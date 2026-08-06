@@ -1,5 +1,5 @@
 # Inactivity in the current project
-So you may have noticed that there's not much activity in the repo right now, but of course it's still being developed by me locally. The next update will be a big rewrite and completely changes how the tweak works fundementally. Update is mostly done, ETA is August 10, 2026 (aka my birthday).
+So you may have noticed that there's not much activity in the repo right now, but of course it's still being developed by me locally. The next update will be a big rewrite and completely changes how the tweak works fundementally. Update is mostly done, ETA is August 10, 2026 (aka my birthday). Join my Discord for updates: https://discord.gg/YWp5DVb4kC
 
 Additionally, my next school year is gonna be the toughest of my life, so updates will be less frequent. I also have different projects at the moment, so I hope you will understand.
 
