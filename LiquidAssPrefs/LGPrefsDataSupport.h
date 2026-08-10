@@ -25,12 +25,10 @@ void LGSetLastSurfaceIdentifier(NSString *identifier);
 void LGClearLastSurfaceIdentifierIfMatching(NSString *identifier);
 void LGObservePrefsNotifications(id target);
 
-BOOL LGPreferenceRequiresRespring(NSString *key);
 BOOL LGNeedsRespring(void);
 BOOL LGRespringBarDismissed(void);
 void LGSetRespringBarDismissed(BOOL dismissed);
 void LGSetNeedsRespring(BOOL needsRespring);
-void LGPostInvalidateSnapshotCachesNotification(void);
 void LGForceSynchronizePreferences(void);
 
 NSNumber *LGReadPreference(NSString *key, NSNumber *fallback);
@@ -44,46 +42,29 @@ NSDictionary *LGSwitchSetting(NSString *key, NSString *title, NSString *subtitle
 NSDictionary *LGSectionSetting(NSString *title, NSString *subtitle);
 NSDictionary *LGNavSetting(NSString *title, NSString *subtitle, NSString *action);
 NSDictionary *LGMenuSetting(NSString *key, NSString *title, NSString *subtitle, NSString *fallback, NSArray<NSDictionary *> *choices);
-NSDictionary *LGStringSetting(NSString *key, NSString *title, NSString *subtitle, NSString *fallback, NSString *placeholder);
 NSDictionary *LGSliderSetting(NSString *key, NSString *title, NSString *subtitle,
                               CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassEnabledSetting(NSString *key, BOOL fallback);
-NSDictionary *LGGlassBezelSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassBlurSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassCornerRadiusSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassThicknessSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassLightTintSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassDarkTintSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassCustomTintColorSetting(NSString *key);
-NSDictionary *LGGlassTintOverrideSetting(NSString *key, NSString *title);
-NSDictionary *LGGlassTintOverrideSettingWithFallback(NSString *key, NSString *title, NSString *fallback);
-NSDictionary *LGGlassRefractiveIndexSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassRefractionSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSDictionary *LGGlassSpecularSetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
 NSDictionary *LGGlassQualitySetting(NSString *key, CGFloat fallback, CGFloat min, CGFloat max, NSInteger decimals);
-NSInteger LGMaximumSupportedFPS(void);
-NSDictionary *LGScopedFPSSliderSetting(NSString *key);
+NSDictionary *LGGlassEnabledSetting(NSString *key, BOOL fallback);
+BOOL LGPrefsItemIsVisible(NSDictionary *item);
 
 NSArray<NSDictionary *> *LGDockItems(void);
+NSArray<NSDictionary *> *LGRendererItemsForHostPrefix(NSString *prefix);
 NSArray<NSDictionary *> *LGFolderItems(void);
 NSArray<NSDictionary *> *LGAppIconItems(void);
 NSArray<NSDictionary *> *LGSearchPillItems(void);
 NSArray<NSDictionary *> *LGContextMenuItems(void);
+NSArray<NSDictionary *> *LGControlCenterItems(void);
+NSArray<NSDictionary *> *LGClockItems(void);
+NSArray<NSDictionary *> *LGTabBarItems(void);
+NSArray<NSDictionary *> *LGGlobalControlsItems(void);
 NSArray<NSDictionary *> *LGLockscreenItems(void);
 NSArray<NSDictionary *> *LGAppLibraryItems(void);
 NSArray<NSDictionary *> *LGWidgetItems(void);
+NSArray<NSDictionary *> *LGKeyboardItems(void);
 NSArray<NSDictionary *> *LGHomescreenItems(void);
 NSArray<NSDictionary *> *LGAllSurfaceItems(void);
-NSArray<NSDictionary *> *LGExperimentalItems(void);
-NSArray<NSDictionary *> *LGCustomViewInjectionItems(void);
-NSArray<NSString *> *LGCustomViewRuleIDs(void);
-NSString *LGCreateCustomViewRule(void);
-void LGDeleteCustomViewRule(NSString *ruleID);
-NSArray<NSDictionary *> *LGCustomViewRuleItems(NSString *ruleID);
-NSArray<NSString *> *LGAllCustomViewPreferenceKeys(void);
-NSArray<NSDictionary *> *LGLiveCaptureItems(void);
 NSArray<NSDictionary *> *LGPrefsSettingsItems(void);
-NSArray<NSDictionary *> *LGPrefsControlsItems(void);
 NSArray<NSDictionary *> *LGMoreOptionsItems(void);
 
 NSString *LGExportPreferencesJSONString(void);
@@ -91,4 +72,3 @@ BOOL LGImportPreferencesJSONString(NSString *jsonString, NSError **error);
 
 void LGResetAllPreferences(void);
 void LGResetPreferencesForKeys(NSArray<NSString *> *keys);
-CGFloat LGCornerRadiusDefaultForKey(NSString *key, CGFloat fallback);

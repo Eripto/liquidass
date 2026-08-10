@@ -1,55 +1,11 @@
-#import "../LiquidGlass.h"
-#import "../Shared/LGHookSupport.h"
-#import "../Shared/LGBannerCaptureSupport.h"
-#import "../Shared/LGPrefAccessors.h"
+#import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
+#import "../Shared/LGLiveBackdropView.h"
+#import "../Shared/LGGlassKit.h"
 #import <objc/runtime.h>
 
-static const NSInteger kWidgetTintTag       = 0x71D0;
-
-static void LGWidgetsRefreshAllHosts(void);
-static void LGWidgetsRefreshAttachedHosts(void);
-static BOOL LGIsWidgetGlassHostView(UIView *view);
-static void LGRestoreWidgetOriginalState(UIView *view);
-static void LGWidgetSyncDisplayLinkActivity(void);
-static void *kWidgetAttachedKey = &kWidgetAttachedKey;
+static const CGFloat kWidgetCornerRadius = 20.2;
 static void *kWidgetGlassKey = &kWidgetGlassKey;
-static void *kWidgetTintKey = &kWidgetTintKey;
-static void *kWidgetOriginalAlphaKey = &kWidgetOriginalAlphaKey;
-static void *kWidgetOriginalCornerRadiusKey = &kWidgetOriginalCornerRadiusKey;
-static void *kWidgetOriginalClipsKey = &kWidgetOriginalClipsKey;
-static void *kWidgetOriginalMasksKey = &kWidgetOriginalMasksKey;
-static void *kWidgetOriginalCornerCurveKey = &kWidgetOriginalCornerCurveKey;
-static void *kWidgetMaterialOriginalHiddenKey = &kWidgetMaterialOriginalHiddenKey;
-static void *kWidgetMaterialOriginalAlphaKey = &kWidgetMaterialOriginalAlphaKey;
-static void *kWidgetMaterialOriginalLayerOpacityKey = &kWidgetMaterialOriginalLayerOpacityKey;
-static void *kWidgetLastLiveCaptureTimeKey = &kWidgetLastLiveCaptureTimeKey;
-static void *kWidgetBackdropViewKey = &kWidgetBackdropViewKey;
-
-static LGDisplayLinkState sWidgetDisplayLinkState = {0};
-static NSHashTable<UIView *> *sWidgetHosts = nil;
-static BOOL sWidgetCoverSheetVisible = NO;
-static BOOL sWidgetDetectedCoverSheetVisible = NO;
-static CFTimeInterval sWidgetLastCoverSheetDetectionTime = 0.0;
-
-LG_ENABLED_BOOL_PREF_FUNC(LGWidgetEnabled, "Widgets.Enabled", NO)
-static CGFloat LGWidgetCornerRadius(void) { return LGDynamicDefaultFloat(@"Widgets.CornerRadius", 20.2); }
-LG_FLOAT_PREF_FUNC(LGWidgetBezelWidth, "Widgets.BezelWidth", 18.0)
-LG_FLOAT_PREF_FUNC(LGWidgetGlassThickness, "Widgets.GlassThickness", 150.0)
-LG_FLOAT_PREF_FUNC(LGWidgetRefractionScale, "Widgets.RefractionScale", 1.8)
-LG_FLOAT_PREF_FUNC(LGWidgetRefractiveIndex, "Widgets.RefractiveIndex", 1.2)
-LG_FLOAT_PREF_FUNC(LGWidgetSpecularOpacity, "Widgets.SpecularOpacity", 0.6)
-LG_FLOAT_PREF_FUNC(LGWidgetBlur, "Widgets.Blur", 8.0)
-LG_FLOAT_PREF_FUNC(LGWidgetWallpaperScale, "Widgets.WallpaperScale", 0.5)
-LG_FLOAT_PREF_FUNC(LGWidgetLightTintAlpha, "Widgets.LightTintAlpha", 0.1)
-LG_FLOAT_PREF_FUNC(LGWidgetDarkTintAlpha, "Widgets.DarkTintAlpha", 0.3)
-LG_FLOAT_PREF_FUNC(LGWidgetLiveCaptureFPS, "Widgets.LiveCaptureFPS", 18.0)
-
-static NSHashTable<UIView *> *LGWidgetHostRegistry(void) {
-    if (!sWidgetHosts) {
-        sWidgetHosts = [NSHashTable weakObjectsHashTable];
-    }
-    return sWidgetHosts;
-}
 
 @interface CHSWidget : NSObject
 @property (nonatomic, copy, readonly) NSString *extensionBundleIdentifier;
@@ -63,813 +19,168 @@ static NSHashTable<UIView *> *LGWidgetHostRegistry(void) {
 @property (nonatomic, copy) CHSWidget *widget;
 @end
 
-static BOOL LGViewBelongsToWidgetStack(UIView *view) {
-    if (!view) return NO;
-
-    NSString *selfClassName = NSStringFromClass([view class]);
-    if ([selfClassName containsString:@"Widget"] || [selfClassName containsString:@"WG"]) {
-        return YES;
-    }
-
-    UIView *ancestor = view.superview;
-    while (ancestor) {
-        NSString *className = NSStringFromClass([ancestor class]);
-        if ([className containsString:@"Widget"] || [className containsString:@"WG"])
-            return YES;
-        ancestor = ancestor.superview;
-    }
-    return NO;
-}
-
-static UIView *LGWidgetFindDescendantNamed(UIView *view, NSString *className) {
-    if (!view) return nil;
-    for (UIView *subview in view.subviews) {
-        if ([NSStringFromClass(subview.class) isEqualToString:className]) return subview;
-        UIView *match = LGWidgetFindDescendantNamed(subview, className);
-        if (match) return match;
-    }
+static UIViewController *widgetNearestStackController(UIView *view) {
+    for (UIResponder *r = view; r; r = r.nextResponder)
+        if ([NSStringFromClass(r.class) isEqualToString:@"SBHWidgetStackViewController"] &&
+            [r isKindOfClass:[UIViewController class]])
+            return (UIViewController *)r;
     return nil;
 }
 
-static BOOL LGWidgetScrollViewContainsWidgetContainer(UIView *view) {
-    if (!view) return NO;
-    if ([NSStringFromClass(view.class) isEqualToString:@"SBHWidgetContainerView"]) return YES;
-    for (UIView *subview in view.subviews) {
-        if (LGWidgetScrollViewContainsWidgetContainer(subview)) return YES;
-    }
-    return NO;
-}
-
-static BOOL LGWidgetHasAncestorClassNamedWithinDepth(UIView *view, NSString *className, NSInteger maxDepth) {
-    UIView *ancestor = view.superview;
+static BOOL widgetHasAncestorNamedWithinDepth(UIView *view, NSString *name, NSInteger maxDepth) {
     NSInteger depth = 0;
-    while (ancestor && depth < maxDepth) {
-        if ([NSStringFromClass(ancestor.class) isEqualToString:className]) return YES;
-        ancestor = ancestor.superview;
-        depth++;
-    }
+    for (UIView *a = view.superview; a && depth < maxDepth; a = a.superview, depth++)
+        if ([NSStringFromClass(a.class) isEqualToString:name]) return YES;
     return NO;
 }
 
-static void LGStartWidgetDisplayLink(void) {
-    if (sWidgetCoverSheetVisible) return;
-    NSInteger fps = LG_prefersLiveCapture(@"Widgets.RenderingMode")
-        ? LGPreferredLiveCaptureFramesPerSecond(LGWidgetLiveCaptureFPS())
-        : LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 1);
-    LGStartDisplayLinkStateWithPreferenceKey(&sWidgetDisplayLinkState,
-                                             fps,
-                                             @"DisplayLink.Widgets.Enabled",
-                                             ^{
-        NSInteger nextFPS = LG_prefersLiveCapture(@"Widgets.RenderingMode")
-            ? LGPreferredLiveCaptureFramesPerSecond(LGWidgetLiveCaptureFPS())
-            : LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 1);
-        LGSetDisplayLinkStatePreferredFPS(&sWidgetDisplayLinkState, nextFPS);
-        if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) LGWidgetsRefreshAttachedHosts();
-        else LG_updateRegisteredGlassViews(LGUpdateGroupWidgets);
-    });
-}
-
-static void LGStopWidgetDisplayLink(void) {
-    LGStopDisplayLinkState(&sWidgetDisplayLinkState);
-}
-
-static BOOL LGWidgetViewIsVisibleInWindow(UIView *view) {
-    if (!view || !view.window || view.hidden || view.alpha <= 0.01f || view.layer.opacity <= 0.01f) return NO;
-    CGRect frame = [view.layer convertRect:view.layer.bounds toLayer:view.window.layer];
-    return CGRectIntersectsRect(CGRectInset(view.window.bounds, -16.0, -16.0), frame);
-}
-
-static BOOL LGWidgetViewIndicatesCoverSheet(UIView *view) {
-    if (!LGWidgetViewIsVisibleInWindow(view)) return NO;
-    NSString *className = NSStringFromClass(view.class);
-    if ([className isEqualToString:@"CSProminentTimeView"]) return YES;
-    if ([className isEqualToString:@"SBFLockScreenDateView"]) return YES;
-    if ([className isEqualToString:@"CSMainPageView"]) return YES;
-    if ([className isEqualToString:@"SBDashBoardView"]) return YES;
-    if ([className isEqualToString:@"CSCoverSheetView"]) return YES;
-    if ([className isEqualToString:@"NCNotificationStructuredListView"]) return YES;
+static BOOL widgetSubtreeContainsClass(UIView *view, NSString *name) {
+    if ([NSStringFromClass(view.class) isEqualToString:name]) return YES;
+    for (UIView *sub in view.subviews)
+        if (widgetSubtreeContainsClass(sub, name)) return YES;
     return NO;
 }
 
-static BOOL LGWidgetDetectCoverSheetVisible(void) {
-    CFTimeInterval now = CACurrentMediaTime();
-    if (now - sWidgetLastCoverSheetDetectionTime < 0.25) {
-        return sWidgetDetectedCoverSheetVisible;
-    }
-    sWidgetLastCoverSheetDetectionTime = now;
-
-    __block BOOL visible = NO;
-    UIApplication *app = UIApplication.sharedApplication;
-    void (^scanWindow)(UIWindow *) = ^(UIWindow *window) {
-        if (visible || !window || window.hidden || window.alpha <= 0.01f || window.layer.opacity <= 0.01f) return;
-        NSString *windowClass = NSStringFromClass(window.class);
-        if ([windowClass containsString:@"CoverSheet"] ||
-            [windowClass containsString:@"DashBoard"] ||
-            [windowClass containsString:@"LockScreen"]) {
-            visible = YES;
-            return;
-        }
-        LGTraverseViews(window, ^(UIView *view) {
-            if (visible) return;
-            if (LGWidgetViewIndicatesCoverSheet(view)) {
-                visible = YES;
-            }
-        });
-    };
-
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *window in ((UIWindowScene *)scene).windows) scanWindow(window);
-        }
-    } else {
-        for (UIWindow *window in LGApplicationWindows(app)) scanWindow(window);
-    }
-
-    if (sWidgetDetectedCoverSheetVisible != visible) {
-        sWidgetDetectedCoverSheetVisible = visible;
-    }
-    return sWidgetDetectedCoverSheetVisible;
-}
-
-static BOOL LGWidgetShouldSuspendForCoverSheet(void) {
-    return sWidgetCoverSheetVisible || LGWidgetDetectCoverSheetVisible();
-}
-
-static BOOL LGWidgetHostIsVisible(UIView *view) {
-    if (!view || !view.window || view.hidden || view.alpha <= 0.01f || view.layer.opacity <= 0.01f) return NO;
-    UIView *current = view.superview;
-    while (current && current != view.window) {
-        if (current.hidden || current.alpha <= 0.01f || current.layer.opacity <= 0.01f) return NO;
-        current = current.superview;
-    }
-    CALayer *layer = view.layer.presentationLayer ?: view.layer;
-    CGRect bounds = layer.bounds;
-    if (CGRectGetWidth(bounds) <= 1.0 || CGRectGetHeight(bounds) <= 1.0) return NO;
-    CGRect windowFrame = [layer convertRect:bounds toLayer:view.window.layer];
-    return CGRectIntersectsRect(CGRectInset(view.window.bounds, -8.0, -8.0), windowFrame);
-}
-
-static NSUInteger LGWidgetVisibleHostCount(void) {
-    NSUInteger count = 0;
-    for (UIView *view in LGWidgetHostRegistry().allObjects) {
-        if (!LGIsWidgetGlassHostView(view)) continue;
-        if (!LGWidgetHostIsVisible(view)) continue;
-        count++;
-    }
-    return count;
-}
-
-static void LGWidgetSyncDisplayLinkActivity(void) {
-    if (!LGWidgetEnabled() || LGWidgetShouldSuspendForCoverSheet()) {
-        sWidgetDisplayLinkState.activeCount = 0;
-        LGDisplayLinkStateDidChangeActivity(&sWidgetDisplayLinkState);
-        LGStopWidgetDisplayLink();
-        return;
-    }
-
-    NSUInteger visibleHostCount = LGWidgetVisibleHostCount();
-    sWidgetDisplayLinkState.activeCount = visibleHostCount;
-    LGDisplayLinkStateDidChangeActivity(&sWidgetDisplayLinkState);
-    if (visibleHostCount > 0) {
-        LGStartWidgetDisplayLink();
-    } else {
-        LGStopWidgetDisplayLink();
-    }
-}
-
-static void LGWidgetSetCoverSheetVisible(BOOL visible) {
-    if (sWidgetCoverSheetVisible == visible) return;
-    sWidgetCoverSheetVisible = visible;
-    LGWidgetSyncDisplayLinkActivity();
-    if (!visible) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            LGWidgetsRefreshAllHosts();
-        });
-    }
-}
-
-static UIColor *widgetTintColorForView(UIView *view) {
-    return LGDefaultTintColorForViewWithOverrideKey(view, LGWidgetLightTintAlpha(), LGWidgetDarkTintAlpha(), @"Widgets.TintOverrideMode");
-}
-
-static BOOL LGWidgetHostUsesStockMaterialBlur(UIView *view) {
-    return view && [NSStringFromClass(view.class) isEqualToString:@"MTMaterialView"];
-}
-
-static UIViewController *LGNearestWidgetStackControllerForView(UIView *view) {
-    UIResponder *responder = view;
-    while (responder) {
-        if ([NSStringFromClass(responder.class) isEqualToString:@"SBHWidgetStackViewController"] &&
-            [responder isKindOfClass:[UIViewController class]]) {
-            return (UIViewController *)responder;
-        }
-        responder = responder.nextResponder;
+static UIView *widgetFindDescendantNamed(UIView *view, NSString *name) {
+    for (UIView *sub in view.subviews) {
+        if ([NSStringFromClass(sub.class) isEqualToString:name]) return sub;
+        UIView *found = widgetFindDescendantNamed(sub, name);
+        if (found) return found;
     }
     return nil;
 }
 
-static BOOL LGWidgetContainerLooksLikeHomescreenWidgetHost(UIView *view) {
-    if (!view) return NO;
-    if (![NSStringFromClass(view.class) isEqualToString:@"UIView"]) return NO;
+static BOOL isWidgetGlassHostContainer(UIView *view) {
+    // widget internals vary so use the nearest stable container
+    if (!isExactClass(view, @"UIView")) return NO;
     if (view.bounds.size.width < 120.0 || view.bounds.size.height < 120.0) return NO;
-    if (!LGNearestWidgetStackControllerForView(view)) return NO;
-    if (!LGWidgetHasAncestorClassNamedWithinDepth(view, @"SBFTouchPassThroughView", 8)) return NO;
-    if (!LGWidgetHasAncestorClassNamedWithinDepth(view, @"SBIconView", 10)) return NO;
-
-    BOOL hasWidgetScroll = NO;
-    for (UIView *subview in view.subviews) {
-        if (![NSStringFromClass(subview.class) isEqualToString:@"UIView"] &&
-            ![NSStringFromClass(subview.class) isEqualToString:@"BSUIScrollView"]) {
-            continue;
-        }
-        UIView *scrollView = [NSStringFromClass(subview.class) isEqualToString:@"BSUIScrollView"] ? subview : LGWidgetFindDescendantNamed(subview, @"BSUIScrollView");
-        if (!scrollView) continue;
-        if (!LGWidgetScrollViewContainsWidgetContainer(scrollView)) continue;
-        hasWidgetScroll = YES;
-        break;
+    if (!widgetNearestStackController(view)) return NO;
+    if (!widgetHasAncestorNamedWithinDepth(view, @"SBFTouchPassThroughView", 8)) return NO;
+    if (!widgetHasAncestorNamedWithinDepth(view, @"SBIconView", 10)) return NO;
+    for (UIView *sub in view.subviews) {
+        if (!isExactClass(sub, @"UIView") && !isExactClass(sub, @"BSUIScrollView")) continue;
+        UIView *scroll = isExactClass(sub, @"BSUIScrollView") ? sub
+                       : widgetFindDescendantNamed(sub, @"BSUIScrollView");
+        if (scroll && widgetSubtreeContainsClass(scroll, @"SBHWidgetContainerView")) return YES;
     }
-    return hasWidgetScroll;
-}
-
-static UIView *LGWidgetAncestorContainerHostForView(UIView *view) {
-    UIView *ancestor = view;
-    NSInteger depth = 0;
-    while (ancestor && depth < 12) {
-        if (LGWidgetContainerLooksLikeHomescreenWidgetHost(ancestor)) return ancestor;
-        ancestor = ancestor.superview;
-        depth++;
-    }
-    return nil;
-}
-
-static NSArray *LGWidgetCleanedFilterArray(NSArray *filters, BOOL *didRemoveAny) {
-    if (!filters.count) return filters;
-    NSMutableArray *cleaned = [NSMutableArray arrayWithCapacity:filters.count];
-    BOOL removed = NO;
-    for (id filter in filters) {
-        NSString *desc = [[filter description] lowercaseString];
-        if ([desc containsString:@"colormatrix"] || [desc containsString:@"opacitycolor"]) {
-            removed = YES;
-            continue;
-        }
-        [cleaned addObject:filter];
-    }
-    if (didRemoveAny) *didRemoveAny = removed;
-    return removed ? cleaned : filters;
-}
-
-static void LGStripWidgetTintFiltersFromLayerTree(CALayer *layer) {
-    if (!layer) return;
-    BOOL removedMain = NO;
-    NSArray *mainFilters = LGWidgetCleanedFilterArray(layer.filters, &removedMain);
-    if (removedMain) layer.filters = mainFilters;
-
-    @try {
-        id rawBackgroundFilters = [layer valueForKey:@"backgroundFilters"];
-        if ([rawBackgroundFilters isKindOfClass:[NSArray class]]) {
-            BOOL removedBg = NO;
-            NSArray *cleanedBg = LGWidgetCleanedFilterArray(rawBackgroundFilters, &removedBg);
-            if (removedBg) [layer setValue:cleanedBg forKey:@"backgroundFilters"];
-        }
-    } @catch (NSException *exception) {
-        LGDebugLog(@"widget tint filter strip failed %@ %@", exception.name, exception.reason);
-    }
-
-    layer.compositingFilter = nil;
-    for (CALayer *sub in layer.sublayers) {
-        LGStripWidgetTintFiltersFromLayerTree(sub);
-    }
-}
-
-static void removeWidgetOverlays(UIView *view) {
-    if (!view) return;
-    objc_setAssociatedObject(view, kWidgetLastLiveCaptureTimeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    LGRemoveAssociatedSubview(view, kWidgetTintKey);
-    LiquidGlassView *glass = objc_getAssociatedObject(view, kWidgetGlassKey);
-    if (glass) [glass removeFromSuperview];
-    objc_setAssociatedObject(view, kWidgetGlassKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    LGRemoveLiveBackdropCaptureView(view, kWidgetBackdropViewKey);
-}
-
-static void LGDetachWidgetGlassHostView(UIView *view) {
-    if (!view) return;
-    [LGWidgetHostRegistry() removeObject:view];
-    removeWidgetOverlays(view);
-    LGRestoreWidgetOriginalState(view);
-    if ([objc_getAssociatedObject(view, kWidgetAttachedKey) boolValue]) {
-        objc_setAssociatedObject(view, kWidgetAttachedKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    }
-    LGWidgetSyncDisplayLinkActivity();
-}
-
-static void LGRememberWidgetOriginalState(UIView *view) {
-    if (!objc_getAssociatedObject(view, kWidgetOriginalAlphaKey))
-        objc_setAssociatedObject(view, kWidgetOriginalAlphaKey, @(view.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!objc_getAssociatedObject(view, kWidgetOriginalCornerRadiusKey)) {
-        objc_setAssociatedObject(view, kWidgetOriginalCornerRadiusKey, @(view.layer.cornerRadius), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        LGCacheDynamicDefaultFloat(@"Widgets.CornerRadius", view.layer.cornerRadius);
-    }
-    if (!objc_getAssociatedObject(view, kWidgetOriginalClipsKey))
-        objc_setAssociatedObject(view, kWidgetOriginalClipsKey, @(view.clipsToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!objc_getAssociatedObject(view, kWidgetOriginalMasksKey))
-        objc_setAssociatedObject(view, kWidgetOriginalMasksKey, @(view.layer.masksToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!objc_getAssociatedObject(view, kWidgetOriginalCornerCurveKey)) {
-        NSString *curve = nil;
-        if (@available(iOS 13.0, *))
-            curve = view.layer.cornerCurve;
-        if (curve)
-            objc_setAssociatedObject(view, kWidgetOriginalCornerCurveKey, curve, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    }
-}
-
-static void LGRestoreWidgetOriginalState(UIView *view) {
-    NSNumber *alpha = objc_getAssociatedObject(view, kWidgetOriginalAlphaKey);
-    if (alpha) view.alpha = [alpha doubleValue];
-    NSNumber *radius = objc_getAssociatedObject(view, kWidgetOriginalCornerRadiusKey);
-    if (radius) view.layer.cornerRadius = [radius doubleValue];
-    NSNumber *clips = objc_getAssociatedObject(view, kWidgetOriginalClipsKey);
-    if (clips) view.clipsToBounds = [clips boolValue];
-    NSNumber *masks = objc_getAssociatedObject(view, kWidgetOriginalMasksKey);
-    if (masks) view.layer.masksToBounds = [masks boolValue];
-    NSString *curve = objc_getAssociatedObject(view, kWidgetOriginalCornerCurveKey);
-    if (@available(iOS 13.0, *)) {
-        if (curve) view.layer.cornerCurve = curve;
-    }
-}
-
-static BOOL LGIsWidgetStackBackgroundMaterialView(UIView *view) {
-    if (!view) return NO;
-    if (![NSStringFromClass(view.class) isEqualToString:@"MTMaterialView"]) return NO;
-    UIView *parent = view.superview;
-    if (!parent || ![NSStringFromClass(parent.class) isEqualToString:@"UIView"]) return NO;
-    UIViewController *controller = LGNearestWidgetStackControllerForView(parent);
-    if (!controller) return NO;
-    if (controller.view == parent) return YES;
-    return parent.superview == controller.view;
-}
-
-static void LGRestoreWidgetStackMaterialView(UIView *view) {
-    NSNumber *hidden = objc_getAssociatedObject(view, kWidgetMaterialOriginalHiddenKey);
-    NSNumber *alpha = objc_getAssociatedObject(view, kWidgetMaterialOriginalAlphaKey);
-    NSNumber *layerOpacity = objc_getAssociatedObject(view, kWidgetMaterialOriginalLayerOpacityKey);
-    if (hidden) view.hidden = hidden.boolValue;
-    if (alpha) view.alpha = alpha.doubleValue;
-    if (layerOpacity) view.layer.opacity = layerOpacity.floatValue;
-    objc_setAssociatedObject(view, kWidgetMaterialOriginalHiddenKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    objc_setAssociatedObject(view, kWidgetMaterialOriginalAlphaKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    objc_setAssociatedObject(view, kWidgetMaterialOriginalLayerOpacityKey, nil, OBJC_ASSOCIATION_ASSIGN);
-}
-
-static void LGApplyWidgetStackMaterialVisibility(UIView *view) {
-    if (!LGIsWidgetStackBackgroundMaterialView(view)) {
-        LGRestoreWidgetStackMaterialView(view);
-        return;
-    }
-    if (!LGWidgetEnabled()) {
-        LGRestoreWidgetStackMaterialView(view);
-        return;
-    }
-    if (!objc_getAssociatedObject(view, kWidgetMaterialOriginalHiddenKey)) {
-        objc_setAssociatedObject(view, kWidgetMaterialOriginalHiddenKey, @(view.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        objc_setAssociatedObject(view, kWidgetMaterialOriginalAlphaKey, @(view.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        objc_setAssociatedObject(view, kWidgetMaterialOriginalLayerOpacityKey, @(view.layer.opacity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    view.hidden = YES;
-    view.alpha = 0.0;
-    view.layer.opacity = 0.0f;
-}
-
-static void ensureWidgetTintOverlay(UIView *view) {
-    if (LGWidgetHostUsesStockMaterialBlur(view)) {
-        LGStripWidgetTintFiltersFromLayerTree(view.layer);
-    }
-
-    UIView *tint = LGEnsureTintOverlayView(view,
-                                           kWidgetTintKey,
-                                           kWidgetTintTag,
-                                           view.bounds,
-                                           UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
-    LGConfigureTintOverlayView(tint,
-                               widgetTintColorForView(view),
-                               view.layer.cornerRadius,
-                               view.layer,
-                               NO);
-    LiquidGlassView *glass = objc_getAssociatedObject(view, kWidgetGlassKey);
-    UIView *contentAnchor = nil;
-    for (UIView *subview in view.subviews) {
-        if (subview == glass || subview == tint) continue;
-        contentAnchor = subview;
-        break;
-    }
-    if (contentAnchor) {
-        [view insertSubview:tint belowSubview:contentAnchor];
-    } else if (glass) {
-        [view insertSubview:tint aboveSubview:glass];
-    } else {
-        [view sendSubviewToBack:tint];
-    }
-}
-
-static BOOL LGIsWidgetGlassHostView(UIView *view) {
-    if (!view.window) return NO;
-
-    NSString *className = NSStringFromClass(view.class);
-    if ([className isEqualToString:@"UIView"] &&
-        LGWidgetContainerLooksLikeHomescreenWidgetHost(view)) {
-        return YES;
-    }
-
     return NO;
 }
 
-static void LGPrepareWidgetGlassHostView(UIView *view) {
-    LGRememberWidgetOriginalState(view);
-    view.layer.cornerRadius = LGWidgetCornerRadius();
-    if (@available(iOS 13.0, *))
-        view.layer.cornerCurve = kCACornerCurveContinuous;
-    view.clipsToBounds = YES;
-    view.layer.masksToBounds = YES;
-    if (LGWidgetHostUsesStockMaterialBlur(view)) {
-        LGStripWidgetTintFiltersFromLayerTree(view.layer);
-    }
+static UIView *widgetAncestorContainerHost(UIView *view) {
+    NSInteger depth = 0;
+    for (UIView *a = view; a && depth < 12; a = a.superview, depth++)
+        if (isWidgetGlassHostContainer(a)) return a;
+    return nil;
 }
 
-static void LGInjectIntoWidgetGlassHostView(UIView *view) {
-    CFTimeInterval profileStart = LGProfileBegin();
-    if (LGWidgetShouldSuspendForCoverSheet()) {
-        LGWidgetSyncDisplayLinkActivity();
-        LGProfileEnd(@"widgets.inject", profileStart);
-        return;
-    }
-    if (!LGWidgetEnabled()) {
-        removeWidgetOverlays(view);
-        LGRestoreWidgetOriginalState(view);
-        LGProfileEnd(@"widgets.inject", profileStart);
-        return;
-    }
-    LiquidGlassView *glass = objc_getAssociatedObject(view, kWidgetGlassKey);
-    BOOL hadGlass = (glass != nil);
-    if (!LGShouldRefreshLiveCaptureForHost(view,
-                                           @"Widgets.RenderingMode",
-                                           kWidgetLastLiveCaptureTimeKey,
-                                           LGWidgetLiveCaptureFPS(),
-                                           hadGlass)) {
-        LGPrepareWidgetGlassHostView(view);
-        glass.cornerRadius = LGWidgetCornerRadius();
-        glass.bezelWidth = LGWidgetBezelWidth();
-        glass.glassThickness = LGWidgetGlassThickness();
-        glass.refractionScale = LGWidgetRefractionScale();
-        glass.refractiveIndex = LGWidgetRefractiveIndex();
-        glass.specularOpacity = LGWidgetSpecularOpacity();
-        glass.blur = LGWidgetBlur();
-        glass.wallpaperScale = LGWidgetWallpaperScale();
-        [view sendSubviewToBack:glass];
-        ensureWidgetTintOverlay(view);
-        [glass updateOrigin];
-        LGProfileEnd(@"widgets.inject", profileStart);
-        return;
-    }
+static BOOL isWidgetStackBackgroundMaterial(UIView *mat) {
+    // stack backgrounds stay stock so child widgets keep separate lenses
+    if (!isExactClass(mat, @"MTMaterialView")) return NO;
+    UIView *parent = mat.superview;
+    if (!isExactClass(parent, @"UIView")) return NO;
+    UIViewController *vc = widgetNearestStackController(parent);
+    if (!vc) return NO;
+    return vc.view == parent || parent.superview == vc.view;
+}
 
-    CGPoint wallpaperOrigin = CGPointZero;
-    UIImage *wallpaper = LG_getWallpaperImage(&wallpaperOrigin);
-    if (!wallpaper && !LG_prefersLiveCapture(@"Widgets.RenderingMode")) {
-        removeWidgetOverlays(view);
-        LGRestoreWidgetOriginalState(view);
-        LGProfileEnd(@"widgets.inject", profileStart);
-        return;
-    }
+static void removeWidgetGlass(UIView *container) {
+    LGLiveBackdropView *glass = objc_getAssociatedObject(container, kWidgetGlassKey);
+    if (!glass) return;
+    [glass removeFromSuperview];
+    objc_setAssociatedObject(container, kWidgetGlassKey, nil, OBJC_ASSOCIATION_ASSIGN);
+}
 
-    LGPrepareWidgetGlassHostView(view);
+static void injectWidgetGlass(UIView *container) {
+    if (!lgHostEnabled(@"Widgets")) { removeWidgetGlass(container); return; }
+    LGLiveBackdropView *glass = objc_getAssociatedObject(container, kWidgetGlassKey);
     if (!glass) {
-        glass = [[LiquidGlassView alloc]
-            initWithFrame:view.bounds wallpaper:wallpaper wallpaperOrigin:wallpaperOrigin];
-        glass.autoresizingMask       = UIViewAutoresizingFlexibleWidth |
-                                       UIViewAutoresizingFlexibleHeight;
-        glass.userInteractionEnabled = NO;
-        glass.cornerRadius           = LGWidgetCornerRadius();
-        glass.bezelWidth             = LGWidgetBezelWidth();
-        glass.glassThickness         = LGWidgetGlassThickness();
-        glass.refractionScale        = LGWidgetRefractionScale();
-        glass.refractiveIndex        = LGWidgetRefractiveIndex();
-        glass.specularOpacity        = LGWidgetSpecularOpacity();
-        glass.blur                   = LGWidgetBlur();
-        glass.wallpaperScale         = LGWidgetWallpaperScale();
-        glass.updateGroup            = LGUpdateGroupWidgets;
-        [view insertSubview:glass atIndex:0];
-        objc_setAssociatedObject(view, kWidgetGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        glass = LGCreateRegisteredGlass(container.bounds, nil, @"Widgets");
+        if (!glass) return;
+        glass.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [container insertSubview:glass atIndex:0];
+        objc_setAssociatedObject(container, kWidgetGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    glass.cornerRadius = LGWidgetCornerRadius();
-    glass.bezelWidth = LGWidgetBezelWidth();
-    glass.glassThickness = LGWidgetGlassThickness();
-    glass.refractionScale = LGWidgetRefractionScale();
-    glass.refractiveIndex = LGWidgetRefractiveIndex();
-    glass.specularOpacity = LGWidgetSpecularOpacity();
-    glass.blur = LGWidgetBlur();
-    glass.wallpaperScale = LGWidgetWallpaperScale();
-    if (!LGApplyRenderingModeToGlassHost(view,
-                                         glass,
-                                         @"Widgets.RenderingMode",
-                                         kWidgetBackdropViewKey,
-                                         wallpaper,
-                                         wallpaperOrigin)) {
-        removeWidgetOverlays(view);
-        LGRestoreWidgetOriginalState(view);
-        LGProfileEnd(@"widgets.inject", profileStart);
-        return;
-    }
-    if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) {
-        LGMarkLiveCaptureRefreshedForHost(view, kWidgetLastLiveCaptureTimeKey);
-    }
-    [LGWidgetHostRegistry() addObject:view];
-    LGWidgetSyncDisplayLinkActivity();
-    [view sendSubviewToBack:glass];
-    ensureWidgetTintOverlay(view);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (view.window) ensureWidgetTintOverlay(view);
-    });
-    LGProfileEnd(@"widgets.inject", profileStart);
+    if (glass.superview != container) [container insertSubview:glass atIndex:0];
+    else if (container.subviews.firstObject != glass) [container sendSubviewToBack:glass];
+    glass.frame = container.bounds;
+    glass.layer.cornerRadius  = kWidgetCornerRadius;
+    glass.layer.cornerCurve   = kCACornerCurveContinuous;
+    glass.layer.masksToBounds = YES;
+    [glass applyFilters];
+    container.layer.cornerRadius  = kWidgetCornerRadius;
+    container.layer.cornerCurve   = kCACornerCurveContinuous;
+    container.layer.masksToBounds = YES;
+    container.clipsToBounds       = YES;
+    lgTrackGlass(glass, @"Widgets", nil);
 }
 
-static void LGWidgetsRefreshAllHosts(void) {
-    CFTimeInterval profileStart = LGProfileBegin();
-    UIApplication *app = UIApplication.sharedApplication;
-    void (^refreshWindow)(UIWindow *) = ^(UIWindow *window) {
-        LGTraverseViews(window, ^(UIView *view) {
-            LGApplyWidgetStackMaterialVisibility(view);
-            if (!LGIsWidgetGlassHostView(view)) return;
-            LGPrepareWidgetGlassHostView(view);
-            LGInjectIntoWidgetGlassHostView(view);
-        });
-    };
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *window in ((UIWindowScene *)scene).windows) refreshWindow(window);
-        }
-    } else {
-        for (UIWindow *window in LGApplicationWindows(app)) refreshWindow(window);
-    }
-    LGProfileEnd(@"widgets.refresh_all_hosts", profileStart);
-}
+#pragma mark - hooks
 
-static void LGWidgetsRefreshAttachedHosts(void) {
-    CFTimeInterval profileStart = LGProfileBegin();
-    if (LGWidgetShouldSuspendForCoverSheet()) {
-        LGWidgetSyncDisplayLinkActivity();
-        LGProfileEnd(@"widgets.refresh_attached_hosts", profileStart);
-        return;
-    }
-    for (UIView *view in LGWidgetHostRegistry().allObjects) {
-        if (!view.window || !LGIsWidgetGlassHostView(view)) {
-            LGDetachWidgetGlassHostView(view);
-            continue;
-        }
-        LGInjectIntoWidgetGlassHostView(view);
-    }
-    LGProfileEnd(@"widgets.refresh_attached_hosts", profileStart);
+%hook MTMaterialView
+- (void)didMoveToWindow {
+    %orig;
+    UIView *self_ = (UIView *)self;
+    if (self_.window && lgHostEnabled(@"Widgets") && isWidgetStackBackgroundMaterial(self_))
+        lgSuppressStock(self_, @"Widgets", YES);
 }
-
-static void LGWidgetsPrefsChanged(CFNotificationCenterRef center,
-                                  void *observer,
-                                  CFStringRef name,
-                                  const void *object,
-                                  CFDictionaryRef userInfo) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        LGWidgetsRefreshAllHosts();
-    });
+- (void)layoutSubviews {
+    %orig;
+    UIView *self_ = (UIView *)self;
+    if (lgHostEnabled(@"Widgets") && isWidgetStackBackgroundMaterial(self_))
+        lgSuppressStock(self_, @"Widgets", YES);
 }
-
-%group LGWidgetsSpringBoard
+- (void)setHidden:(BOOL)hidden {
+    UIView *self_ = (UIView *)self;
+    if (lgHostEnabled(@"Widgets") && isWidgetStackBackgroundMaterial(self_)) {
+        hidden = YES;
+        lgSuppressStock(self_, @"Widgets", NO);
+    }
+    %orig(hidden);
+}
+%end
 
 %hook CHUISAvocadoHostViewController
-
 - (void)_updateBackgroundMaterialAndColor {
-    CHSWidget *widget = self.widget;
-    if (widget.extensionBundleIdentifier.length && LGWidgetEnabled()) {
-        LGDebugLog(@"widget springboard suppressed avocado material widget=%@", widget.extensionBundleIdentifier);
-        return;
-    }
+    if (self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
-
 - (id)screenshotManager {
-    CHSWidget *widget = self.widget;
-    if (widget.extensionBundleIdentifier.length && LGWidgetEnabled()) {
-        LGDebugLog(@"widget springboard suppressed avocado screenshot widget=%@", widget.extensionBundleIdentifier);
-        return nil;
-    }
+    if (self.widget.extensionBundleIdentifier.length) return nil;
     return %orig;
 }
-
 %end
 
 %hook CHUISWidgetHostViewController
-
 - (void)_updateBackgroundMaterialAndColor {
-    CHSWidget *widget = self.widget;
-    if (widget.extensionBundleIdentifier.length && LGWidgetEnabled()) {
-        LGDebugLog(@"widget springboard suppressed host material widget=%@", widget.extensionBundleIdentifier);
-        return;
-    }
+    if (self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
-
 - (void)_updatePersistedSnapshotContent {
-    CHSWidget *widget = self.widget;
-    if (widget.extensionBundleIdentifier.length && LGWidgetEnabled()) {
-        LGDebugLog(@"widget springboard suppressed host snapshot widget=%@", widget.extensionBundleIdentifier);
-        return;
-    }
+    if (self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
-
 - (void)_updatePersistedSnapshotContentIfNecessary {
-    CHSWidget *widget = self.widget;
-    if (widget.extensionBundleIdentifier.length && LGWidgetEnabled()) {
-        LGDebugLog(@"widget springboard suppressed host snapshot-if-needed widget=%@", widget.extensionBundleIdentifier);
-        return;
-    }
+    if (self.widget.extensionBundleIdentifier.length) return;
     %orig;
 }
-
 - (id)_snapshotImageFromURL:(id)arg1 {
-    CHSWidget *widget = self.widget;
-    if (widget.extensionBundleIdentifier.length && LGWidgetEnabled()) {
-        LGDebugLog(@"widget springboard suppressed host snapshot image widget=%@", widget.extensionBundleIdentifier);
-        return nil;
-    }
+    if (self.widget.extensionBundleIdentifier.length) return nil;
     return %orig;
 }
-
-%end
-
-%hook MTMaterialView
-
-- (void)didMoveToWindow {
-    %orig;
-    UIView *self_ = (UIView *)self;
-
-    if (!self_.window) {
-        LGRestoreWidgetStackMaterialView(self_);
-        LGDetachWidgetGlassHostView(self_);
-        return;
-    }
-
-    LGApplyWidgetStackMaterialVisibility(self_);
-    if (!LGIsWidgetGlassHostView(self_)) return;
-    if (LGWidgetShouldSuspendForCoverSheet()) {
-        LGWidgetSyncDisplayLinkActivity();
-        return;
-    }
-    LGInjectIntoWidgetGlassHostView(self_);
-    if (![objc_getAssociatedObject(self_, kWidgetAttachedKey) boolValue]) {
-        objc_setAssociatedObject(self_, kWidgetAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [LGWidgetHostRegistry() addObject:self_];
-        LGWidgetSyncDisplayLinkActivity();
-    }
-}
-
-- (void)layoutSubviews {
-    %orig;
-    UIView *self_ = (UIView *)self;
-    LGApplyWidgetStackMaterialVisibility(self_);
-    if (!LGIsWidgetGlassHostView(self_)) return;
-    if (!LGWidgetEnabled()) {
-        LGDetachWidgetGlassHostView(self_);
-        return;
-    }
-    LGWidgetSyncDisplayLinkActivity();
-    if (LGWidgetShouldSuspendForCoverSheet()) return;
-    if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) {
-        LGInjectIntoWidgetGlassHostView(self_);
-        return;
-    }
-    ensureWidgetTintOverlay(self_);
-    LiquidGlassView *glass = objc_getAssociatedObject(self_, kWidgetGlassKey);
-    [glass updateOrigin];
-}
-
-%end
-
-%hook UIScrollView
-
-- (void)setContentOffset:(CGPoint)offset {
-    %orig;
-    if (!LGViewBelongsToWidgetStack((UIView *)self)) return;
-    LGWidgetSyncDisplayLinkActivity();
-    if (!sWidgetDisplayLinkState.link) LG_updateRegisteredGlassViews(LGUpdateGroupWidgets);
-}
-
-- (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated {
-    %orig;
-    if (!LGViewBelongsToWidgetStack((UIView *)self)) return;
-    LGWidgetSyncDisplayLinkActivity();
-    if (!sWidgetDisplayLinkState.link) LG_updateRegisteredGlassViews(LGUpdateGroupWidgets);
-}
-
 %end
 
 %hook BSUIScrollView
-
 - (void)didMoveToWindow {
     %orig;
-    UIView *host = LGWidgetAncestorContainerHostForView((UIView *)self);
+    UIView *self_ = (UIView *)self;
+    UIView *host = widgetAncestorContainerHost(self_);
     if (!host) return;
-    if (!((UIView *)self).window) {
-        LGDetachWidgetGlassHostView(host);
-        return;
-    }
-
-    if (!LGWidgetEnabled()) {
-        LGDetachWidgetGlassHostView(host);
-        return;
-    }
-    if (LGWidgetShouldSuspendForCoverSheet()) {
-        LGWidgetSyncDisplayLinkActivity();
-        return;
-    }
-
-    LGInjectIntoWidgetGlassHostView(host);
-    if (![objc_getAssociatedObject(host, kWidgetAttachedKey) boolValue]) {
-        objc_setAssociatedObject(host, kWidgetAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [LGWidgetHostRegistry() addObject:host];
-        LGWidgetSyncDisplayLinkActivity();
-    }
+    if (!self_.window) { removeWidgetGlass(host); return; }
+    injectWidgetGlass(host);
 }
-
 - (void)layoutSubviews {
     %orig;
-    UIView *host = LGWidgetAncestorContainerHostForView((UIView *)self);
-    if (!host) return;
-    if (!LGIsWidgetGlassHostView(host)) return;
-    if (!LGWidgetEnabled()) {
-        LGDetachWidgetGlassHostView(host);
-        return;
-    }
-    LGWidgetSyncDisplayLinkActivity();
-    if (LGWidgetShouldSuspendForCoverSheet()) return;
-    LiquidGlassView *glass = objc_getAssociatedObject(host, kWidgetGlassKey);
-    if (!glass) {
-        LGInjectIntoWidgetGlassHostView(host);
-        glass = objc_getAssociatedObject(host, kWidgetGlassKey);
-        if (!glass) return;
-    }
-    if (LG_prefersLiveCapture(@"Widgets.RenderingMode")) {
-        LGInjectIntoWidgetGlassHostView(host);
-        return;
-    }
-    ensureWidgetTintOverlay(host);
-    [glass updateOrigin];
+    UIView *host = widgetAncestorContainerHost((UIView *)self);
+    if (host) injectWidgetGlass(host);
 }
-
 %end
-
-%hook SBCoverSheetViewController
-
-- (void)viewWillAppear:(BOOL)animated {
-    %orig;
-    LGWidgetSetCoverSheetVisible(YES);
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    LGWidgetSetCoverSheetVisible(YES);
-}
-
-- (void)viewDidDisappear:(BOOL)animated {
-    %orig;
-    LGWidgetSetCoverSheetVisible(NO);
-}
-
-%end
-
-%hook SBDashBoardViewController
-
-- (void)viewWillAppear:(BOOL)animated {
-    %orig;
-    LGWidgetSetCoverSheetVisible(YES);
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    LGWidgetSetCoverSheetVisible(YES);
-}
-
-- (void)viewDidDisappear:(BOOL)animated {
-    %orig;
-    LGWidgetSetCoverSheetVisible(NO);
-}
-
-%end
-
-%end
-
-%ctor {
-    if (LGIsSpringBoardProcess()) {
-        LGObservePreferenceChanges(^{
-            LGWidgetsPrefsChanged(NULL, NULL, NULL, NULL, NULL);
-        });
-        %init(LGWidgetsSpringBoard);
-    }
-}

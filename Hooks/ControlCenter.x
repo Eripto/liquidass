@@ -1,1273 +1,687 @@
-#import "../LiquidGlass.h"
-#import "../Shared/LGBannerCaptureSupport.h"
-#import "../Shared/LGHookSupport.h"
-#import "../Shared/LGSharedSupport.h"
+#import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import "../Shared/LGLiveBackdropView.h"
+#import "../Shared/LGGlassKit.h"
+#import "../Shared/LGSharedSupport.h"
 #import <objc/runtime.h>
 
-static CGFloat sControlCenterSmallModuleCornerRadius = 0.0;
-static const CFTimeInterval kControlCenterDisplayLinkVisibilityGrace = 0.45;
-static void *kControlCenterGlassKey = &kControlCenterGlassKey;
-static void *kControlCenterBackdropViewKey = &kControlCenterBackdropViewKey;
-static void *kControlCenterLastLiveCaptureTimeKey = &kControlCenterLastLiveCaptureTimeKey;
-static void *kControlCenterFullscreenBlurCapKey = &kControlCenterFullscreenBlurCapKey;
-static void *kControlCenterOriginalCornerStateKey = &kControlCenterOriginalCornerStateKey;
-static void *kSpecularOnlyBlurScalingAllowedKey = &kSpecularOnlyBlurScalingAllowedKey;
-static void *kSpecularOnlyBlurScalingAppliedScaleKey = &kSpecularOnlyBlurScalingAppliedScaleKey;
-static LGDisplayLinkState sControlCenterDisplayLinkState = {0};
-static LGDisplayLinkState sControlCenterFullscreenBlurCapState = {0};
-static NSHashTable<UIView *> *sControlCenterLiveCaptureHosts = nil;
-static NSHashTable<UIView *> *sControlCenterFullscreenBackdropMaterials = nil;
-static CFTimeInterval sControlCenterLastVisibleHostTime = 0.0;
-static BOOL sControlCenterScanPending = NO;
-static BOOL sControlCenterBackdropBlurRetryPending = NO;
-static BOOL sSpecularOnlyBlurScaleApplying = NO;
-static NSUInteger sControlCenterRefreshCursor = 0;
+#pragma mark - taxonomy
 
-static BOOL LGControlCenterEnabled(void) {
-    return LG_globalEnabled() && LG_prefBool(@"ControlCenter.Enabled", YES);
+static CGFloat sCCSmallModuleRadius = 0.0;
+
+static UIView *ccModuleAncestor(UIView *v) {
+    for (UIView *a = v.superview; a; a = a.superview)
+        if (isExactClass(a, @"CCUIContentModuleContainerView")) return a;
+    return nil;
 }
 
-static BOOL LGControlCenterClassNameEquals(UIView *view, NSString *className) {
-    return view && [NSStringFromClass(view.class) isEqualToString:className];
+static BOOL ccIsModuleCandidate(UIView *module) {
+    CGSize s = module.bounds.size;
+    CGFloat mn = fmin(s.width, s.height), mx = fmax(s.width, s.height);
+    if (mn < 20.0) return NO;
+    return mx <= mn * 1.25;
 }
 
-static void LGControlCenterDetachGlass(UIView *host);
+static CGFloat ccModuleCornerRadius(UIView *module) {
+    CGFloat h = CGRectGetHeight(module.bounds);
+    if (h <= 0.0) return 0.0;
+    CGFloat r = h * 0.5;
+    if (h < 100.0) { sCCSmallModuleRadius = r; return r; }
+    return sCCSmallModuleRadius > 0.0 ? sCCSmallModuleRadius : r;
+}
 
-static void LGControlCenterRememberOriginalCornerState(UIView *view) {
-    if (!view || objc_getAssociatedObject(view, kControlCenterOriginalCornerStateKey)) return;
-    NSMutableDictionary<NSString *, id> *state = [@{
-        @"clipsToBounds": @(view.clipsToBounds),
-        @"masksToBounds": @(view.layer.masksToBounds),
-        @"cornerRadius": @(view.layer.cornerRadius),
-    } mutableCopy];
-    if (@available(iOS 13.0, *)) {
-        state[@"cornerCurve"] = view.layer.cornerCurve ?: @"";
+static BOOL ccIsInsideSlider(UIView *mat) {
+    return hasAncestorOfClassName(mat, @"CCUIContinuousSliderView") ||
+           hasAncestorOfClassName(mat, @"MRUContinuousSliderView");
+}
+
+static BOOL ccHasSBElasticHierarchy(UIView *view) {
+    // volume hud reuses cc views so leave its elastic hierarchy alone
+    UIView *candidate = view;
+    for (NSInteger level = 0; candidate && level < 3; level++, candidate = candidate.superview) {
+        NSString *className = NSStringFromClass(candidate.class);
+        if ([className hasPrefix:@"SBElastic"]) return YES;
     }
-    objc_setAssociatedObject(view, kControlCenterOriginalCornerStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return NO;
 }
 
-static void LGControlCenterRestoreCornerState(UIView *view) {
-    if (!view) return;
-    NSDictionary<NSString *, id> *state = objc_getAssociatedObject(view, kControlCenterOriginalCornerStateKey);
-    if (state) {
-        view.clipsToBounds = [state[@"clipsToBounds"] boolValue];
-        view.layer.masksToBounds = [state[@"masksToBounds"] boolValue];
-        view.layer.cornerRadius = [state[@"cornerRadius"] doubleValue];
-        if (@available(iOS 13.0, *)) {
-            NSString *cornerCurve = state[@"cornerCurve"];
-            if (cornerCurve.length) view.layer.cornerCurve = cornerCurve;
-        }
-        objc_setAssociatedObject(view, kControlCenterOriginalCornerStateKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    }
-    LGControlCenterDetachGlass(view);
+static CGFloat ccPillRadius(UIView *v) {
+    return fmin(CGRectGetWidth(v.bounds), CGRectGetHeight(v.bounds)) * 0.5;
 }
 
-static void LGControlCenterRestoreCornerStateInTree(UIView *root) {
-    if (!root) return;
-    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
-    while (stack.count > 0) {
-        UIView *view = stack.lastObject;
-        [stack removeLastObject];
-        LGControlCenterRestoreCornerState(view);
-        for (UIView *subview in view.subviews) {
-            [stack addObject:subview];
-        }
-    }
-}
+static CGFloat ccGlassRadiusForMaterial(UIView *mat) {
+    if (ccHasSBElasticHierarchy(mat)) return -1.0;
+    if (!isExactClass(mat, @"MTMaterialView")) return -1.0;
+    if (!hasAncestorOfClassName(mat, @"CCUIContentModuleContainerView")) return -1.0;
 
-static NSHashTable<UIView *> *LGControlCenterLiveCaptureHostRegistry(void) {
-    if (!sControlCenterLiveCaptureHosts) {
-        sControlCenterLiveCaptureHosts = [NSHashTable weakObjectsHashTable];
-    }
-    return sControlCenterLiveCaptureHosts;
-}
+    CGFloat w = CGRectGetWidth(mat.bounds), h = CGRectGetHeight(mat.bounds);
+    if (w < 30.0 || h < 30.0) return -1.0;
 
-static NSHashTable<UIView *> *LGControlCenterFullscreenBackdropMaterialRegistry(void) {
-    if (!sControlCenterFullscreenBackdropMaterials) {
-        sControlCenterFullscreenBackdropMaterials = [NSHashTable weakObjectsHashTable];
-    }
-    return sControlCenterFullscreenBackdropMaterials;
-}
-
-static void LGControlCenterApplyCornerRadius(UIView *view, CGFloat cornerRadius) {
-    if (!view) return;
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerState(view);
-        return;
-    }
-    if (cornerRadius <= 0.0) return;
-    LGControlCenterRememberOriginalCornerState(view);
-    view.clipsToBounds = YES;
-    view.layer.masksToBounds = YES;
-    view.layer.cornerRadius = cornerRadius;
-    if (@available(iOS 13.0, *)) {
-        view.layer.cornerCurve = kCACornerCurveCircular;
-    }
-}
-
-static void LGControlCenterEnsureGlassForMaterialView(UIView *materialView, CGFloat cornerRadius);
-
-static void LGControlCenterApplyGlassCornerRadius(UIView *view, CGFloat cornerRadius) {
-    LGControlCenterApplyCornerRadius(view, cornerRadius);
-    if (LGControlCenterClassNameEquals(view, @"MTMaterialView")) {
-        LGControlCenterEnsureGlassForMaterialView(view, cornerRadius);
-    }
-}
-
-static BOOL LGControlCenterHostIsVisible(UIView *host) {
-    if (!host || !host.window || host.hidden || host.alpha <= 0.01f || host.layer.opacity <= 0.01f) return NO;
-    UIView *current = host.superview;
-    while (current && current != host.window) {
-        if (current.hidden || current.alpha <= 0.01f || current.layer.opacity <= 0.01f) return NO;
-        current = current.superview;
+    if (ccIsInsideSlider(mat)) {
+        if (isExactClass(mat.superview, @"MRUContinuousSliderView")) return ccPillRadius(mat);
+        return -1.0;
     }
 
-    CALayer *layer = host.layer.presentationLayer ?: host.layer;
-    CGRect bounds = layer.bounds;
-    if (CGRectGetWidth(bounds) <= 1.0 || CGRectGetHeight(bounds) <= 1.0) return NO;
-    CGRect windowFrame = [layer convertRect:bounds toLayer:host.window.layer];
-    CGRect visibleBounds = CGRectInset(host.window.bounds, -8.0, -8.0);
-    if (CGRectIntersectsRect(visibleBounds, windowFrame)) return YES;
-
-    CGRect modelFrame = [host convertRect:host.bounds toView:host.window];
-    return CGRectIntersectsRect(visibleBounds, modelFrame);
+    UIView *module = ccModuleAncestor(mat);
+    if (module && ccIsModuleCandidate(module)) return ccModuleCornerRadius(module);
+    if (w > 100.0 && h < 100.0) return h * 0.5;
+    if (h > 100.0 && w < 100.0) return w * 0.5;
+    return ccPillRadius(mat);
 }
 
-static BOOL LGControlCenterHostHasVisibleHierarchy(UIView *host) {
-    if (!host || !host.window || host.hidden || host.alpha <= 0.01f || host.layer.opacity <= 0.01f) return NO;
-    UIView *current = host.superview;
-    while (current && current != host.window) {
-        if (current.hidden || current.alpha <= 0.01f || current.layer.opacity <= 0.01f) return NO;
-        current = current.superview;
-    }
-    return YES;
+#pragma mark - fullscreen backdrop styling
+
+static void *kCCFullscreenBlurCapKey = &kCCFullscreenBlurCapKey;
+static void *kCCFullscreenDimViewKey = &kCCFullscreenDimViewKey;
+static void *kCCFullscreenMaterialKey = &kCCFullscreenMaterialKey;
+static void *kCCFullscreenOverlayRootKey = &kCCFullscreenOverlayRootKey;
+static NSHashTable<UIView *> *sCCOverlayRoots;
+
+static CFTimeInterval sCCFullscreenDimSyncDeadline = 0.0;
+static CFTimeInterval sCCFullscreenDimSyncHardDeadline = 0.0;
+
+static NSHashTable<UIView *> *ccOverlayRoots(void) {
+    if (!sCCOverlayRoots) sCCOverlayRoots = [NSHashTable weakObjectsHashTable];
+    return sCCOverlayRoots;
 }
 
-static NSString *LGControlCenterViewSummary(UIView *view) {
-    if (!view) return @"(null)";
-    return [NSString stringWithFormat:@"%p %@ frame=%@ bounds=%@ window=%d hidden=%d alpha=%.2f opacity=%.2f subviews=%lu",
-            view,
-            NSStringFromClass(view.class),
-            NSStringFromCGRect(view.frame),
-            NSStringFromCGRect(view.bounds),
-            view.window ? 1 : 0,
-            view.hidden ? 1 : 0,
-            view.alpha,
-            view.layer.opacity,
-            (unsigned long)view.subviews.count];
-}
-
-static NSString *LGControlCenterAncestorChain(UIView *view) {
-    NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    UIView *cursor = view;
-    NSUInteger depth = 0;
-    while (cursor && depth < 12) {
-        [parts addObject:NSStringFromClass(cursor.class)];
-        cursor = cursor.superview;
-        depth++;
-    }
-    if (cursor) [parts addObject:@"..."];
-    return [parts componentsJoinedByString:@" <- "];
-}
-
-static void LGControlCenterConfigureGlass(LiquidGlassView *glass, CGFloat cornerRadius) {
-    if (!glass) return;
-    glass.cornerRadius = cornerRadius;
-    glass.bezelWidth = LG_prefFloat(@"ControlCenter.BezelWidth", 18.0);
-    glass.glassThickness = LG_prefFloat(@"ControlCenter.GlassThickness", 120.0);
-    glass.refractionScale = LG_prefFloat(@"ControlCenter.RefractionScale", 1.35);
-    glass.refractiveIndex = LG_prefFloat(@"ControlCenter.RefractiveIndex", 1.2);
-    glass.specularOpacity = LG_prefFloat(@"ControlCenter.SpecularOpacity", 0.55);
-    glass.blur = LG_prefFloat(@"ControlCenter.Blur", 10.0);
-    glass.wallpaperScale = LG_prefFloat(@"ControlCenter.WallpaperScale", 0.25);
-    glass.releasesWallpaperAfterUpload = YES;
-    glass.updateGroup = LGUpdateGroupControlCenter;
-}
-
-static void LGControlCenterSyncDisplayLinkActivity(void);
-
-static CGFloat LGControlCenterFullscreenBackdropBlurRadius(void) {
+static CGFloat ccFullscreenBlurRadius(void) {
     return fmax(0.0, LG_prefFloat(@"ControlCenter.FullscreenBackdropBlurRadius", 8.0));
 }
 
-static BOOL LGControlCenterIsBlurRadiusKey(NSString *key) {
-    if (![key isKindOfClass:[NSString class]]) return NO;
+static UIColor *ccColorFromRGBAHex(NSString *hex, NSString *fallback) {
+    NSString *source = [hex isKindOfClass:NSString.class] && hex.length ? hex : fallback;
+    NSString *value = [[[source ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+        stringByReplacingOccurrencesOfString:@"#" withString:@""] uppercaseString];
+    if (value.length != 6 && value.length != 8) {
+        NSString *fallbackSource = fallback.length ? fallback : @"#00000033";
+        value = [[[fallbackSource stringByReplacingOccurrencesOfString:@"#" withString:@""] uppercaseString] copy];
+    }
+    if (value.length != 6 && value.length != 8) return [UIColor colorWithWhite:0.0 alpha:0.20];
+
+    unsigned parsed = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:value];
+    if (![scanner scanHexInt:&parsed]) return [UIColor colorWithWhite:0.0 alpha:0.20];
+
+    CGFloat red = 0.0, green = 0.0, blue = 0.0, alpha = 1.0;
+    if (value.length == 6) {
+        red = ((parsed >> 16) & 0xff) / 255.0;
+        green = ((parsed >> 8) & 0xff) / 255.0;
+        blue = (parsed & 0xff) / 255.0;
+    } else {
+        red = ((parsed >> 24) & 0xff) / 255.0;
+        green = ((parsed >> 16) & 0xff) / 255.0;
+        blue = ((parsed >> 8) & 0xff) / 255.0;
+        alpha = (parsed & 0xff) / 255.0;
+    }
+    return [UIColor colorWithRed:red green:green blue:blue alpha:alpha];
+}
+
+static UIColor *ccFullscreenDimColor(void) {
+    NSString *fallback = @"#00000033";
+    return ccColorFromRGBAHex(LG_prefString(@"ControlCenter.FullscreenBackdropDimColor", fallback), fallback);
+}
+
+static CGFloat ccFullscreenDimTargetAlpha(void) {
+    return CGColorGetAlpha(ccFullscreenDimColor().CGColor);
+}
+
+static UIColor *ccFullscreenDimBaseColor(void) {
+    UIColor *color = ccFullscreenDimColor();
+    CGFloat red = 0.0, green = 0.0, blue = 0.0, alpha = 0.0;
+    if ([color getRed:&red green:&green blue:&blue alpha:&alpha]) {
+        return [UIColor colorWithRed:red green:green blue:blue alpha:1.0];
+    }
+    return [color colorWithAlphaComponent:1.0];
+}
+
+static BOOL ccIsBlurRadiusKey(NSString *key) {
+    if (![key isKindOfClass:NSString.class]) return NO;
     return [key isEqualToString:@"inputRadius"] ||
            [key isEqualToString:@"radius"] ||
            [key isEqualToString:@"inputBlurRadius"] ||
            [key isEqualToString:@"blurRadius"];
 }
 
-static id LGControlCenterClampedBlurRadiusValue(id value, CGFloat radius) {
+static id ccClampedBlurRadiusValue(id value, CGFloat radius) {
     if (![value respondsToSelector:@selector(doubleValue)]) return value;
-    CGFloat incoming = [value doubleValue];
-    if (incoming <= radius) return value;
-    return @(radius);
+    return [value doubleValue] > radius ? @(radius) : value;
 }
 
-static BOOL LGSpecularOnlyExperimentalEnabled(void) {
-    return NO;
-}
-
-static CGFloat LGSpecularOnlyExperimentalBlurScale(void) {
-    CGFloat scale = LG_prefFloat(@"SpecularOnly.BlurScale", 0.8);
-    if (LG_prefBool(@"SpecularOnly.ControlCenter.OverrideEnabled", NO)) {
-        scale = LG_prefFloat(@"SpecularOnly.ControlCenter.BlurScale", scale);
-    }
-    return MAX(0.0, MIN(1.5, scale));
-}
-
-static id LGSpecularOnlyScaledBlurRadiusValue(id value) {
-    if (![value respondsToSelector:@selector(doubleValue)]) return value;
-    return @(MAX(0.0, [value doubleValue] * LGSpecularOnlyExperimentalBlurScale()));
-}
-
-static BOOL LGSpecularOnlyBlurScalingAllowedForObject(id object) {
-    return object && [objc_getAssociatedObject(object, kSpecularOnlyBlurScalingAllowedKey) boolValue];
-}
-
-static void LGSpecularOnlySetBlurScalingAllowedForObject(id object, BOOL allowed) {
+static void ccSetBlurCapMarker(id object, BOOL enabled) {
     if (!object) return;
     objc_setAssociatedObject(object,
-                             kSpecularOnlyBlurScalingAllowedKey,
-                             allowed ? @YES : nil,
-                             allowed ? OBJC_ASSOCIATION_RETAIN_NONATOMIC : OBJC_ASSOCIATION_ASSIGN);
-    if (!allowed) {
-        objc_setAssociatedObject(object, kSpecularOnlyBlurScalingAppliedScaleKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    }
+                             kCCFullscreenBlurCapKey,
+                             enabled ? @YES : nil,
+                             enabled ? OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                                     : OBJC_ASSOCIATION_ASSIGN);
 }
 
-static void LGSpecularOnlyMarkBlurScalingLayerTree(CALayer *layer, BOOL allowed) {
-    if (!layer) return;
-    LGSpecularOnlySetBlurScalingAllowedForObject(layer, allowed);
-    for (CALayer *sublayer in layer.sublayers) {
-        LGSpecularOnlyMarkBlurScalingLayerTree(sublayer, allowed);
-    }
+static BOOL ccObjectHasBlurCap(id object) {
+    return object && [objc_getAssociatedObject(object, kCCFullscreenBlurCapKey) boolValue];
 }
 
-static void __attribute__((unused)) LGSpecularOnlyMarkBlurScalingView(UIView *view, BOOL allowed) {
-    if (!view) return;
-    LGSpecularOnlySetBlurScalingAllowedForObject(view, allowed);
-    LGSpecularOnlyMarkBlurScalingLayerTree(view.layer, allowed);
-}
-
-static void LGSpecularOnlyScaleBlurFilter(id filter) {
-    if (!LGSpecularOnlyBlurScalingAllowedForObject(filter)) return;
-    CGFloat scale = LGSpecularOnlyExperimentalBlurScale();
-    NSNumber *appliedScale = objc_getAssociatedObject(filter, kSpecularOnlyBlurScalingAppliedScaleKey);
-    if (appliedScale && fabs(appliedScale.doubleValue - scale) < 0.001) return;
-    NSArray<NSString *> *candidateKeys = @[@"inputRadius", @"radius", @"inputBlurRadius", @"blurRadius"];
-    for (NSString *key in candidateKeys) {
-        @try {
-            id currentValue = [filter valueForKey:key];
-            id scaledValue = LGSpecularOnlyScaledBlurRadiusValue(currentValue);
-            if (scaledValue != currentValue) {
-                [filter setValue:scaledValue forKey:key];
-            }
-        } @catch (__unused NSException *exception) {
-        }
-    }
-    objc_setAssociatedObject(filter, kSpecularOnlyBlurScalingAppliedScaleKey, @(scale), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void LGSpecularOnlyScaleBlurFilterArray(id filters) {
-    if (![filters isKindOfClass:[NSArray class]]) return;
-    BOOL wasApplying = sSpecularOnlyBlurScaleApplying;
-    sSpecularOnlyBlurScaleApplying = YES;
-    for (id filter in (NSArray *)filters) {
-        LGSpecularOnlySetBlurScalingAllowedForObject(filter, YES);
-        LGSpecularOnlyScaleBlurFilter(filter);
-    }
-    sSpecularOnlyBlurScaleApplying = wasApplying;
-}
-
-static void LGSpecularOnlyScaleBlurLayer(CALayer *layer) {
-    if (!layer || !LGSpecularOnlyExperimentalEnabled() || !LGSpecularOnlyBlurScalingAllowedForObject(layer)) return;
-    LGSpecularOnlyScaleBlurFilterArray(layer.filters);
-    @try {
-        LGSpecularOnlyScaleBlurFilterArray([layer valueForKey:@"backgroundFilters"]);
-    } @catch (__unused NSException *exception) {
-    }
-    LGSpecularOnlyMarkBlurScalingLayerTree(layer, YES);
-    for (CALayer *sublayer in layer.sublayers) {
-        LGSpecularOnlyScaleBlurLayer(sublayer);
-    }
-}
-
-static void __attribute__((unused)) LGSpecularOnlyScaleBlurForHookedView(UIView *view) {
-    if (!LGSpecularOnlyBlurScalingAllowedForObject(view)) return;
-    LGSpecularOnlyScaleBlurLayer(view.layer);
-}
-
-static void LGControlCenterMarkBlurCappedObject(id object, CGFloat radius) {
-    if (!object) return;
-    objc_setAssociatedObject(object, kControlCenterFullscreenBlurCapKey, @(radius), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void LGControlCenterClampBlurFilter(id filter, CGFloat radius) {
+static void ccClampBlurFilter(id filter, CGFloat radius) {
+    // blur radius keys changed names across ios releases
     if (!filter) return;
-    LGControlCenterMarkBlurCappedObject(filter, radius);
-    NSArray<NSString *> *candidateKeys = @[@"inputRadius", @"radius", @"inputBlurRadius", @"blurRadius"];
-    for (NSString *key in candidateKeys) {
+    ccSetBlurCapMarker(filter, YES);
+    for (NSString *key in @[@"inputRadius", @"radius", @"inputBlurRadius", @"blurRadius"]) {
         @try {
-            id currentValue = [filter valueForKey:key];
-            id cappedValue = LGControlCenterClampedBlurRadiusValue(currentValue, radius);
-            if (cappedValue != currentValue) {
-                [filter setValue:cappedValue forKey:key];
-            }
+            id value = [filter valueForKey:key];
+            id clamped = ccClampedBlurRadiusValue(value, radius);
+            if (clamped != value) [filter setValue:clamped forKey:key];
         } @catch (__unused NSException *exception) {
         }
     }
 }
 
-static void LGControlCenterClampBlurFilterArray(id filters, CGFloat radius) {
-    if (![filters isKindOfClass:[NSArray class]]) return;
+static void ccSetBlurCapOnFilters(id filters, BOOL enabled, CGFloat radius) {
+    if (![filters isKindOfClass:NSArray.class]) return;
     for (id filter in (NSArray *)filters) {
-        LGControlCenterClampBlurFilter(filter, radius);
+        if (enabled) ccClampBlurFilter(filter, radius);
+        else ccSetBlurCapMarker(filter, NO);
     }
 }
 
-static void LGControlCenterMarkBlurCapOnLayer(CALayer *layer, CGFloat radius) {
+static void ccAssociateOverlayRootWithFilters(id filters, UIView *overlayRoot) {
+    if (![filters isKindOfClass:NSArray.class]) return;
+    for (id filter in (NSArray *)filters) {
+        objc_setAssociatedObject(filter,
+                                 kCCFullscreenOverlayRootKey,
+                                 overlayRoot,
+                                 OBJC_ASSOCIATION_ASSIGN);
+    }
+}
+
+static void ccSetBlurCapOnLayerTree(CALayer *layer, BOOL enabled, CGFloat radius) {
     if (!layer) return;
-    LGControlCenterMarkBlurCappedObject(layer, radius);
-    LGControlCenterClampBlurFilterArray(layer.filters, radius);
+    ccSetBlurCapMarker(layer, enabled);
+    ccSetBlurCapOnFilters(layer.filters, enabled, radius);
     @try {
-        LGControlCenterClampBlurFilterArray([layer valueForKey:@"backgroundFilters"], radius);
+        ccSetBlurCapOnFilters([layer valueForKey:@"backgroundFilters"], enabled, radius);
     } @catch (__unused NSException *exception) {
     }
     for (CALayer *sublayer in layer.sublayers) {
-        LGControlCenterMarkBlurCapOnLayer(sublayer, radius);
+        ccSetBlurCapOnLayerTree(sublayer, enabled, radius);
     }
 }
 
-static void LGControlCenterClampBlurAnimation(CAAnimation *animation, CGFloat radius) {
+static void ccClampBlurAnimation(CAAnimation *animation, CGFloat radius) {
+    // stock transitions can restore blur after the model value is clamped
     if (!animation) return;
+
+    if ([animation isKindOfClass:CAAnimationGroup.class]) {
+        for (CAAnimation *child in ((CAAnimationGroup *)animation).animations) {
+            ccClampBlurAnimation(child, radius);
+        }
+        return;
+    }
+
     NSString *keyPath = nil;
-    @try {
-        keyPath = [animation valueForKey:@"keyPath"];
-    } @catch (__unused NSException *exception) {
-    }
-    if (![keyPath isKindOfClass:[NSString class]]) return;
-    NSString *lowerKeyPath = keyPath.lowercaseString;
-    if (![lowerKeyPath containsString:@"radius"] && ![lowerKeyPath containsString:@"blur"]) return;
+    @try { keyPath = [animation valueForKey:@"keyPath"]; }
+    @catch (__unused NSException *exception) {}
+    if (![keyPath isKindOfClass:NSString.class]) return;
 
-    if ([animation isKindOfClass:[CABasicAnimation class]]) {
+    NSString *lower = keyPath.lowercaseString;
+    if (![lower containsString:@"radius"] && ![lower containsString:@"blur"]) return;
+
+    if ([animation isKindOfClass:CABasicAnimation.class]) {
         CABasicAnimation *basic = (CABasicAnimation *)animation;
-        basic.fromValue = LGControlCenterClampedBlurRadiusValue(basic.fromValue, radius);
-        basic.toValue = LGControlCenterClampedBlurRadiusValue(basic.toValue, radius);
-        basic.byValue = LGControlCenterClampedBlurRadiusValue(basic.byValue, radius);
-    } else if ([animation isKindOfClass:[CAKeyframeAnimation class]]) {
+        basic.fromValue = ccClampedBlurRadiusValue(basic.fromValue, radius);
+        basic.toValue = ccClampedBlurRadiusValue(basic.toValue, radius);
+        basic.byValue = ccClampedBlurRadiusValue(basic.byValue, radius);
+    } else if ([animation isKindOfClass:CAKeyframeAnimation.class]) {
         CAKeyframeAnimation *keyframe = (CAKeyframeAnimation *)animation;
-        NSMutableArray *values = nil;
+        if (!keyframe.values.count) return;
+        NSMutableArray *values = [NSMutableArray arrayWithCapacity:keyframe.values.count];
         for (id value in keyframe.values) {
-            if (!values) values = [NSMutableArray arrayWithCapacity:keyframe.values.count];
-            [values addObject:LGControlCenterClampedBlurRadiusValue(value, radius)];
+            [values addObject:ccClampedBlurRadiusValue(value, radius) ?: value];
         }
-        if (values) keyframe.values = values;
-    } else if ([animation isKindOfClass:[CAAnimationGroup class]]) {
-        CAAnimationGroup *group = (CAAnimationGroup *)animation;
-        for (CAAnimation *child in group.animations) {
-            LGControlCenterClampBlurAnimation(child, radius);
-        }
+        keyframe.values = values;
     }
 }
 
-static void LGSpecularOnlyScaleBlurAnimation(CAAnimation *animation) {
-    if (!animation) return;
-    NSString *keyPath = nil;
-    @try {
-        keyPath = [animation valueForKey:@"keyPath"];
-    } @catch (__unused NSException *exception) {
-    }
-    if (![keyPath isKindOfClass:[NSString class]]) return;
-    NSString *lowerKeyPath = keyPath.lowercaseString;
-    if (![lowerKeyPath containsString:@"radius"] && ![lowerKeyPath containsString:@"blur"]) return;
+static BOOL ccIsFullscreenBackdropMaterial(UIView *material, UIView *overlayRoot) {
+    if (!material || !overlayRoot) return NO;
+    if (!isExactClass(material, @"MTMaterialView")) return NO;
+    if (material.superview != overlayRoot) return NO;
 
-    if ([animation isKindOfClass:[CABasicAnimation class]]) {
-        CABasicAnimation *basic = (CABasicAnimation *)animation;
-        basic.fromValue = LGSpecularOnlyScaledBlurRadiusValue(basic.fromValue);
-        basic.toValue = LGSpecularOnlyScaledBlurRadiusValue(basic.toValue);
-        basic.byValue = LGSpecularOnlyScaledBlurRadiusValue(basic.byValue);
-    } else if ([animation isKindOfClass:[CAKeyframeAnimation class]]) {
-        CAKeyframeAnimation *keyframe = (CAKeyframeAnimation *)animation;
-        NSMutableArray *values = nil;
-        for (id value in keyframe.values) {
-            if (!values) values = [NSMutableArray arrayWithCapacity:keyframe.values.count];
-            [values addObject:LGSpecularOnlyScaledBlurRadiusValue(value)];
-        }
-        if (values) keyframe.values = values;
-    } else if ([animation isKindOfClass:[CAAnimationGroup class]]) {
-        CAAnimationGroup *group = (CAAnimationGroup *)animation;
-        for (CAAnimation *child in group.animations) {
-            LGSpecularOnlyScaleBlurAnimation(child);
-        }
-    }
+    CGRect bounds = material.bounds;
+    if (CGRectGetWidth(bounds) < 100.0 || CGRectGetHeight(bounds) < 100.0) return NO;
+
+    return CGRectContainsRect(CGRectInset(overlayRoot.bounds, -2.0, -2.0), material.frame);
 }
 
-static BOOL LGControlCenterRootLooksLikeOverlayView(UIView *root) {
-    if (!root) return NO;
-    BOOL hasScrollView = NO;
-    BOOL hasHeaderPocket = NO;
-    for (UIView *subview in root.subviews) {
-        if (LGControlCenterClassNameEquals(subview, @"CCUIScrollView")) hasScrollView = YES;
-        if (LGControlCenterClassNameEquals(subview, @"CCUIHeaderPocketView")) hasHeaderPocket = YES;
-    }
-    return hasScrollView || hasHeaderPocket;
-}
+static CGFloat ccBlurRadiusFromFilters(id filters) {
+    if (![filters isKindOfClass:NSArray.class]) return -1.0;
 
-static BOOL LGControlCenterIsFullscreenBackdropMaterialView(UIView *view) {
-    if (!LGControlCenterClassNameEquals(view, @"MTMaterialView")) return NO;
-    UIView *root = view.superview;
-    if (!LGControlCenterRootLooksLikeOverlayView(root)) return NO;
-    if (CGRectGetWidth(view.bounds) < 100.0 || CGRectGetHeight(view.bounds) < 100.0) return NO;
-    return CGRectContainsRect(CGRectInset(root.bounds, -2.0, -2.0), view.frame);
-}
-
-static void LGControlCenterApplyFullscreenBackdropMaterialBlur(UIView *materialView) {
-    if (!LGControlCenterEnabled() || !LGControlCenterIsFullscreenBackdropMaterialView(materialView)) return;
-    [LGControlCenterFullscreenBackdropMaterialRegistry() addObject:materialView];
-    materialView.hidden = NO;
-    materialView.alpha = 1.0;
-    materialView.layer.opacity = 1.0f;
-    LGControlCenterMarkBlurCapOnLayer(materialView.layer, LGControlCenterFullscreenBackdropBlurRadius());
-    sControlCenterFullscreenBlurCapState.activeCount = LGControlCenterFullscreenBackdropMaterialRegistry().allObjects.count;
-    LGDisplayLinkStateDidChangeActivity(&sControlCenterFullscreenBlurCapState);
-    if (sControlCenterFullscreenBlurCapState.activeCount > 0) {
-        LGStartDisplayLinkStateWithPreferenceKey(&sControlCenterFullscreenBlurCapState,
-                                                 LGPreferredLiveCaptureFramesPerSecond(15),
-                                                 @"DisplayLink.ControlCenter.Enabled",
-                                                 ^{
-            NSArray<UIView *> *materials = LGControlCenterFullscreenBackdropMaterialRegistry().allObjects;
-            for (UIView *material in materials) {
-                if (!material.window || !LGControlCenterIsFullscreenBackdropMaterialView(material)) {
-                    [LGControlCenterFullscreenBackdropMaterialRegistry() removeObject:material];
-                    continue;
+    CGFloat found = -1.0;
+    for (id filter in (NSArray *)filters) {
+        for (NSString *key in @[@"inputRadius", @"radius", @"inputBlurRadius", @"blurRadius"]) {
+            @try {
+                id value = [filter valueForKey:key];
+                if ([value respondsToSelector:@selector(doubleValue)]) {
+                    found = fmax(found, (CGFloat)[value doubleValue]);
                 }
-                LGControlCenterApplyFullscreenBackdropMaterialBlur(material);
+            } @catch (__unused NSException *exception) {
             }
-            sControlCenterFullscreenBlurCapState.activeCount = LGControlCenterFullscreenBackdropMaterialRegistry().allObjects.count;
-            LGDisplayLinkStateDidChangeActivity(&sControlCenterFullscreenBlurCapState);
-            if (sControlCenterFullscreenBlurCapState.activeCount == 0) {
-                LGStopDisplayLinkState(&sControlCenterFullscreenBlurCapState);
-            }
-        });
-    }
-}
-
-static void LGControlCenterScheduleFullscreenBackdropMaterialBlur(UIView *materialView) {
-    if (!LGControlCenterEnabled() || !materialView) return;
-    __weak UIView *weakMaterialView = materialView;
-    LGControlCenterApplyFullscreenBackdropMaterialBlur(materialView);
-    int64_t delays[] = {
-        (int64_t)(0.03 * NSEC_PER_SEC),
-        (int64_t)(0.08 * NSEC_PER_SEC),
-        (int64_t)(0.16 * NSEC_PER_SEC),
-        (int64_t)(0.32 * NSEC_PER_SEC),
-        (int64_t)(0.55 * NSEC_PER_SEC),
-    };
-    for (NSUInteger i = 0; i < sizeof(delays) / sizeof(delays[0]); i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delays[i]), dispatch_get_main_queue(), ^{
-            LGControlCenterApplyFullscreenBackdropMaterialBlur(weakMaterialView);
-        });
-    }
-}
-
-static void LGControlCenterApplyFullscreenBackdropBlur(UIView *root) {
-    if (!LGControlCenterEnabled() || !root) return;
-    for (UIView *subview in root.subviews) {
-        LGControlCenterApplyFullscreenBackdropMaterialBlur(subview);
-    }
-}
-
-static void LGControlCenterScheduleFullscreenBackdropBlur(UIView *root) {
-    if (!LGControlCenterEnabled() || !root) return;
-    __weak UIView *weakRoot = root;
-    LGControlCenterApplyFullscreenBackdropBlur(root);
-    if (sControlCenterBackdropBlurRetryPending) return;
-    sControlCenterBackdropBlurRetryPending = YES;
-    int64_t delays[] = {
-        (int64_t)(0.04 * NSEC_PER_SEC),
-        (int64_t)(0.10 * NSEC_PER_SEC),
-        (int64_t)(0.20 * NSEC_PER_SEC),
-        (int64_t)(0.38 * NSEC_PER_SEC),
-        (int64_t)(0.65 * NSEC_PER_SEC),
-    };
-    for (NSUInteger i = 0; i < sizeof(delays) / sizeof(delays[0]); i++) {
-        BOOL finalPass = (i + 1 == sizeof(delays) / sizeof(delays[0]));
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delays[i]), dispatch_get_main_queue(), ^{
-            LGControlCenterApplyFullscreenBackdropBlur(weakRoot);
-            if (finalPass) sControlCenterBackdropBlurRetryPending = NO;
-        });
-    }
-}
-
-static void LGControlCenterDetachGlass(UIView *host) {
-    if (!host) return;
-    [LGControlCenterLiveCaptureHostRegistry() removeObject:host];
-    LiquidGlassView *glass = objc_getAssociatedObject(host, kControlCenterGlassKey);
-    [glass removeFromSuperview];
-    objc_setAssociatedObject(host, kControlCenterGlassKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    objc_setAssociatedObject(host, kControlCenterLastLiveCaptureTimeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    LGRemoveLiveBackdropCaptureView(host, kControlCenterBackdropViewKey);
-}
-
-static BOOL LGControlCenterHostHasLiveBackdrop(UIView *host) {
-    return objc_getAssociatedObject(host, kControlCenterBackdropViewKey) != nil;
-}
-
-static void LGControlCenterResetLiveBackdrops(NSString *reason) {
-    NSUInteger count = 0;
-    for (UIView *host in LGControlCenterLiveCaptureHostRegistry().allObjects) {
-        if (!host) continue;
-        LGRemoveLiveBackdropCaptureView(host, kControlCenterBackdropViewKey);
-        objc_setAssociatedObject(host, kControlCenterLastLiveCaptureTimeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        if (LG_prefersLiveCapture(@"ControlCenter.RenderingMode")) {
-            LiquidGlassView *glass = objc_getAssociatedObject(host, kControlCenterGlassKey);
-            glass.hidden = YES;
         }
-        count++;
     }
-    LGDebugLog(@"cc reset live backdrops reason=%@ hosts=%lu", reason ?: @"unknown", (unsigned long)count);
+    return found;
 }
 
-static void LGControlCenterEnsureGlassForMaterialViewWithOptions(UIView *materialView,
-                                                                 CGFloat cornerRadius,
-                                                                 BOOL allowLiveCapture,
-                                                                 BOOL syncActivity) {
-    if (!LGControlCenterEnabled()) return;
-    BOOL liveMode = LG_prefersLiveCapture(@"ControlCenter.RenderingMode");
-    BOOL hostVisible = LGControlCenterHostIsVisible(materialView);
-    BOOL hostHierarchyVisible = LGControlCenterHostHasVisibleHierarchy(materialView);
-    if (!hostHierarchyVisible) {
-        LGDebugLog(@"cc ensure skip invisible host=%@ chain=%@",
-                   LGControlCenterViewSummary(materialView),
-                   LGControlCenterAncestorChain(materialView));
+static CGFloat ccPresentedBlurRadiusInLayerTree(CALayer *layer) {
+    if (!layer) return -1.0;
+
+    CALayer *sampleLayer = layer.presentationLayer ?: layer;
+    CGFloat found = ccBlurRadiusFromFilters(sampleLayer.filters);
+    @try {
+        found = fmax(found, ccBlurRadiusFromFilters([sampleLayer valueForKey:@"backgroundFilters"]));
+    } @catch (__unused NSException *exception) {
+    }
+
+    for (CALayer *sublayer in layer.sublayers) {
+        found = fmax(found, ccPresentedBlurRadiusInLayerTree(sublayer));
+    }
+    return found;
+}
+
+static CGFloat ccModelBlurRadiusInLayerTree(CALayer *layer) {
+    if (!layer) return -1.0;
+
+    CGFloat found = ccBlurRadiusFromFilters(layer.filters);
+    @try {
+        found = fmax(found, ccBlurRadiusFromFilters([layer valueForKey:@"backgroundFilters"]));
+    } @catch (__unused NSException *exception) {
+    }
+    for (CALayer *sublayer in layer.sublayers) {
+        found = fmax(found, ccModelBlurRadiusInLayerTree(sublayer));
+    }
+    return found;
+}
+
+static UIView *ccFullscreenDimView(UIView *backdropMaterial, BOOL create) {
+    if (!backdropMaterial) return nil;
+
+    UIView *dimView = objc_getAssociatedObject(backdropMaterial, kCCFullscreenDimViewKey);
+    if (!dimView && create) {
+        dimView = [[UIView alloc] initWithFrame:backdropMaterial.bounds];
+        dimView.userInteractionEnabled = NO;
+        dimView.accessibilityElementsHidden = YES;
+        dimView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        dimView.backgroundColor = UIColor.clearColor;
+        dimView.alpha = 0.0;
+        dimView.opaque = NO;
+        objc_setAssociatedObject(backdropMaterial,
+                                 kCCFullscreenDimViewKey,
+                                 dimView,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return dimView;
+}
+
+#pragma mark - fullscreen backdrop diagnostics
+
+static void ccApplyFullscreenBackdropStyle(UIView *overlayRoot) {
+    if (!overlayRoot) return;
+    [ccOverlayRoots() addObject:overlayRoot];
+
+    BOOL enabled = lgHostEnabled(@"ControlCenter");
+    CGFloat radius = ccFullscreenBlurRadius();
+    UIView *previousBackdropMaterial = objc_getAssociatedObject(overlayRoot, kCCFullscreenMaterialKey);
+    UIView *backdropMaterial = nil;
+
+    for (UIView *subview in [overlayRoot.subviews copy]) {
+        if (!ccIsFullscreenBackdropMaterial(subview, overlayRoot)) continue;
+        if (!backdropMaterial) backdropMaterial = subview;
+        ccSetBlurCapOnLayerTree(subview.layer, enabled, radius);
+    }
+
+    if (!backdropMaterial) {
+        if (previousBackdropMaterial) {
+            LGLog(@"[CCFSDBG][target] lost fullscreen material root=%@:%p previous=%@:%p",
+                  NSStringFromClass(overlayRoot.class), overlayRoot,
+                  NSStringFromClass(previousBackdropMaterial.class), previousBackdropMaterial);
+        }
+        objc_setAssociatedObject(overlayRoot,
+                                 kCCFullscreenMaterialKey,
+                                 nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
         return;
     }
 
-    CGPoint snapshotOrigin = CGPointZero;
-    UIImage *snapshot = LG_getHomescreenSnapshot(&snapshotOrigin);
-    if (!snapshot && !LG_prefersLiveCapture(@"ControlCenter.RenderingMode")) {
-        LGDebugLog(@"cc ensure skip no snapshot host=%@", LGControlCenterViewSummary(materialView));
+    if (previousBackdropMaterial != backdropMaterial) {
+        LGLog(@"[CCFSDBG][target] fullscreen material root=%@:%p material=%@:%p frame=%@ bounds=%@",
+              NSStringFromClass(overlayRoot.class), overlayRoot,
+              NSStringFromClass(backdropMaterial.class), backdropMaterial,
+              NSStringFromCGRect(backdropMaterial.frame), NSStringFromCGRect(backdropMaterial.bounds));
+    }
+
+    objc_setAssociatedObject(overlayRoot,
+                             kCCFullscreenMaterialKey,
+                             backdropMaterial,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(backdropMaterial.layer,
+                             kCCFullscreenOverlayRootKey,
+                             overlayRoot,
+                             OBJC_ASSOCIATION_ASSIGN);
+    ccAssociateOverlayRootWithFilters(backdropMaterial.layer.filters, overlayRoot);
+    @try {
+        ccAssociateOverlayRootWithFilters([backdropMaterial.layer valueForKey:@"backgroundFilters"],
+                                          overlayRoot);
+    } @catch (__unused NSException *exception) {
+    }
+
+    CGFloat targetAlpha = ccFullscreenDimTargetAlpha();
+    UIView *dimView = ccFullscreenDimView(backdropMaterial,
+                                           enabled && targetAlpha > 0.001);
+    if (!dimView) return;
+
+    if (!enabled || targetAlpha <= 0.001) {
+        dimView.hidden = YES;
+        dimView.backgroundColor = UIColor.clearColor;
         return;
     }
 
-    LiquidGlassView *glass = objc_getAssociatedObject(materialView, kControlCenterGlassKey);
-    BOOL hadGlass = (glass != nil);
-    if (!glass) {
-        LGDebugLog(@"cc inject glass host=%@ radius=%.2f snapshot=%d chain=%@",
-                   LGControlCenterViewSummary(materialView),
-                   cornerRadius,
-                   snapshot ? 1 : 0,
-                   LGControlCenterAncestorChain(materialView));
-        glass = [[LiquidGlassView alloc] initWithFrame:materialView.bounds wallpaper:snapshot wallpaperOrigin:snapshotOrigin];
-        glass.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        glass.userInteractionEnabled = NO;
-        [materialView insertSubview:glass atIndex:0];
-        objc_setAssociatedObject(materialView, kControlCenterGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (dimView.superview != backdropMaterial) {
+        [dimView removeFromSuperview];
+        [backdropMaterial addSubview:dimView];
     } else {
-        glass.frame = materialView.bounds;
-        if (!LG_prefersLiveCapture(@"ControlCenter.RenderingMode")) {
-            glass.wallpaperImage = snapshot;
-        }
-        if (glass.superview != materialView) {
-            [glass removeFromSuperview];
-            [materialView insertSubview:glass atIndex:0];
-        }
+        [backdropMaterial bringSubviewToFront:dimView];
     }
 
-    LGControlCenterConfigureGlass(glass, cornerRadius);
-    [LGControlCenterLiveCaptureHostRegistry() addObject:materialView];
-
-    if (!hostVisible) {
-        LGDebugLog(@"cc ensure registered offscreen host=%@ chain=%@",
-                   LGControlCenterViewSummary(materialView),
-                   LGControlCenterAncestorChain(materialView));
-        [glass updateOrigin];
-        if (syncActivity) LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-
-    BOOL hasLiveBackdrop = LGControlCenterHostHasLiveBackdrop(materialView);
-    if (liveMode && !hasLiveBackdrop) {
-        objc_setAssociatedObject(materialView, kControlCenterLastLiveCaptureTimeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    }
-
-    if (liveMode && !allowLiveCapture) {
-        [glass updateOrigin];
-        if (syncActivity) LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-
-    if (hasLiveBackdrop &&
-        !LGShouldRefreshLiveCaptureForHost(materialView,
-                                           @"ControlCenter.RenderingMode",
-                                           kControlCenterLastLiveCaptureTimeKey,
-                                           LG_prefFloat(@"ControlCenter.LiveCaptureFPS", 22.0),
-                                           hadGlass)) {
-        [glass updateOrigin];
-        if (syncActivity) LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-
-    if (!LGApplyRenderingModeToGlassHost(materialView,
-                                         glass,
-                                         @"ControlCenter.RenderingMode",
-                                         kControlCenterBackdropViewKey,
-                                         snapshot,
-                                         snapshotOrigin)) {
-        LGDebugLog(@"cc rendering failed host=%@ hadGlass=%d snapshot=%d",
-                   LGControlCenterViewSummary(materialView),
-                   hadGlass ? 1 : 0,
-                   snapshot ? 1 : 0);
-        if (!hadGlass) LGControlCenterDetachGlass(materialView);
-        if (syncActivity) LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-
-    glass.hidden = NO;
-    if (liveMode) {
-        if (LGControlCenterHostHasLiveBackdrop(materialView)) {
-            LGMarkLiveCaptureRefreshedForHost(materialView, kControlCenterLastLiveCaptureTimeKey);
-        } else {
-            LGDebugLog(@"cc live fallback snapshot host=%@", LGControlCenterViewSummary(materialView));
-            objc_setAssociatedObject(materialView, kControlCenterLastLiveCaptureTimeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        }
-    }
-    if (syncActivity) LGControlCenterSyncDisplayLinkActivity();
+    dimView.frame = backdropMaterial.bounds;
+    dimView.backgroundColor = ccFullscreenDimBaseColor();
+    dimView.hidden = NO;
 }
 
-static void LGControlCenterEnsureGlassForMaterialView(UIView *materialView, CGFloat cornerRadius) {
-    LGControlCenterEnsureGlassForMaterialViewWithOptions(materialView, cornerRadius, YES, YES);
-}
+static void ccSyncFullscreenDimForRoot(UIView *overlayRoot) {
+    if (!overlayRoot) return;
 
-static void LGControlCenterRefreshLiveCaptureHosts(void) {
-    NSArray<UIView *> *hosts = LGControlCenterLiveCaptureHostRegistry().allObjects;
-    NSMutableArray<UIView *> *visibleHosts = [NSMutableArray array];
-    NSMutableArray<UIView *> *missingBackdropHosts = [NSMutableArray array];
-    for (UIView *host in hosts) {
-        if (!host.window) {
-            LGDebugLog(@"cc refresh detach no-window host=%@", LGControlCenterViewSummary(host));
-            LGControlCenterDetachGlass(host);
-            continue;
-        }
-        if (!LGControlCenterHostIsVisible(host)) continue;
-        [visibleHosts addObject:host];
-        if (!LGControlCenterHostHasLiveBackdrop(host)) [missingBackdropHosts addObject:host];
+    UIView *backdropMaterial = objc_getAssociatedObject(overlayRoot, kCCFullscreenMaterialKey);
+    if (!backdropMaterial || backdropMaterial.superview != overlayRoot) {
+        ccApplyFullscreenBackdropStyle(overlayRoot);
+        backdropMaterial = objc_getAssociatedObject(overlayRoot, kCCFullscreenMaterialKey);
     }
+    if (!backdropMaterial) return;
 
-    NSInteger captureBudget = MAX(1, MIN(4, (NSInteger)lround(LG_prefFloat(@"ControlCenter.LiveCaptureBudget", 2.0))));
-    NSInteger capturesUsed = 0;
-    NSMutableSet<UIView *> *captureHosts = [NSMutableSet set];
+    UIView *dimView = ccFullscreenDimView(backdropMaterial, NO);
+    if (!dimView) return;
 
-    for (UIView *host in missingBackdropHosts) {
-        if (capturesUsed >= captureBudget) break;
-        [captureHosts addObject:host];
-        capturesUsed++;
-    }
-
-    NSUInteger visibleCount = visibleHosts.count;
-    if (visibleCount > 0 && capturesUsed < captureBudget) {
-        NSUInteger start = sControlCenterRefreshCursor % visibleCount;
-        for (NSUInteger offset = 0; offset < visibleCount && capturesUsed < captureBudget; offset++) {
-            UIView *host = visibleHosts[(start + offset) % visibleCount];
-            if ([captureHosts containsObject:host]) continue;
-            [captureHosts addObject:host];
-            capturesUsed++;
-        }
-        sControlCenterRefreshCursor = (start + MAX((NSUInteger)1, (NSUInteger)capturesUsed)) % visibleCount;
-    }
-
-    for (UIView *host in visibleHosts) {
-        CGFloat cornerRadius = host.layer.cornerRadius;
-        if (cornerRadius <= 0.0) cornerRadius = fmin(CGRectGetWidth(host.bounds), CGRectGetHeight(host.bounds)) * 0.5;
-        LGControlCenterEnsureGlassForMaterialViewWithOptions(host,
-                                                             cornerRadius,
-                                                             [captureHosts containsObject:host],
-                                                             NO);
-    }
-
-    if (missingBackdropHosts.count > 0) {
-        LGDebugLog(@"cc refresh visible=%lu missingBackdrop=%lu captures=%ld total=%lu",
-                   (unsigned long)visibleHosts.count,
-                   (unsigned long)missingBackdropHosts.count,
-                   (long)capturesUsed,
-                   (unsigned long)hosts.count);
-    }
-
-    sControlCenterDisplayLinkState.activeCount = visibleHosts.count;
-    LGDisplayLinkStateDidChangeActivity(&sControlCenterDisplayLinkState);
-}
-
-static void LGControlCenterStartDisplayLink(void) {
-    LGStartDisplayLinkStateWithPreferenceKey(&sControlCenterDisplayLinkState,
-                                             LGPreferredLiveCaptureFramesPerSecond(LG_prefFloat(@"ControlCenter.LiveCaptureFPS", 22.0)),
-                                             @"DisplayLink.ControlCenter.Enabled",
-                                             ^{
-        LGSetDisplayLinkStatePreferredFPS(&sControlCenterDisplayLinkState,
-                                          LGPreferredLiveCaptureFramesPerSecond(LG_prefFloat(@"ControlCenter.LiveCaptureFPS", 22.0)));
-        LGControlCenterRefreshLiveCaptureHosts();
-    });
-}
-
-static void LGControlCenterSyncDisplayLinkActivity(void) {
-    if (!LGControlCenterEnabled()) {
-        sControlCenterDisplayLinkState.activeCount = 0;
-        LGDisplayLinkStateDidChangeActivity(&sControlCenterDisplayLinkState);
-        LGStopDisplayLinkState(&sControlCenterDisplayLinkState);
+    CGFloat targetAlpha = lgHostEnabled(@"ControlCenter")
+        ? ccFullscreenDimTargetAlpha()
+        : 0.0;
+    if (targetAlpha <= 0.001) {
+        dimView.alpha = 0.0;
+        dimView.hidden = YES;
         return;
     }
 
-    NSInteger visibleCount = 0;
-    for (UIView *host in LGControlCenterLiveCaptureHostRegistry().allObjects) {
-        if (LGControlCenterHostIsVisible(host)) visibleCount++;
+    dimView.hidden = NO;
+
+    CGFloat cap = ccFullscreenBlurRadius();
+    CGFloat presentedRadius = ccPresentedBlurRadiusInLayerTree(backdropMaterial.layer);
+    CGFloat progress = 1.0;
+    if (cap > 0.001 && presentedRadius >= 0.0) {
+        progress = fmin(1.0, fmax(0.0, presentedRadius / cap));
     }
 
+    dimView.alpha = targetAlpha * progress;
+}
+
+static void ccSetFullscreenDimAlpha(UIView *overlayRoot, CGFloat alpha) {
+    if (!overlayRoot) return;
+    UIView *backdropMaterial = objc_getAssociatedObject(overlayRoot, kCCFullscreenMaterialKey);
+    UIView *dimView = ccFullscreenDimView(backdropMaterial, NO);
+    if (!dimView) return;
+    dimView.alpha = fmin(1.0, fmax(0.0, alpha));
+}
+
+@interface LGCCFullscreenDimSyncDriver : NSObject
+@property (nonatomic, weak) UIView *overlayRoot;
+@end
+
+static LGCCFullscreenDimSyncDriver *sCCFullscreenDimSyncDriver;
+static CADisplayLink *sCCFullscreenDimDisplayLink;
+
+static void ccStopFullscreenDimSync(UIView *overlayRoot);
+
+@implementation LGCCFullscreenDimSyncDriver
+- (void)tick:(CADisplayLink *)displayLink {
+    (void)displayLink;
+    UIView *root = self.overlayRoot;
+    if (!root) {
+        if (sCCFullscreenDimDisplayLink) sCCFullscreenDimDisplayLink.paused = YES;
+        return;
+    }
+
+    ccSyncFullscreenDimForRoot(root);
+
+    UIView *material = objc_getAssociatedObject(root, kCCFullscreenMaterialKey);
+    CGFloat modelRadius = material ? ccModelBlurRadiusInLayerTree(material.layer) : -1.0;
+    CGFloat presentedRadius = material ? ccPresentedBlurRadiusInLayerTree(material.layer) : -1.0;
     CFTimeInterval now = CACurrentMediaTime();
-    if (visibleCount > 0) {
-        sControlCenterLastVisibleHostTime = now;
-    }
+    BOOL settled = (modelRadius >= 0.0 && presentedRadius >= 0.0 &&
+                    fabs(modelRadius - presentedRadius) <= 0.025);
 
-    BOOL liveMode = LG_prefersLiveCapture(@"ControlCenter.RenderingMode");
-    NSUInteger totalCount = LGControlCenterLiveCaptureHostRegistry().allObjects.count;
-    BOOL withinVisibilityGrace = sControlCenterLastVisibleHostTime > 0.0 &&
-        (now - sControlCenterLastVisibleHostTime) <= kControlCenterDisplayLinkVisibilityGrace;
-    NSInteger effectiveVisibleCount = visibleCount;
-    if (effectiveVisibleCount == 0 && liveMode && totalCount > 0 && withinVisibilityGrace) {
-        effectiveVisibleCount = 1;
-    }
+    if ((now >= sCCFullscreenDimSyncDeadline && settled) ||
+        now >= sCCFullscreenDimSyncHardDeadline) {
 
-    sControlCenterDisplayLinkState.activeCount = effectiveVisibleCount;
-    LGDisplayLinkStateDidChangeActivity(&sControlCenterDisplayLinkState);
-    if (effectiveVisibleCount > 0 && liveMode) {
-        LGControlCenterStartDisplayLink();
-    } else {
-        LGStopDisplayLinkState(&sControlCenterDisplayLinkState);
+        ccSyncFullscreenDimForRoot(root);
+        ccStopFullscreenDimSync(root);
     }
 }
+@end
 
-static BOOL LGControlCenterIsModuleCandidate(UIView *moduleView) {
-    CGSize size = moduleView.bounds.size;
-    CGFloat minSide = fmin(size.width, size.height);
-    CGFloat maxSide = fmax(size.width, size.height);
-    if (minSide < 20.0) return NO;
-    return maxSide <= minSide * 1.25;
-}
+static void ccStartFullscreenDimSync(UIView *overlayRoot) {
+    if (!overlayRoot) return;
 
-static CGFloat LGControlCenterModuleCornerRadius(UIView *moduleView) {
-    CGFloat moduleHeight = CGRectGetHeight(moduleView.bounds);
-    if (moduleHeight <= 0.0) return 0.0;
-
-    CGFloat measuredRadius = moduleHeight * 0.5;
-    if (moduleHeight < 100.0) {
-        sControlCenterSmallModuleCornerRadius = measuredRadius;
-        return measuredRadius;
+    if (!sCCFullscreenDimSyncDriver) {
+        sCCFullscreenDimSyncDriver = [LGCCFullscreenDimSyncDriver new];
     }
-    return sControlCenterSmallModuleCornerRadius > 0.0 ? sControlCenterSmallModuleCornerRadius : measuredRadius;
+    sCCFullscreenDimSyncDriver.overlayRoot = overlayRoot;
+
+    if (!sCCFullscreenDimDisplayLink) {
+        sCCFullscreenDimDisplayLink = [CADisplayLink displayLinkWithTarget:sCCFullscreenDimSyncDriver
+                                                                   selector:@selector(tick:)];
+        [sCCFullscreenDimDisplayLink addToRunLoop:[NSRunLoop mainRunLoop]
+                                           forMode:NSRunLoopCommonModes];
+    }
+    sCCFullscreenDimDisplayLink.paused = NO;
 }
 
-static void LGControlCenterCirclifyModuleView(UIView *moduleView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(moduleView);
+static void ccKickFullscreenDimSync(UIView *overlayRoot) {
+    if (!overlayRoot) return;
+    CFTimeInterval now = CACurrentMediaTime();
+
+    sCCFullscreenDimSyncDeadline = now + 0.18;
+    sCCFullscreenDimSyncHardDeadline = now + 1.25;
+    ccStartFullscreenDimSync(overlayRoot);
+}
+
+static void ccStopFullscreenDimSync(UIView *overlayRoot) {
+    (void)overlayRoot;
+    if (sCCFullscreenDimDisplayLink) sCCFullscreenDimDisplayLink.paused = YES;
+}
+
+static void ccScheduleFullscreenBackdropStyle(UIView *overlayRoot) {
+    if (!overlayRoot) return;
+    ccApplyFullscreenBackdropStyle(overlayRoot);
+    __weak UIView *weakRoot = overlayRoot;
+    dispatch_async(dispatch_get_main_queue(), ^{ ccApplyFullscreenBackdropStyle(weakRoot); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ ccApplyFullscreenBackdropStyle(weakRoot); });
+}
+
+#pragma mark - round-only fills
+
+static void *kCCRoundOriginalRadiusKey = &kCCRoundOriginalRadiusKey;
+static void *kCCRoundOriginalCurveKey = &kCCRoundOriginalCurveKey;
+static void *kCCRoundOriginalMasksKey = &kCCRoundOriginalMasksKey;
+static NSHashTable<UIView *> *sCCRoundedViews;
+
+static NSHashTable<UIView *> *ccRoundedViews(void) {
+    if (!sCCRoundedViews) sCCRoundedViews = [NSHashTable weakObjectsHashTable];
+    return sCCRoundedViews;
+}
+
+static void ccRememberOriginalRoundState(UIView *view) {
+    if (!view || objc_getAssociatedObject(view, kCCRoundOriginalRadiusKey)) return;
+
+    [ccRoundedViews() addObject:view];
+    objc_setAssociatedObject(view, kCCRoundOriginalRadiusKey,
+                             @(view.layer.cornerRadius),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(view, kCCRoundOriginalCurveKey,
+                             view.layer.cornerCurve ?: (id)[NSNull null],
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(view, kCCRoundOriginalMasksKey,
+                             @(view.layer.masksToBounds),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void ccRestoreRoundState(UIView *view) {
+    if (!view) return;
+
+    NSNumber *radius = objc_getAssociatedObject(view, kCCRoundOriginalRadiusKey);
+    id curve = objc_getAssociatedObject(view, kCCRoundOriginalCurveKey);
+    NSNumber *masks = objc_getAssociatedObject(view, kCCRoundOriginalMasksKey);
+    if (!radius || !curve || !masks) return;
+
+    view.layer.cornerRadius = radius.doubleValue;
+    view.layer.cornerCurve = curve == [NSNull null] ? nil : curve;
+    view.layer.masksToBounds = masks.boolValue;
+
+    objc_setAssociatedObject(view, kCCRoundOriginalRadiusKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(view, kCCRoundOriginalCurveKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(view, kCCRoundOriginalMasksKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    [sCCRoundedViews removeObject:view];
+}
+
+static void ccRestoreAllRoundedViews(void) {
+    for (UIView *view in ccRoundedViews().allObjects)
+        ccRestoreRoundState(view);
+}
+
+static void lgRound(UIView *v, CGFloat r) {
+    if (!v) return;
+    if (!lgHostEnabled(@"ControlCenter") || ccHasSBElasticHierarchy(v)) {
+        ccRestoreRoundState(v);
         return;
     }
-    if (!LGControlCenterClassNameEquals(moduleView, @"CCUIContentModuleContainerView")) return;
-    if (!LGControlCenterIsModuleCandidate(moduleView)) return;
-
-    UIView *contentContainer = nil;
-    for (UIView *sub in moduleView.subviews) {
-        if (LGControlCenterClassNameEquals(sub, @"CCUIContentModuleContentContainer") ||
-            LGControlCenterClassNameEquals(sub, @"CCUIContentModuleContentContainerView")) {
-            contentContainer = sub;
-            break;
-        }
-    }
-
-    CGFloat cornerRadius = LGControlCenterModuleCornerRadius(moduleView);
-    LGControlCenterApplyCornerRadius(moduleView, cornerRadius);
-    if (contentContainer) LGControlCenterApplyCornerRadius(contentContainer, cornerRadius);
-}
-
-static void LGControlCenterCirclifySquareModuleMaterialView(UIView *materialView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerState(materialView);
+    if (CGRectGetWidth(v.bounds) < 2.0 || CGRectGetHeight(v.bounds) < 2.0) {
+        ccRestoreRoundState(v);
         return;
     }
-    if (!LGControlCenterClassNameEquals(materialView, @"MTMaterialView")) return;
 
-    UIView *parent = materialView.superview;
-    if (!LGControlCenterClassNameEquals(parent, @"CCUIContentModuleContentContainer") &&
-        !LGControlCenterClassNameEquals(parent, @"CCUIContentModuleContentContainerView")) return;
-
-    UIView *moduleView = nil;
-    UIView *ancestor = parent.superview;
-    while (ancestor) {
-        if (LGControlCenterClassNameEquals(ancestor, @"CCUIContentModuleContainerView")) {
-            moduleView = ancestor;
-            break;
-        }
-        ancestor = ancestor.superview;
-    }
-    if (!moduleView || !LGControlCenterIsModuleCandidate(moduleView)) return;
-
-    LGControlCenterApplyGlassCornerRadius(materialView, LGControlCenterModuleCornerRadius(moduleView));
+    ccRememberOriginalRoundState(v);
+    if (fabs(v.layer.cornerRadius - r) > 0.5) v.layer.cornerRadius = r;
+    v.layer.cornerCurve   = kCACornerCurveContinuous;
+    v.layer.masksToBounds = YES;
 }
 
-static void LGControlCenterCirclifyMediaPlayerMaterialView(UIView *materialView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerState(materialView);
+static void ccApplyOrRestoreRound(UIView *view, CGFloat radius, BOOL eligible) {
+    if (!eligible || !lgHostEnabled(@"ControlCenter") || ccHasSBElasticHierarchy(view)) {
+        ccRestoreRoundState(view);
         return;
     }
-    if (!LGControlCenterClassNameEquals(materialView, @"MTMaterialView")) return;
-
-    UIView *uiViewParent = materialView.superview;
-    if (!LGControlCenterClassNameEquals(uiViewParent, @"UIView")) return;
-
-    UIView *mruView = uiViewParent.superview;
-    if (!LGControlCenterClassNameEquals(mruView, @"MRUControlCenterView")) return;
-
-    UIView *contentContainer = mruView.superview;
-    if (!LGControlCenterClassNameEquals(contentContainer, @"CCUIContentModuleContentContainer") &&
-        !LGControlCenterClassNameEquals(contentContainer, @"CCUIContentModuleContentContainerView")) return;
-
-    UIView *moduleView = nil;
-    UIView *ancestor = contentContainer.superview;
-    while (ancestor) {
-        if (LGControlCenterClassNameEquals(ancestor, @"CCUIContentModuleContainerView")) {
-            moduleView = ancestor;
-            break;
-        }
-        ancestor = ancestor.superview;
-    }
-    if (!moduleView || !LGControlCenterIsModuleCandidate(moduleView)) return;
-
-    LGControlCenterApplyGlassCornerRadius(materialView, LGControlCenterModuleCornerRadius(moduleView));
+    lgRound(view, radius);
 }
 
-static void LGControlCenterCirclify1x2MaterialView(UIView *materialView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerState(materialView);
-        return;
-    }
-    if (!LGControlCenterClassNameEquals(materialView, @"MTMaterialView")) return;
-
-    UIView *parent = materialView.superview;
-    if (!LGControlCenterClassNameEquals(parent, @"CCUIContentModuleContentContainer") &&
-        !LGControlCenterClassNameEquals(parent, @"CCUIContentModuleContentContainerView")) return;
-
-    CGFloat width = CGRectGetWidth(materialView.bounds);
-    CGFloat height = CGRectGetHeight(materialView.bounds);
-    if (width <= 100.0 || height >= 100.0) return;
-
-    BOOL hasUIViewSibling = NO;
-    for (UIView *sibling in parent.subviews) {
-        if (sibling != materialView && LGControlCenterClassNameEquals(sibling, @"UIView")) {
-            hasUIViewSibling = YES;
-            break;
-        }
-    }
-    if (!hasUIViewSibling) return;
-
-    LGControlCenterApplyGlassCornerRadius(materialView, height * 0.5);
-}
-
-static void LGControlCenterCirclifyFocusMaterialView(UIView *materialView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerState(materialView);
-        return;
-    }
-    if (!LGControlCenterClassNameEquals(materialView, @"MTMaterialView")) return;
-
-    UIView *parent = materialView.superview;
-    if (!LGControlCenterClassNameEquals(parent, @"UIView")) return;
-    if (!LGControlCenterClassNameEquals(parent.superview, @"UIView")) return;
-    if (!LGControlCenterClassNameEquals(parent.superview.superview, @"CCUIContentModuleContentContainerView")) return;
-
-    CGFloat width = CGRectGetWidth(materialView.bounds);
-    CGFloat height = CGRectGetHeight(materialView.bounds);
-    if (width <= 100.0 || height >= 100.0) return;
-
-    BOOL hasUIViewSibling = NO;
-    for (UIView *sibling in parent.subviews) {
-        if (sibling != materialView && LGControlCenterClassNameEquals(sibling, @"UIView")) {
-            hasUIViewSibling = YES;
-            break;
-        }
-    }
-    if (!hasUIViewSibling) return;
-
-    LGControlCenterApplyGlassCornerRadius(materialView, height * 0.5);
-}
-
-static void LGControlCenterApplyActivityControlMaterialView(UIView *materialView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerState(materialView);
-        return;
-    }
-    if (!LGControlCenterClassNameEquals(materialView, @"MTMaterialView")) return;
-
-    UIView *contentView = materialView.superview;
-    if (!LGControlCenterClassNameEquals(contentView, @"_FCUIActivityControlContentView")) return;
-    if (!LGControlCenterClassNameEquals(contentView.superview, @"FCUIActivityControl")) return;
-
-    CGFloat cornerRadius = materialView.layer.cornerRadius;
-    if (cornerRadius <= 0.0) {
-        cornerRadius = CGRectGetHeight(materialView.bounds) * 0.5;
-    }
-    LGControlCenterEnsureGlassForMaterialView(materialView, cornerRadius);
-}
-
-static void LGControlCenterCirclifyToggleFillView(UIView *buttonModuleView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(buttonModuleView);
-        return;
-    }
-    if (!LGControlCenterClassNameEquals(buttonModuleView, @"CCUIButtonModuleView")) return;
-
-    UIView *moduleView = nil;
-    UIView *ancestor = buttonModuleView.superview;
-    while (ancestor) {
-        if (LGControlCenterClassNameEquals(ancestor, @"CCUIContentModuleContainerView")) {
-            moduleView = ancestor;
-            break;
-        }
-        ancestor = ancestor.superview;
-    }
-    if (!moduleView || !LGControlCenterIsModuleCandidate(moduleView)) return;
-
-    CGFloat cornerRadius = LGControlCenterModuleCornerRadius(moduleView);
-    for (UIView *child in buttonModuleView.subviews) {
-        if (LGControlCenterClassNameEquals(child, @"UIView")) {
-            LGControlCenterApplyCornerRadius(child, cornerRadius);
-        }
+static void roundContinuousSliderFill(UIView *slider) {
+    BOOL eligible = !ccHasSBElasticHierarchy(slider);
+    for (UIView *child in slider.subviews) {
+        if (!isExactClass(child, @"UIView")) continue;
+        for (UIView *gc in child.subviews)
+            if (isExactClass(gc, @"MTMaterialView"))
+                ccApplyOrRestoreRound(gc, ccPillRadius(gc), eligible);
     }
 }
 
-static void LGControlCenterApplySliderSiblingMaterialRadius(UIView *sliderView) {
-    UIView *parent = sliderView.superview;
-    if (!parent) return;
-    if (!LGControlCenterClassNameEquals(parent, @"CCUIContentModuleContentContainer") &&
-        !LGControlCenterClassNameEquals(parent, @"CCUIContentModuleContentContainerView")) return;
-
-    for (UIView *sibling in parent.subviews) {
-        if (sibling == sliderView) continue;
-        if (LGControlCenterClassNameEquals(sibling, @"MTMaterialView")) {
-            LGControlCenterApplyGlassCornerRadius(sibling, CGRectGetWidth(sibling.bounds) * 0.5);
-        }
+static void roundMRUSliderFill(UIView *slider) {
+    BOOL eligible = !ccHasSBElasticHierarchy(slider);
+    for (UIView *child in slider.subviews) {
+        if (!isExactClass(child, @"UIView")) continue;
+        for (UIView *gc in child.subviews)
+            if (isExactClass(gc, @"MTMaterialView"))
+                ccApplyOrRestoreRound(gc, ccPillRadius(gc), eligible);
     }
 }
 
-static void LGControlCenterApplySliderFillRadius(UIView *sliderView) {
-    for (UIView *child in sliderView.subviews) {
-        if (!LGControlCenterClassNameEquals(child, @"UIView")) continue;
-        for (UIView *grandchild in child.subviews) {
-            if (LGControlCenterClassNameEquals(grandchild, @"MTMaterialView")) {
-                LGControlCenterApplyCornerRadius(grandchild, CGRectGetWidth(grandchild.bounds) * 0.5);
-            }
-        }
-    }
+static void roundToggleFills(UIView *buttonModule) {
+    UIView *module = ccModuleAncestor(buttonModule);
+    BOOL eligible = module && ccIsModuleCandidate(module) &&
+                    !ccHasSBElasticHierarchy(buttonModule) &&
+                    !ccHasSBElasticHierarchy(module);
+    CGFloat r = eligible ? ccModuleCornerRadius(module) : 0.0;
+    for (UIView *child in buttonModule.subviews)
+        if (isExactClass(child, @"UIView")) ccApplyOrRestoreRound(child, r, eligible);
 }
 
-static BOOL LGControlCenterHasAncestorNamed(UIView *view, NSString *className) {
-    if (!view || !className.length) return NO;
-    UIView *ancestor = view.superview;
-    while (ancestor) {
-        if (LGControlCenterClassNameEquals(ancestor, className)) return YES;
-        ancestor = ancestor.superview;
-    }
-    return NO;
+static void roundModuleContainer(UIView *module) {
+    if (!isExactClass(module, @"CCUIContentModuleContainerView")) return;
+    BOOL eligible = ccIsModuleCandidate(module) && !ccHasSBElasticHierarchy(module);
+    CGFloat r = eligible ? ccModuleCornerRadius(module) : 0.0;
+    ccApplyOrRestoreRound(module, r, eligible);
+    for (UIView *sub in module.subviews)
+        if (isExactClass(sub, @"CCUIContentModuleContentContainer") ||
+            isExactClass(sub, @"CCUIContentModuleContentContainerView"))
+            ccApplyOrRestoreRound(sub, r, eligible);
 }
 
-static BOOL LGControlCenterMaterialIsInsideSlider(UIView *materialView) {
-    return LGControlCenterHasAncestorNamed(materialView, @"CCUIContinuousSliderView") ||
-        LGControlCenterHasAncestorNamed(materialView, @"MRUContinuousSliderView");
-}
-
-static void LGControlCenterApplySliderViewRadii(UIView *sliderView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(sliderView);
-        return;
-    }
-    if (!LGControlCenterClassNameEquals(sliderView, @"CCUIContinuousSliderView")) return;
-
-    LGControlCenterApplySliderSiblingMaterialRadius(sliderView);
-    LGControlCenterApplySliderFillRadius(sliderView);
-}
-
-static void LGControlCenterApplyMRUSliderViewRadii(UIView *sliderView) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(sliderView);
-        return;
-    }
-    if (!LGControlCenterClassNameEquals(sliderView, @"MRUContinuousSliderView")) return;
-
-    for (UIView *child in sliderView.subviews) {
-        if (LGControlCenterClassNameEquals(child, @"MTMaterialView")) {
-            LGControlCenterApplyGlassCornerRadius(child, CGRectGetWidth(child.bounds) * 0.5);
-        } else if (LGControlCenterClassNameEquals(child, @"UIView")) {
-            for (UIView *grandchild in child.subviews) {
-                if (LGControlCenterClassNameEquals(grandchild, @"MTMaterialView")) {
-                    LGControlCenterApplyCornerRadius(grandchild, CGRectGetWidth(grandchild.bounds) * 0.5);
-                }
-            }
-        }
-    }
-}
-
-static void LGControlCenterRoundContentContainerMaterialViews(UIView *contentContainer) {
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(contentContainer);
-        return;
-    }
-    if (!LGControlCenterClassNameEquals(contentContainer, @"CCUIContentModuleContentContainer") &&
-        !LGControlCenterClassNameEquals(contentContainer, @"CCUIContentModuleContentContainerView")) return;
-
-    @try {
-        BOOL expanded = [contentContainer valueForKey:@"_expanded"] != nil &&
-                        [[contentContainer valueForKey:@"_expanded"] boolValue];
-        if (expanded) return;
-    } @catch (NSException *e) {}
-
-    UIView *moduleView = nil;
-    UIView *ancestor = contentContainer.superview;
-    while (ancestor) {
-        if (LGControlCenterClassNameEquals(ancestor, @"CCUIContentModuleContainerView")) {
-            moduleView = ancestor;
-            break;
-        }
-        ancestor = ancestor.superview;
-    }
-
-    NSMutableArray *stack = [NSMutableArray arrayWithArray:contentContainer.subviews];
-    while (stack.count > 0) {
-        UIView *view = stack.lastObject;
-        [stack removeLastObject];
-
-        if (LGControlCenterClassNameEquals(view, @"MTMaterialView")) {
-            CGFloat width = CGRectGetWidth(view.bounds);
-            CGFloat height = CGRectGetHeight(view.bounds);
-
-            if (moduleView && LGControlCenterIsModuleCandidate(moduleView)) {
-                if (LGControlCenterMaterialIsInsideSlider(view)) {
-                    LGControlCenterApplyCornerRadius(view, LGControlCenterModuleCornerRadius(moduleView));
-                } else {
-                    LGControlCenterApplyGlassCornerRadius(view, LGControlCenterModuleCornerRadius(moduleView));
-                }
-            } else if (width > 100.0 && height < 100.0) {
-                if (LGControlCenterMaterialIsInsideSlider(view)) {
-                    LGControlCenterApplyCornerRadius(view, height * 0.5);
-                } else {
-                    LGControlCenterApplyGlassCornerRadius(view, height * 0.5);
-                }
-            } else {
-                LGControlCenterApplyCornerRadius(view, width * 0.5);
-            }
-        }
-
-        [stack addObjectsFromArray:view.subviews];
-    }
-}
-
-static void LGControlCenterApplyKnownView(UIView *view) {
-    if (LGControlCenterClassNameEquals(view, @"CCUIContentModuleContainerView")) {
-        LGControlCenterCirclifyModuleView(view);
-    } else if (LGControlCenterClassNameEquals(view, @"CCUIContentModuleContentContainer") ||
-               LGControlCenterClassNameEquals(view, @"CCUIContentModuleContentContainerView")) {
-        LGControlCenterRoundContentContainerMaterialViews(view);
-    } else if (LGControlCenterClassNameEquals(view, @"MTMaterialView")) {
-        LGControlCenterCirclifySquareModuleMaterialView(view);
-        LGControlCenterCirclifyMediaPlayerMaterialView(view);
-        LGControlCenterCirclify1x2MaterialView(view);
-        LGControlCenterCirclifyFocusMaterialView(view);
-        LGControlCenterApplyActivityControlMaterialView(view);
-    } else if (LGControlCenterClassNameEquals(view, @"CCUIButtonModuleView")) {
-        LGControlCenterCirclifyToggleFillView(view);
-    } else if (LGControlCenterClassNameEquals(view, @"CCUIContinuousSliderView")) {
-        LGControlCenterApplySliderViewRadii(view);
-    } else if (LGControlCenterClassNameEquals(view, @"MRUContinuousSliderView")) {
-        LGControlCenterApplyMRUSliderViewRadii(view);
-    }
-}
-
-static void LGControlCenterScanViewTree(UIView *root) {
-    if (!root) return;
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(root);
-        LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-    LGControlCenterApplyFullscreenBackdropBlur(root);
-    __block NSUInteger visited = 0;
-    __block NSUInteger materialCount = 0;
-    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
-    while (stack.count > 0) {
-        UIView *view = stack.lastObject;
-        [stack removeLastObject];
-        visited++;
-        if (LGControlCenterClassNameEquals(view, @"MTMaterialView")) materialCount++;
-        LGControlCenterApplyKnownView(view);
-        for (UIView *subview in view.subviews) {
-            [stack addObject:subview];
-        }
-    }
-    LGDebugLog(@"cc scan root=%@ visited=%lu materials=%lu registered=%lu",
-               LGControlCenterViewSummary(root),
-               (unsigned long)visited,
-               (unsigned long)materialCount,
-               (unsigned long)LGControlCenterLiveCaptureHostRegistry().allObjects.count);
-    LGControlCenterSyncDisplayLinkActivity();
-}
-
-static void LGControlCenterScheduleViewScan(UIView *root) {
-    if (!root) return;
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(root);
-        LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-    __weak UIView *weakRoot = root;
-    if (sControlCenterScanPending) return;
-    sControlCenterScanPending = YES;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        sControlCenterScanPending = NO;
-        LGControlCenterScanViewTree(weakRoot);
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        LGControlCenterScanViewTree(weakRoot);
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        LGControlCenterScanViewTree(weakRoot);
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.42 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        LGControlCenterScanViewTree(weakRoot);
-    });
-}
-
-%group LGControlCenterSpringBoard
+#pragma mark - hooks
 
 %hook CCUIContentModuleContainerView
-
-- (void)willMoveToWindow:(UIWindow *)newWindow {
-    LGControlCenterCirclifyModuleView((UIView *)self);
-    %orig;
-    LGControlCenterCirclifyModuleView((UIView *)self);
-}
-
-- (void)didMoveToWindow {
-    %orig;
-    LGControlCenterCirclifyModuleView((UIView *)self);
-}
-
-- (void)layoutSubviews {
-    %orig;
-    LGControlCenterCirclifyModuleView((UIView *)self);
-}
-
+- (void)layoutSubviews { %orig; roundModuleContainer((UIView *)self); }
+- (void)didMoveToWindow { %orig; roundModuleContainer((UIView *)self); }
 %end
 
-%hook CCUIContentModuleContentContainerView
-
-- (void)didMoveToWindow {
-    %orig;
-    LGControlCenterRoundContentContainerMaterialViews((UIView *)self);
-}
-
-- (void)layoutSubviews {
-    %orig;
-    LGControlCenterRoundContentContainerMaterialViews((UIView *)self);
-}
-
+%hook CCUIButtonModuleView
+- (void)layoutSubviews { %orig; roundToggleFills((UIView *)self); }
+- (void)didMoveToWindow { %orig; roundToggleFills((UIView *)self); }
 %end
 
-%hook CCUIContentModuleContentContainer
-
-- (void)didMoveToWindow {
-    %orig;
-    LGControlCenterRoundContentContainerMaterialViews((UIView *)self);
-}
-
-- (void)layoutSubviews {
-    %orig;
-    LGControlCenterRoundContentContainerMaterialViews((UIView *)self);
-}
-
+%hook CCUIContinuousSliderView
+- (void)layoutSubviews { %orig; roundContinuousSliderFill((UIView *)self); }
+- (void)didMoveToWindow { %orig; roundContinuousSliderFill((UIView *)self); }
 %end
 
-%hook MTMaterialView
-
-- (void)willMoveToSuperview:(UIView *)newSuperview {
-    LGControlCenterScheduleFullscreenBackdropMaterialBlur((UIView *)self);
-    LGControlCenterCirclifySquareModuleMaterialView((UIView *)self);
-    LGControlCenterCirclifyMediaPlayerMaterialView((UIView *)self);
-    LGControlCenterCirclify1x2MaterialView((UIView *)self);
-    LGControlCenterCirclifyFocusMaterialView((UIView *)self);
-    LGControlCenterApplyActivityControlMaterialView((UIView *)self);
-    %orig;
-    LGControlCenterScheduleFullscreenBackdropMaterialBlur((UIView *)self);
-    LGControlCenterCirclifySquareModuleMaterialView((UIView *)self);
-    LGControlCenterCirclifyMediaPlayerMaterialView((UIView *)self);
-    LGControlCenterCirclify1x2MaterialView((UIView *)self);
-    LGControlCenterCirclifyFocusMaterialView((UIView *)self);
-    LGControlCenterApplyActivityControlMaterialView((UIView *)self);
-}
-
-- (void)didMoveToSuperview {
-    %orig;
-    LGControlCenterScheduleFullscreenBackdropMaterialBlur((UIView *)self);
-    LGControlCenterCirclifySquareModuleMaterialView((UIView *)self);
-    LGControlCenterCirclifyMediaPlayerMaterialView((UIView *)self);
-    LGControlCenterCirclify1x2MaterialView((UIView *)self);
-    LGControlCenterCirclifyFocusMaterialView((UIView *)self);
-    LGControlCenterApplyActivityControlMaterialView((UIView *)self);
-}
-
-- (void)willMoveToWindow:(UIWindow *)newWindow {
-    LGControlCenterScheduleFullscreenBackdropMaterialBlur((UIView *)self);
-    LGControlCenterCirclifySquareModuleMaterialView((UIView *)self);
-    LGControlCenterCirclifyMediaPlayerMaterialView((UIView *)self);
-    LGControlCenterCirclify1x2MaterialView((UIView *)self);
-    LGControlCenterCirclifyFocusMaterialView((UIView *)self);
-    LGControlCenterApplyActivityControlMaterialView((UIView *)self);
-    %orig;
-    LGControlCenterScheduleFullscreenBackdropMaterialBlur((UIView *)self);
-    LGControlCenterCirclifySquareModuleMaterialView((UIView *)self);
-    LGControlCenterCirclifyMediaPlayerMaterialView((UIView *)self);
-    LGControlCenterCirclify1x2MaterialView((UIView *)self);
-    LGControlCenterCirclifyFocusMaterialView((UIView *)self);
-    LGControlCenterApplyActivityControlMaterialView((UIView *)self);
-}
-
-- (void)didMoveToWindow {
-    %orig;
-    LGControlCenterScheduleFullscreenBackdropMaterialBlur((UIView *)self);
-    LGControlCenterCirclifySquareModuleMaterialView((UIView *)self);
-    LGControlCenterCirclifyMediaPlayerMaterialView((UIView *)self);
-    LGControlCenterCirclify1x2MaterialView((UIView *)self);
-    LGControlCenterCirclifyFocusMaterialView((UIView *)self);
-    LGControlCenterApplyActivityControlMaterialView((UIView *)self);
-}
-
-- (void)layoutSubviews {
-    %orig;
-    LGControlCenterScheduleFullscreenBackdropMaterialBlur((UIView *)self);
-    LGControlCenterCirclifySquareModuleMaterialView((UIView *)self);
-    LGControlCenterCirclifyMediaPlayerMaterialView((UIView *)self);
-    LGControlCenterCirclify1x2MaterialView((UIView *)self);
-    LGControlCenterCirclifyFocusMaterialView((UIView *)self);
-    LGControlCenterApplyActivityControlMaterialView((UIView *)self);
-}
-
+%hook MRUContinuousSliderView
+- (void)layoutSubviews { %orig; roundMRUSliderFill((UIView *)self); }
+- (void)didMoveToWindow { %orig; roundMRUSliderFill((UIView *)self); }
 %end
 
-%hook UIVisualEffectView
+%hook CCUIModularControlCenterOverlayViewController
 
-- (void)didMoveToWindow {
+- (void)viewWillAppear:(BOOL)animated {
     %orig;
+    UIView *root = ((UIViewController *)self).view;
+    ccScheduleFullscreenBackdropStyle(root);
+
+    ccSetFullscreenDimAlpha(root, 0.0);
 }
 
-- (void)layoutSubviews {
+- (void)viewDidAppear:(BOOL)animated {
     %orig;
+    UIView *root = ((UIViewController *)self).view;
+    ccApplyFullscreenBackdropStyle(root);
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    %orig;
+    UIView *root = ((UIViewController *)self).view;
+    ccApplyFullscreenBackdropStyle(root);
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    %orig;
+
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    UIView *root = ((UIViewController *)self).view;
+    ccApplyFullscreenBackdropStyle(root);
 }
 
 %end
@@ -1275,37 +689,26 @@ static void LGControlCenterScheduleViewScan(UIView *root) {
 %hook CAFilter
 
 - (void)setValue:(id)value forKey:(NSString *)key {
-    if (!sSpecularOnlyBlurScaleApplying &&
-        LGSpecularOnlyExperimentalEnabled() &&
-        LGSpecularOnlyBlurScalingAllowedForObject(self) &&
-        LGControlCenterIsBlurRadiusKey(key)) {
-        value = LGSpecularOnlyScaledBlurRadiusValue(value);
-    }
-    NSNumber *radius = objc_getAssociatedObject(self, kControlCenterFullscreenBlurCapKey);
-    if (radius && LGControlCenterEnabled() && LGControlCenterIsBlurRadiusKey(key)) {
-        value = LGControlCenterClampedBlurRadiusValue(value, radius.doubleValue);
+    UIView *overlayRoot = nil;
+    if (ccObjectHasBlurCap(self) && lgHostEnabled(@"ControlCenter") && ccIsBlurRadiusKey(key)) {
+        overlayRoot = objc_getAssociatedObject(self, kCCFullscreenOverlayRootKey);
+        value = ccClampedBlurRadiusValue(value, ccFullscreenBlurRadius());
     }
     %orig(value, key);
+    if (overlayRoot) ccKickFullscreenDimSync(overlayRoot);
 }
 
 - (void)setValue:(id)value forKeyPath:(NSString *)keyPath {
-    if (!sSpecularOnlyBlurScaleApplying &&
-        LGSpecularOnlyExperimentalEnabled() &&
-        LGSpecularOnlyBlurScalingAllowedForObject(self) &&
-        [keyPath isKindOfClass:[NSString class]]) {
+    UIView *overlayRoot = nil;
+    if (ccObjectHasBlurCap(self) && lgHostEnabled(@"ControlCenter") && [keyPath isKindOfClass:NSString.class]) {
         NSString *lastKey = [keyPath componentsSeparatedByString:@"."].lastObject;
-        if (LGControlCenterIsBlurRadiusKey(lastKey)) {
-            value = LGSpecularOnlyScaledBlurRadiusValue(value);
-        }
-    }
-    NSNumber *radius = objc_getAssociatedObject(self, kControlCenterFullscreenBlurCapKey);
-    if (radius && LGControlCenterEnabled() && [keyPath isKindOfClass:[NSString class]]) {
-        NSString *lastKey = [keyPath componentsSeparatedByString:@"."].lastObject;
-        if (LGControlCenterIsBlurRadiusKey(lastKey)) {
-            value = LGControlCenterClampedBlurRadiusValue(value, radius.doubleValue);
+        if (ccIsBlurRadiusKey(lastKey)) {
+            overlayRoot = objc_getAssociatedObject(self, kCCFullscreenOverlayRootKey);
+            value = ccClampedBlurRadiusValue(value, ccFullscreenBlurRadius());
         }
     }
     %orig(value, keyPath);
+    if (overlayRoot) ccKickFullscreenDimSync(overlayRoot);
 }
 
 %end
@@ -1313,179 +716,67 @@ static void LGControlCenterScheduleViewScan(UIView *root) {
 %hook CALayer
 
 - (void)setFilters:(NSArray *)filters {
-    if (LGSpecularOnlyExperimentalEnabled() && LGSpecularOnlyBlurScalingAllowedForObject(self)) {
-        LGSpecularOnlyScaleBlurFilterArray(filters);
-    }
-    NSNumber *radius = objc_getAssociatedObject(self, kControlCenterFullscreenBlurCapKey);
-    if (radius && LGControlCenterEnabled()) {
-        LGControlCenterClampBlurFilterArray(filters, radius.doubleValue);
+    UIView *overlayRoot = nil;
+    CGFloat incomingBlurRadius = -1.0;
+    if (ccObjectHasBlurCap(self) && lgHostEnabled(@"ControlCenter")) {
+        overlayRoot = objc_getAssociatedObject(self, kCCFullscreenOverlayRootKey);
+        incomingBlurRadius = ccBlurRadiusFromFilters(filters);
+        ccAssociateOverlayRootWithFilters(filters, overlayRoot);
+        ccSetBlurCapOnFilters(filters, YES, ccFullscreenBlurRadius());
     }
     %orig(filters);
+
+    if (overlayRoot && incomingBlurRadius >= 0.0) {
+        ccKickFullscreenDimSync(overlayRoot);
+    }
 }
 
 - (void)setValue:(id)value forKey:(NSString *)key {
-    if (LGSpecularOnlyExperimentalEnabled() &&
-        LGSpecularOnlyBlurScalingAllowedForObject(self) &&
-        [key isEqualToString:@"backgroundFilters"]) {
-        LGSpecularOnlyScaleBlurFilterArray(value);
-    }
-    NSNumber *radius = objc_getAssociatedObject(self, kControlCenterFullscreenBlurCapKey);
-    if (radius && LGControlCenterEnabled() && [key isEqualToString:@"backgroundFilters"]) {
-        LGControlCenterClampBlurFilterArray(value, radius.doubleValue);
+    UIView *overlayRoot = nil;
+    CGFloat incomingBlurRadius = -1.0;
+    if (ccObjectHasBlurCap(self) && lgHostEnabled(@"ControlCenter") && [key isEqualToString:@"backgroundFilters"]) {
+        overlayRoot = objc_getAssociatedObject(self, kCCFullscreenOverlayRootKey);
+        incomingBlurRadius = ccBlurRadiusFromFilters(value);
+        ccAssociateOverlayRootWithFilters(value, overlayRoot);
+        ccSetBlurCapOnFilters(value, YES, ccFullscreenBlurRadius());
     }
     %orig(value, key);
+    if (overlayRoot && incomingBlurRadius >= 0.0) {
+        ccKickFullscreenDimSync(overlayRoot);
+    }
 }
 
 - (void)setValue:(id)value forKeyPath:(NSString *)keyPath {
-    if (LGSpecularOnlyExperimentalEnabled() &&
-        LGSpecularOnlyBlurScalingAllowedForObject(self) &&
-        [keyPath isKindOfClass:[NSString class]]) {
+    if (ccObjectHasBlurCap(self) && lgHostEnabled(@"ControlCenter") && [keyPath isKindOfClass:NSString.class]) {
         NSString *lastKey = [keyPath componentsSeparatedByString:@"."].lastObject;
-        if (LGControlCenterIsBlurRadiusKey(lastKey)) {
-            value = LGSpecularOnlyScaledBlurRadiusValue(value);
-        }
-    }
-    NSNumber *radius = objc_getAssociatedObject(self, kControlCenterFullscreenBlurCapKey);
-    if (radius && LGControlCenterEnabled() && [keyPath isKindOfClass:[NSString class]]) {
-        NSString *lastKey = [keyPath componentsSeparatedByString:@"."].lastObject;
-        if (LGControlCenterIsBlurRadiusKey(lastKey)) {
-            value = LGControlCenterClampedBlurRadiusValue(value, radius.doubleValue);
+        if (ccIsBlurRadiusKey(lastKey)) {
+            value = ccClampedBlurRadiusValue(value, ccFullscreenBlurRadius());
         }
     }
     %orig(value, keyPath);
 }
 
 - (void)addAnimation:(CAAnimation *)animation forKey:(NSString *)key {
-    if (LGSpecularOnlyExperimentalEnabled() && LGSpecularOnlyBlurScalingAllowedForObject(self)) {
-        LGSpecularOnlyScaleBlurAnimation(animation);
-    }
-    NSNumber *radius = objc_getAssociatedObject(self, kControlCenterFullscreenBlurCapKey);
-    if (radius && LGControlCenterEnabled()) {
-        LGControlCenterClampBlurAnimation(animation, radius.doubleValue);
+    if (ccObjectHasBlurCap(self) && lgHostEnabled(@"ControlCenter")) {
+        ccClampBlurAnimation(animation, ccFullscreenBlurRadius());
     }
     %orig(animation, key);
 }
 
 %end
 
-%hook CCUIButtonModuleView
-
-- (void)willMoveToWindow:(UIWindow *)newWindow {
-    %orig;
-    LGControlCenterCirclifyToggleFillView((UIView *)self);
-}
-
-- (void)didMoveToWindow {
-    %orig;
-    LGControlCenterCirclifyToggleFillView((UIView *)self);
-}
-
-- (void)layoutSubviews {
-    %orig;
-    LGControlCenterCirclifyToggleFillView((UIView *)self);
-}
-
-%end
-
-%hook CCUIContinuousSliderView
-
-- (void)willMoveToWindow:(UIWindow *)newWindow {
-    %orig;
-    LGControlCenterApplySliderViewRadii((UIView *)self);
-}
-
-- (void)didMoveToWindow {
-    %orig;
-    LGControlCenterApplySliderViewRadii((UIView *)self);
-}
-
-- (void)layoutSubviews {
-    %orig;
-    LGControlCenterApplySliderViewRadii((UIView *)self);
-}
-
-%end
-
-%hook MRUContinuousSliderView
-
-- (void)willMoveToWindow:(UIWindow *)newWindow {
-    %orig;
-    LGControlCenterApplyMRUSliderViewRadii((UIView *)self);
-}
-
-- (void)didMoveToWindow {
-    %orig;
-    LGControlCenterApplyMRUSliderViewRadii((UIView *)self);
-}
-
-- (void)layoutSubviews {
-    %orig;
-    LGControlCenterApplyMRUSliderViewRadii((UIView *)self);
-}
-
-%end
-
-%hook CCUIModularControlCenterOverlayViewController
-
-- (void)viewWillAppear:(BOOL)animated {
-    %orig;
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(((UIViewController *)self).view);
-        LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-    LGControlCenterResetLiveBackdrops(@"viewWillAppear");
-    LGControlCenterScheduleFullscreenBackdropBlur(((UIViewController *)self).view);
-    LGControlCenterScheduleViewScan(((UIViewController *)self).view);
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(((UIViewController *)self).view);
-        LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-    LGControlCenterScheduleFullscreenBackdropBlur(((UIViewController *)self).view);
-    LGControlCenterScheduleViewScan(((UIViewController *)self).view);
-}
-
-- (void)viewWillDisappear:(BOOL)animated {
-    if (LGControlCenterEnabled()) {
-        LGControlCenterResetLiveBackdrops(@"viewWillDisappear");
-    } else {
-        LGControlCenterRestoreCornerStateInTree(((UIViewController *)self).view);
-        LGControlCenterSyncDisplayLinkActivity();
-    }
-    %orig;
-}
-
-- (void)viewDidDisappear:(BOOL)animated {
-    %orig;
-    if (LGControlCenterEnabled()) {
-        LGControlCenterResetLiveBackdrops(@"viewDidDisappear");
-    } else {
-        LGControlCenterRestoreCornerStateInTree(((UIViewController *)self).view);
-    }
-    LGControlCenterSyncDisplayLinkActivity();
-}
-
-- (void)viewDidLayoutSubviews {
-    %orig;
-    if (!LGControlCenterEnabled()) {
-        LGControlCenterRestoreCornerStateInTree(((UIViewController *)self).view);
-        LGControlCenterSyncDisplayLinkActivity();
-        return;
-    }
-    LGControlCenterScheduleFullscreenBackdropBlur(((UIViewController *)self).view);
-    LGControlCenterScheduleViewScan(((UIViewController *)self).view);
-}
-
-%end
-
-%end
-
 %ctor {
-    if (!LGIsSpringBoardProcess()) return;
-    %init(LGControlCenterSpringBoard);
+    lgObservePreferenceReload(^{
+        if (!lgHostEnabled(@"ControlCenter")) ccRestoreAllRoundedViews();
+        for (UIView *root in ccOverlayRoots().allObjects) {
+            ccApplyFullscreenBackdropStyle(root);
+            ccKickFullscreenDimSync(root);
+        }
+    });
+
+    LGRegisterMaterialHost(@"ControlCenter", 110, ^BOOL(UIView *material) {
+        return ccGlassRadiusForMaterial(material) >= 0.0;
+    }, UIEdgeInsetsZero, ^CGFloat(UIView *material) {
+        return ccGlassRadiusForMaterial(material);
+    }, nil, nil);
 }

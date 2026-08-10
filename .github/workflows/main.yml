@@ -82,6 +82,9 @@ jobs:
           brew install ldid make
           echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
 
+      - name: audit localizations
+        run: tools/localizations.rb validate
+
       - name: build (${{ matrix.scheme }})
         run: |
           SCHEME_FLAG=""

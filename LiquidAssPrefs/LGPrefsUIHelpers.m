@@ -1,14 +1,12 @@
 #import "LGPrefsUIHelpers.h"
 #import "LGPrefsDataSupport.h"
-#import "../Shared/LGBackButtonSupport.h"
-#import "../Shared/LGBannerCaptureSupport.h"
-#import "../Shared/LGGlassRenderer.h"
-#import "../Shared/LGHookSupport.h"
+#import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGSharedSupport.h"
 #import <notify.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
+#import <math.h>
 
 void * const kLGDefaultValueKey = (void *)&kLGDefaultValueKey;
 void * const kLGValueLabelKey = (void *)&kLGValueLabelKey;
@@ -22,8 +20,11 @@ void * const kLGControlTitleKey = (void *)&kLGControlTitleKey;
 void * const kLGControlSubtitleKey = (void *)&kLGControlSubtitleKey;
 void * const kLGControlledByEnabledKey = (void *)&kLGControlledByEnabledKey;
 
-@interface LGTopFadeView : UIView
-@end
+static NSURL *LGTemporaryPreferencesExportURL(void) {
+    NSString *filename = [NSString stringWithFormat:@"liquidass-preferences-%@.json",
+                          NSUUID.UUID.UUIDString.lowercaseString];
+    return [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:filename]];
+}
 
 @interface LGSliderResetAnimator : NSObject
 @property (nonatomic, weak) UISlider *slider;
@@ -62,12 +63,117 @@ void * const kLGControlledByEnabledKey = (void *)&kLGControlledByEnabledKey;
 
 static UIView *LGMakeRespringBar(id target, SEL respringAction, SEL laterAction);
 static void *kLGRespringBarGlassViewKey = &kLGRespringBarGlassViewKey;
-static void *kLGRespringBarBlurViewKey = &kLGRespringBarBlurViewKey;
 static void *kLGRespringBarTintViewKey = &kLGRespringBarTintViewKey;
-static void *kLGRespringBarBackdropViewKey = &kLGRespringBarBackdropViewKey;
-static void *kLGRespringBarLiveReadyKey = &kLGRespringBarLiveReadyKey;
 static NSNumber *LGParseLocalizedDecimalString(NSString *rawText);
 static void LGDismissOverlayPanel(UIView *overlay, UIView *panel);
+
+@interface LGLiveGlassBarButton : UIView
+- (instancetype)initWithTarget:(id)target action:(SEL)action symbolName:(NSString *)symbolName;
+- (void)setPrimaryMenu:(UIMenu *)menu;
+- (void)refreshGlass;
+@end
+
+@implementation LGLiveGlassBarButton {
+    LGLiveBackdropView *_glass;
+    UIView *_tint;
+    UIButton *_button;
+    UIImageView *_glyph;
+    UIViewPropertyAnimator *_pressAnimator;
+}
+
+- (instancetype)initWithTarget:(id)target action:(SEL)action symbolName:(NSString *)symbolName {
+    self = [super initWithFrame:CGRectMake(0.0, 0.0, 44.0, 44.0)];
+    if (!self) return nil;
+    self.backgroundColor = UIColor.clearColor;
+    [self.widthAnchor constraintEqualToConstant:44.0].active = YES;
+    [self.heightAnchor constraintEqualToConstant:44.0].active = YES;
+
+    _glass = [[LGLiveBackdropView alloc] initWithFrame:self.bounds groupName:nil
+                                             filterType:LGFilterTypeForHostPrefix(@"PrefsButton")];
+    _glass.layer.cornerRadius = 22.0;
+    _glass.layer.cornerCurve = kCACornerCurveContinuous;
+    _glass.layer.masksToBounds = YES;
+    [self addSubview:_glass];
+
+    _tint = [[UIView alloc] initWithFrame:self.bounds];
+    _tint.userInteractionEnabled = NO;
+    _tint.layer.cornerRadius = 22.0;
+    _tint.layer.cornerCurve = kCACornerCurveContinuous;
+    _tint.layer.borderWidth = 0.75;
+    _tint.layer.borderColor = [[UIColor separatorColor] colorWithAlphaComponent:0.16].CGColor;
+    _tint.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+        return trait.userInterfaceStyle == UIUserInterfaceStyleDark
+            ? [UIColor colorWithWhite:1.0 alpha:0.06] : [UIColor colorWithWhite:1.0 alpha:0.12];
+    }];
+    [self addSubview:_tint];
+
+    _button = [UIButton buttonWithType:UIButtonTypeCustom];
+    _button.frame = self.bounds;
+    [_button addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
+    [_button addTarget:self action:@selector(setPressed:) forControlEvents:UIControlEventTouchDown];
+    [_button addTarget:self action:@selector(clearPressed:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+    [self addSubview:_button];
+
+    UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:22.0 weight:UIImageSymbolWeightSemibold];
+    _glyph = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbolName withConfiguration:configuration]];
+    _glyph.tintColor = UIColor.labelColor;
+    _glyph.contentMode = UIViewContentModeCenter;
+    _glyph.userInteractionEnabled = NO;
+    [self addSubview:_glyph];
+    return self;
+}
+
+- (CGSize)intrinsicContentSize { return CGSizeMake(44.0, 44.0); }
+- (void)setPrimaryMenu:(UIMenu *)menu {
+    _button.menu = menu;
+    _button.showsMenuAsPrimaryAction = YES;
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    _glass.frame = self.bounds;
+    _tint.frame = self.bounds;
+    _button.frame = self.bounds;
+    _glyph.frame = self.bounds;
+    CGFloat radius = CGRectGetHeight(self.bounds) * 0.5;
+    _glass.layer.cornerRadius = radius;
+    _tint.layer.cornerRadius = radius;
+}
+- (void)lgAnimatePressed:(BOOL)pressed {
+    CALayer *presentation = self.layer.presentationLayer;
+    if (presentation) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        self.transform = CATransform3DGetAffineTransform(presentation.transform);
+        [CATransaction commit];
+    }
+    [_pressAnimator stopAnimation:YES];
+
+    CGFloat mass = 0.8;
+    CGFloat stiffness = 300.0;
+    CGFloat damping = pressed ? 18.0 : 12.0;
+    CGFloat velocity = pressed ? 0.5 : 1.0;
+    CGFloat duration = pressed ? 0.3 : 0.5;
+    UISpringTimingParameters *timing = [[UISpringTimingParameters alloc]
+        initWithMass:mass stiffness:stiffness damping:damping
+     initialVelocity:CGVectorMake(velocity, velocity)];
+    _pressAnimator = [[UIViewPropertyAnimator alloc] initWithDuration:duration timingParameters:timing];
+    _pressAnimator.interruptible = YES;
+    __weak LGLiveGlassBarButton *weakSelf = self;
+    [_pressAnimator addAnimations:^{
+        LGLiveGlassBarButton *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.transform = pressed ? CGAffineTransformMakeScale(1.16, 1.16) : CGAffineTransformIdentity;
+    }];
+    [_pressAnimator addCompletion:^(__unused UIViewAnimatingPosition position) {
+        LGLiveGlassBarButton *strongSelf = weakSelf;
+        if (strongSelf) strongSelf->_pressAnimator = nil;
+    }];
+    [_pressAnimator startAnimation];
+}
+- (void)setPressed:(id)sender { (void)sender; [self lgAnimatePressed:YES]; }
+- (void)clearPressed:(id)sender { (void)sender; [self lgAnimatePressed:NO]; }
+- (void)refreshGlass { [_glass applyFilters]; }
+@end
 
 static UINavigationBarAppearance *LGMakePrefsTransparentNavigationAppearance(void) {
     UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
@@ -96,10 +202,6 @@ void LGInstallScrollableStack(UIViewController *controller,
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [controller.view addSubview:scrollView];
 
-    LGTopFadeView *fadeView = [[LGTopFadeView alloc] initWithFrame:CGRectZero];
-    fadeView.translatesAutoresizingMaskIntoConstraints = NO;
-    [controller.view addSubview:fadeView];
-
     UIStackView *stackView = [[UIStackView alloc] initWithFrame:CGRectZero];
     stackView.axis = UILayoutConstraintAxisVertical;
     stackView.spacing = stackSpacing;
@@ -111,13 +213,6 @@ void LGInstallScrollableStack(UIViewController *controller,
         [stackView.leadingAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.leadingAnchor constant:16.0],
         [stackView.trailingAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.trailingAnchor constant:-16.0],
         [stackView.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor constant:-112.0],
-    ]];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [fadeView.topAnchor constraintEqualToAnchor:controller.view.topAnchor],
-        [fadeView.leadingAnchor constraintEqualToAnchor:controller.view.leadingAnchor],
-        [fadeView.trailingAnchor constraintEqualToAnchor:controller.view.trailingAnchor],
-        [fadeView.bottomAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.topAnchor constant:16.0],
     ]];
 
     if (scrollViewOut) *scrollViewOut = scrollView;
@@ -138,42 +233,17 @@ void LGInstallBottomRespringBar(UIViewController *controller, UIView *__strong *
 
 void LGRefreshRespringBarGlass(UIView *respringBar) {
     if (!respringBar) return;
-    LGSharedGlassView *glassView = objc_getAssociatedObject(respringBar, kLGRespringBarGlassViewKey);
-    UIView *blurView = objc_getAssociatedObject(respringBar, kLGRespringBarBlurViewKey);
+    UIView *glassView = objc_getAssociatedObject(respringBar, kLGRespringBarGlassViewKey);
     UIView *tintView = objc_getAssociatedObject(respringBar, kLGRespringBarTintViewKey);
-    UIColor *customTint = LGCustomTintColorForKey(@"Preferences.RespringBar.CustomTintColor");
-    tintView.backgroundColor = customTint ?: [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
+    tintView.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
         if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
             return [[UIColor whiteColor] colorWithAlphaComponent:0.04];
         }
         return [[UIColor blackColor] colorWithAlphaComponent:0.01];
     }];
-    BOOL glassEnabled = [LGReadPreference(@"Preferences.RespringBar.Enabled", @NO) boolValue];
-    BOOL liveReady = [objc_getAssociatedObject(respringBar, kLGRespringBarLiveReadyKey) boolValue];
-    glassView.hidden = !glassEnabled || !liveReady;
-    blurView.hidden = glassEnabled && liveReady;
-    LGApplyLowBlurRadiusToView(blurView);
-    if (!glassEnabled) {
-        objc_setAssociatedObject(respringBar, kLGRespringBarLiveReadyKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        LGRemoveLiveBackdropCaptureView(respringBar, kLGRespringBarBackdropViewKey);
-        return;
-    }
-    if (!respringBar.window || respringBar.hidden || CGRectIsEmpty(respringBar.bounds)) return;
-
-    CGPoint captureOrigin = CGPointZero;
-    CGSize samplingResolution = CGSizeZero;
-    if (LGCaptureLiveBackdropTextureForHost(respringBar,
-                                            glassView,
-                                            kLGRespringBarBackdropViewKey,
-                                            &captureOrigin,
-                                            &samplingResolution)) {
-        objc_setAssociatedObject(respringBar, kLGRespringBarLiveReadyKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        glassView.hidden = NO;
-        blurView.hidden = YES;
-        glassView.wallpaperOrigin = captureOrigin;
-        glassView.wallpaperSamplingResolution = samplingResolution;
-        [glassView updateOrigin];
-        [glassView scheduleDraw];
+    glassView.hidden = NO;
+    if ([glassView isKindOfClass:[LGLiveBackdropView class]]) {
+        [(LGLiveBackdropView *)glassView applyFilters];
     }
 }
 
@@ -337,100 +407,47 @@ UIView *LGMakeSectionDivider(void) {
 }
 
 UIBarButtonItem *LGMakeCircularBackItem(id target, SEL action) {
-    LGSharedBackButtonView *container = [[LGSharedBackButtonView alloc] initWithTarget:target action:action];
-    return [[UIBarButtonItem alloc] initWithCustomView:container];
+    LGLiveGlassBarButton *button = [[LGLiveGlassBarButton alloc] initWithTarget:target action:action symbolName:@"chevron.left"];
+    return [[UIBarButtonItem alloc] initWithCustomView:button];
 }
 
-UIBarButtonItem *LGMakeCircularResetItem(id target, SEL action) {
-    LGSharedBackButtonView *container = [[LGSharedBackButtonView alloc] initWithTarget:target
-                                                                                action:action
-                                                                            symbolName:@"arrow.counterclockwise"];
-    container.accessibilityLabel = LGLocalized(@"prefs.button.reset");
-    return [[UIBarButtonItem alloc] initWithCustomView:container];
+UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL applyAction, SEL resetAction, NSString *resetTitle) {
+    __weak id weakTarget = target;
+    UIAction *apply = [UIAction actionWithTitle:LGLocalized(@"prefs.button.apply")
+                                           image:[UIImage systemImageNamed:@"checkmark"]
+                                      identifier:nil
+                                         handler:^(__kindof UIAction *action) {
+        (void)action;
+        id strongTarget = weakTarget;
+        if (strongTarget && [strongTarget respondsToSelector:applyAction]) {
+            ((void (*)(id, SEL))objc_msgSend)(strongTarget, applyAction);
+        }
+    }];
+    UIAction *reset = [UIAction actionWithTitle:(resetTitle.length ? resetTitle : LGLocalized(@"prefs.button.reset"))
+                                           image:[UIImage systemImageNamed:@"arrow.counterclockwise"]
+                                      identifier:nil
+                                         handler:^(__kindof UIAction *action) {
+        (void)action;
+        id strongTarget = weakTarget;
+        if (strongTarget && [strongTarget respondsToSelector:resetAction]) {
+            ((void (*)(id, SEL))objc_msgSend)(strongTarget, resetAction);
+        }
+    }];
+    UIMenu *menu = [UIMenu menuWithTitle:@"" children:@[ apply, reset ]];
+    LGLiveGlassBarButton *button = [[LGLiveGlassBarButton alloc]
+        initWithTarget:nil action:nil symbolName:@"line.3.horizontal"];
+    [button setPrimaryMenu:menu];
+    button.accessibilityLabel = LGLocalized(@"prefs.button.more");
+    UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithCustomView:button];
+    item.accessibilityLabel = button.accessibilityLabel;
+    return item;
 }
 
 void LGRefreshCircularBackItem(UIBarButtonItem *item) {
-    UIView *customView = item.customView;
-    if ([customView isKindOfClass:[LGSharedBackButtonView class]]) {
-        [(LGSharedBackButtonView *)customView setGlassEnabled:LGReadPreference(@"Preferences.BackButton.Enabled", @NO).boolValue];
-        [(LGSharedBackButtonView *)customView refreshBackdropAfterScreenUpdates:NO];
+    if ([item.customView isKindOfClass:[LGLiveGlassBarButton class]]) {
+        [(LGLiveGlassBarButton *)item.customView refreshGlass];
     }
 }
-
-@implementation LGTopFadeView {
-    UIView *_blurView;
-    CAGradientLayer *_blurMaskLayer;
-    CAGradientLayer *_tintLayer;
-}
-
-- (void)lg_updateGradientColors {
-    UIColor *maskColor = UIColor.blackColor;
-    _blurMaskLayer.colors = @[
-        (__bridge id)[maskColor colorWithAlphaComponent:1.0].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.96].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.78].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.34].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.10].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.0].CGColor
-    ];
-    _blurMaskLayer.locations = @[ @0.0, @0.34, @0.62, @0.82, @0.94, @1.0 ];
-
-    UIColor *baseColor = [UIColor systemBackgroundColor];
-    _tintLayer.colors = @[
-        (__bridge id)[baseColor colorWithAlphaComponent:0.86].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.74].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.42].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.14].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.0].CGColor
-    ];
-    _tintLayer.locations = @[ @0.0, @0.36, @0.68, @0.90, @1.0 ];
-}
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (!self) return nil;
-    self.userInteractionEnabled = NO;
-    self.backgroundColor = UIColor.clearColor;
-    _blurView = LGMakeLowBlurFallbackView();
-    _blurView.userInteractionEnabled = NO;
-    _blurView.frame = self.bounds;
-    _blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self addSubview:_blurView];
-    LGApplyLowBlurRadiusToView(_blurView);
-
-    _blurMaskLayer = [CAGradientLayer layer];
-    _blurMaskLayer.startPoint = CGPointMake(0.5, 0.0);
-    _blurMaskLayer.endPoint = CGPointMake(0.5, 1.0);
-    _blurView.layer.mask = _blurMaskLayer;
-
-    _tintLayer = [CAGradientLayer layer];
-    _tintLayer.startPoint = CGPointMake(0.5, 0.0);
-    _tintLayer.endPoint = CGPointMake(0.5, 1.0);
-    [self.layer addSublayer:_tintLayer];
-    [self lg_updateGradientColors];
-    return self;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    _blurView.frame = self.bounds;
-    _blurMaskLayer.frame = self.bounds;
-    _tintLayer.frame = self.bounds;
-    LGApplyLowBlurRadiusToView(_blurView);
-}
-
-- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
-    [super traitCollectionDidChange:previousTraitCollection];
-    if (@available(iOS 13.0, *)) {
-        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
-            [self lg_updateGradientColors];
-        }
-    } else {
-        [self lg_updateGradientColors];
-    }
-}
-
-@end
 
 static NSNumber *LGParseLocalizedDecimalString(NSString *rawText) {
     NSString *trimmed = [rawText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -460,525 +477,84 @@ void LGPresentResetConfirmation(UIViewController *controller) {
 
 void LGPresentResetConfirmationWithBody(UIViewController *controller, NSString *body, SEL resetSelector) {
     if (!controller.view.window) return;
-    UIView *existing = [controller.view viewWithTag:0x1ACE];
-    if (existing) [existing removeFromSuperview];
-
-    UIView *overlay = [[UIView alloc] initWithFrame:controller.view.bounds];
-    overlay.tag = 0x1ACE;
-    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    overlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.24];
-    overlay.alpha = 0.0;
-
-    UIControl *dismissControl = [[UIControl alloc] initWithFrame:overlay.bounds];
-    dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [overlay addSubview:dismissControl];
-
-    UIVisualEffectView *panel =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
-    panel.translatesAutoresizingMaskIntoConstraints = NO;
-    panel.layer.cornerRadius = 32.0;
-    panel.layer.cornerCurve = kCACornerCurveContinuous;
-    panel.layer.masksToBounds = YES;
-    panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
-
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    titleLabel.text = LGLocalized(@"prefs.reset_confirm.title");
-    titleLabel.font = [UIFont systemFontOfSize:24.0 weight:UIFontWeightBold];
-    titleLabel.numberOfLines = 0;
-
-    UILabel *bodyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    bodyLabel.text = body.length ? body : LGLocalized(@"prefs.reset_confirm.body");
-    bodyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
-    bodyLabel.textColor = [UIColor secondaryLabelColor];
-    bodyLabel.numberOfLines = 0;
-
-    UIButton *cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    cancelButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [cancelButton setTitle:LGLocalized(@"prefs.button.cancel") forState:UIControlStateNormal];
-    [cancelButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    cancelButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    cancelButton.backgroundColor = [UIColor systemBlueColor];
-    cancelButton.layer.cornerRadius = 23.0;
-    cancelButton.layer.cornerCurve = kCACornerCurveContinuous;
-    cancelButton.layer.masksToBounds = YES;
-
-    UIButton *resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    resetButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [resetButton setTitle:LGLocalized(@"prefs.button.reset") forState:UIControlStateNormal];
-    [resetButton setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
-    resetButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    resetButton.backgroundColor = [UIColor tertiarySystemFillColor];
-    resetButton.layer.cornerRadius = 23.0;
-    resetButton.layer.cornerCurve = kCACornerCurveContinuous;
-    resetButton.layer.masksToBounds = YES;
-
-    UIStackView *buttonRow = [[UIStackView alloc] initWithArrangedSubviews:@[cancelButton, resetButton]];
-    buttonRow.translatesAutoresizingMaskIntoConstraints = NO;
-    buttonRow.axis = UILayoutConstraintAxisHorizontal;
-    buttonRow.spacing = 12.0;
-    buttonRow.distribution = UIStackViewDistributionFillEqually;
-
-    [overlay addSubview:panel];
-    [panel.contentView addSubview:titleLabel];
-    [panel.contentView addSubview:bodyLabel];
-    [panel.contentView addSubview:buttonRow];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
-        [panel.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor],
-        [panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor constant:20.0],
-        [panel.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor constant:-20.0],
-        [panel.widthAnchor constraintEqualToConstant:320.0],
-        [titleLabel.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:22.0],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [bodyLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:10.0],
-        [bodyLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [bodyLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [buttonRow.topAnchor constraintEqualToAnchor:bodyLabel.bottomAnchor constant:20.0],
-        [buttonRow.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
-        [buttonRow.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
-        [buttonRow.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-16.0],
-        [cancelButton.heightAnchor constraintEqualToConstant:46.0],
-        [resetButton.heightAnchor constraintEqualToConstant:46.0],
-    ]];
-
-    [dismissControl addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [cancelButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [resetButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:LGLocalized(@"prefs.reset_confirm.title")
+                         message:(body.length ? body : LGLocalized(@"prefs.reset_confirm.body"))
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.cancel")
+                  style:UIAlertActionStyleCancel
+                handler:nil]];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.reset")
+                  style:UIAlertActionStyleDestructive
+                handler:^(__unused UIAlertAction *action) {
         if (resetSelector && [controller respondsToSelector:resetSelector]) {
             ((void (*)(id, SEL))objc_msgSend)(controller, resetSelector);
         } else {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.67 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                (int64_t)(0.67 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 LGResetAllPreferences();
             });
         }
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [controller.view addSubview:overlay];
-    [UIView animateWithDuration:0.22 animations:^{
-        overlay.alpha = 1.0;
-        panel.transform = CGAffineTransformIdentity;
-    }];
+    }]];
+    [controller presentViewController:alert animated:YES completion:nil];
 }
 
 void LGPresentRespringConfirmation(UIViewController *controller) {
     if (!controller.view.window) return;
-    UIView *existing = [controller.view viewWithTag:0x1ACF];
-    if (existing) [existing removeFromSuperview];
-
-    UIView *overlay = [[UIView alloc] initWithFrame:controller.view.bounds];
-    overlay.tag = 0x1ACF;
-    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    overlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.24];
-    overlay.alpha = 0.0;
-
-    UIControl *dismissControl = [[UIControl alloc] initWithFrame:overlay.bounds];
-    dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [overlay addSubview:dismissControl];
-
-    UIVisualEffectView *panel =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
-    panel.translatesAutoresizingMaskIntoConstraints = NO;
-    panel.layer.cornerRadius = 32.0;
-    panel.layer.cornerCurve = kCACornerCurveContinuous;
-    panel.layer.masksToBounds = YES;
-    panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
-
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    titleLabel.text = LGLocalized(@"prefs.respring_confirm.title");
-    titleLabel.font = [UIFont systemFontOfSize:24.0 weight:UIFontWeightBold];
-    titleLabel.numberOfLines = 0;
-
-    UILabel *bodyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    bodyLabel.text = LGLocalized(@"prefs.respring_confirm.body");
-    bodyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
-    bodyLabel.textColor = [UIColor secondaryLabelColor];
-    bodyLabel.numberOfLines = 0;
-
-    UIButton *laterButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    laterButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [laterButton setTitle:LGLocalized(@"prefs.button.later") forState:UIControlStateNormal];
-    [laterButton setTitleColor:[UIColor secondaryLabelColor] forState:UIControlStateNormal];
-    laterButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    laterButton.backgroundColor = [UIColor tertiarySystemFillColor];
-    laterButton.layer.cornerRadius = 23.0;
-    laterButton.layer.cornerCurve = kCACornerCurveContinuous;
-    laterButton.layer.masksToBounds = YES;
-
-    UIButton *respringButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    respringButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [respringButton setTitle:LGLocalized(@"prefs.button.respring") forState:UIControlStateNormal];
-    [respringButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    respringButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    respringButton.backgroundColor = [UIColor systemBlueColor];
-    respringButton.layer.cornerRadius = 23.0;
-    respringButton.layer.cornerCurve = kCACornerCurveContinuous;
-    respringButton.layer.masksToBounds = YES;
-
-    UIStackView *buttonRow = [[UIStackView alloc] initWithArrangedSubviews:@[laterButton, respringButton]];
-    buttonRow.translatesAutoresizingMaskIntoConstraints = NO;
-    buttonRow.axis = UILayoutConstraintAxisHorizontal;
-    buttonRow.spacing = 12.0;
-    buttonRow.distribution = UIStackViewDistributionFillEqually;
-
-    [overlay addSubview:panel];
-    [panel.contentView addSubview:titleLabel];
-    [panel.contentView addSubview:bodyLabel];
-    [panel.contentView addSubview:buttonRow];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
-        [panel.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor],
-        [panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor constant:20.0],
-        [panel.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor constant:-20.0],
-        [panel.widthAnchor constraintEqualToConstant:320.0],
-        [titleLabel.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:22.0],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [bodyLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:10.0],
-        [bodyLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [bodyLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [buttonRow.topAnchor constraintEqualToAnchor:bodyLabel.bottomAnchor constant:20.0],
-        [buttonRow.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
-        [buttonRow.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
-        [buttonRow.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-16.0],
-        [laterButton.heightAnchor constraintEqualToConstant:46.0],
-        [respringButton.heightAnchor constraintEqualToConstant:46.0],
-    ]];
-
-    [dismissControl addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [laterButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [respringButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:LGLocalized(@"prefs.respring_confirm.title")
+                         message:LGLocalized(@"prefs.respring_confirm.body")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.later")
+                  style:UIAlertActionStyleCancel
+                handler:nil]];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.respring")
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
         LGSetNeedsRespring(NO);
         notify_post(LGPrefsRespringNotificationCString);
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [controller.view addSubview:overlay];
-    [UIView animateWithDuration:0.22 animations:^{
-        overlay.alpha = 1.0;
-        panel.transform = CGAffineTransformIdentity;
-    }];
-}
-
-void LGPresentInvalidateCachesConfirmation(UIViewController *controller) {
-    if (!controller.view.window) return;
-    UIView *existing = [controller.view viewWithTag:0x1AD0];
-    if (existing) [existing removeFromSuperview];
-
-    UIView *overlay = [[UIView alloc] initWithFrame:controller.view.bounds];
-    overlay.tag = 0x1AD0;
-    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    overlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.24];
-    overlay.alpha = 0.0;
-
-    UIControl *dismissControl = [[UIControl alloc] initWithFrame:overlay.bounds];
-    dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [overlay addSubview:dismissControl];
-
-    UIVisualEffectView *panel =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
-    panel.translatesAutoresizingMaskIntoConstraints = NO;
-    panel.layer.cornerRadius = 32.0;
-    panel.layer.cornerCurve = kCACornerCurveContinuous;
-    panel.layer.masksToBounds = YES;
-    panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
-
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    titleLabel.text = LGLocalized(@"prefs.invalidate_caches_confirm.title");
-    titleLabel.font = [UIFont systemFontOfSize:24.0 weight:UIFontWeightBold];
-    titleLabel.numberOfLines = 0;
-
-    UILabel *bodyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    bodyLabel.text = LGLocalized(@"prefs.invalidate_caches_confirm.body");
-    bodyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
-    bodyLabel.textColor = [UIColor secondaryLabelColor];
-    bodyLabel.numberOfLines = 0;
-
-    UIButton *cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    cancelButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [cancelButton setTitle:LGLocalized(@"prefs.button.cancel") forState:UIControlStateNormal];
-    [cancelButton setTitleColor:[UIColor secondaryLabelColor] forState:UIControlStateNormal];
-    cancelButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    cancelButton.backgroundColor = [UIColor tertiarySystemFillColor];
-    cancelButton.layer.cornerRadius = 23.0;
-    cancelButton.layer.cornerCurve = kCACornerCurveContinuous;
-    cancelButton.layer.masksToBounds = YES;
-
-    UIButton *invalidateButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    invalidateButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [invalidateButton setTitle:LGLocalized(@"prefs.button.invalidate") forState:UIControlStateNormal];
-    [invalidateButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    invalidateButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    invalidateButton.backgroundColor = [UIColor systemBlueColor];
-    invalidateButton.layer.cornerRadius = 23.0;
-    invalidateButton.layer.cornerCurve = kCACornerCurveContinuous;
-    invalidateButton.layer.masksToBounds = YES;
-
-    UIStackView *buttonRow = [[UIStackView alloc] initWithArrangedSubviews:@[cancelButton, invalidateButton]];
-    buttonRow.translatesAutoresizingMaskIntoConstraints = NO;
-    buttonRow.axis = UILayoutConstraintAxisHorizontal;
-    buttonRow.spacing = 12.0;
-    buttonRow.distribution = UIStackViewDistributionFillEqually;
-
-    [overlay addSubview:panel];
-    [panel.contentView addSubview:titleLabel];
-    [panel.contentView addSubview:bodyLabel];
-    [panel.contentView addSubview:buttonRow];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
-        [panel.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor],
-        [panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor constant:20.0],
-        [panel.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor constant:-20.0],
-        [panel.widthAnchor constraintEqualToConstant:320.0],
-        [titleLabel.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:22.0],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [bodyLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:10.0],
-        [bodyLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [bodyLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [buttonRow.topAnchor constraintEqualToAnchor:bodyLabel.bottomAnchor constant:20.0],
-        [buttonRow.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
-        [buttonRow.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
-        [buttonRow.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-16.0],
-        [cancelButton.heightAnchor constraintEqualToConstant:46.0],
-        [invalidateButton.heightAnchor constraintEqualToConstant:46.0],
-    ]];
-
-    [dismissControl addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [cancelButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [invalidateButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGPostInvalidateSnapshotCachesNotification();
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [controller.view addSubview:overlay];
-    [UIView animateWithDuration:0.22 animations:^{
-        overlay.alpha = 1.0;
-        panel.transform = CGAffineTransformIdentity;
-    }];
+    }]];
+    [controller presentViewController:alert animated:YES completion:nil];
 }
 
 void LGPresentReopenSettingsConfirmation(UIViewController *controller) {
     if (!controller.view.window) return;
-    UIView *existing = [controller.view viewWithTag:0x1AD2];
-    if (existing) [existing removeFromSuperview];
-
-    UIView *overlay = [[UIView alloc] initWithFrame:controller.view.bounds];
-    overlay.tag = 0x1AD2;
-    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    overlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.24];
-    overlay.alpha = 0.0;
-
-    UIControl *dismissControl = [[UIControl alloc] initWithFrame:overlay.bounds];
-    dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [overlay addSubview:dismissControl];
-
-    UIVisualEffectView *panel =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
-    panel.translatesAutoresizingMaskIntoConstraints = NO;
-    panel.layer.cornerRadius = 32.0;
-    panel.layer.cornerCurve = kCACornerCurveContinuous;
-    panel.layer.masksToBounds = YES;
-    panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
-
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    titleLabel.text = LGLocalized(@"prefs.reopen_settings.title");
-    titleLabel.font = [UIFont systemFontOfSize:24.0 weight:UIFontWeightBold];
-    titleLabel.numberOfLines = 0;
-
-    UILabel *bodyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    bodyLabel.text = LGLocalized(@"prefs.reopen_settings.body");
-    bodyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
-    bodyLabel.textColor = [UIColor secondaryLabelColor];
-    bodyLabel.numberOfLines = 0;
-
-    UIButton *laterButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    laterButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [laterButton setTitle:LGLocalized(@"prefs.button.later") forState:UIControlStateNormal];
-    [laterButton setTitleColor:[UIColor secondaryLabelColor] forState:UIControlStateNormal];
-    laterButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    laterButton.backgroundColor = [UIColor tertiarySystemFillColor];
-    laterButton.layer.cornerRadius = 23.0;
-    laterButton.layer.cornerCurve = kCACornerCurveContinuous;
-    laterButton.layer.masksToBounds = YES;
-
-    UIButton *reopenButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    reopenButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [reopenButton setTitle:LGLocalized(@"prefs.button.reopen_settings") forState:UIControlStateNormal];
-    [reopenButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    reopenButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    reopenButton.backgroundColor = [UIColor systemBlueColor];
-    reopenButton.layer.cornerRadius = 23.0;
-    reopenButton.layer.cornerCurve = kCACornerCurveContinuous;
-    reopenButton.layer.masksToBounds = YES;
-
-    UIStackView *buttonRow = [[UIStackView alloc] initWithArrangedSubviews:@[laterButton, reopenButton]];
-    buttonRow.translatesAutoresizingMaskIntoConstraints = NO;
-    buttonRow.axis = UILayoutConstraintAxisHorizontal;
-    buttonRow.spacing = 12.0;
-    buttonRow.distribution = UIStackViewDistributionFillEqually;
-
-    [overlay addSubview:panel];
-    [panel.contentView addSubview:titleLabel];
-    [panel.contentView addSubview:bodyLabel];
-    [panel.contentView addSubview:buttonRow];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
-        [panel.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor],
-        [panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor constant:20.0],
-        [panel.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor constant:-20.0],
-        [panel.widthAnchor constraintEqualToConstant:320.0],
-        [titleLabel.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:22.0],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [bodyLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:10.0],
-        [bodyLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [bodyLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [buttonRow.topAnchor constraintEqualToAnchor:bodyLabel.bottomAnchor constant:20.0],
-        [buttonRow.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
-        [buttonRow.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
-        [buttonRow.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-16.0],
-        [laterButton.heightAnchor constraintEqualToConstant:46.0],
-        [reopenButton.heightAnchor constraintEqualToConstant:46.0],
-    ]];
-
-    [dismissControl addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [laterButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [reopenButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.18 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:LGLocalized(@"prefs.reopen_settings.title")
+                         message:LGLocalized(@"prefs.reopen_settings.body")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.later")
+                  style:UIAlertActionStyleCancel
+                handler:nil]];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.reopen_settings")
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+            (int64_t)(0.18 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             LGForceSynchronizePreferences();
             exit(0);
         });
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [controller.view addSubview:overlay];
-    [UIView animateWithDuration:0.22 animations:^{
-        overlay.alpha = 1.0;
-        panel.transform = CGAffineTransformIdentity;
-    }];
+    }]];
+    [controller presentViewController:alert animated:YES completion:nil];
 }
 
 void LGPresentInfoSheet(UIViewController *controller, NSString *title, NSString *message) {
     if (!controller.view.window) return;
-    UIView *existing = [controller.view viewWithTag:0x1AD3];
-    if (existing) [existing removeFromSuperview];
-
-    UIView *overlay = [[UIView alloc] initWithFrame:controller.view.bounds];
-    overlay.tag = 0x1AD3;
-    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    overlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.24];
-    overlay.alpha = 0.0;
-
-    UIControl *dismissControl = [[UIControl alloc] initWithFrame:overlay.bounds];
-    dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [overlay addSubview:dismissControl];
-
-    UIVisualEffectView *panel =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
-    panel.translatesAutoresizingMaskIntoConstraints = NO;
-    panel.layer.cornerRadius = 32.0;
-    panel.layer.cornerCurve = kCACornerCurveContinuous;
-    panel.layer.masksToBounds = YES;
-    panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
-
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    titleLabel.text = title.length ? title : LGLocalized(@"prefs.info.title");
-    titleLabel.font = [UIFont systemFontOfSize:24.0 weight:UIFontWeightBold];
-    titleLabel.numberOfLines = 0;
-
-    UILabel *bodyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    bodyLabel.text = message.length ? message : @"";
-    bodyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
-    bodyLabel.textColor = [UIColor secondaryLabelColor];
-    bodyLabel.numberOfLines = 0;
-
-    UIButton *okButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    okButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [okButton setTitle:LGLocalized(@"prefs.button.ok") forState:UIControlStateNormal];
-    [okButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    okButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    okButton.backgroundColor = [UIColor systemBlueColor];
-    okButton.layer.cornerRadius = 23.0;
-    okButton.layer.cornerCurve = kCACornerCurveContinuous;
-    okButton.layer.masksToBounds = YES;
-
-    [overlay addSubview:panel];
-    [panel.contentView addSubview:titleLabel];
-    [panel.contentView addSubview:bodyLabel];
-    [panel.contentView addSubview:okButton];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
-        [panel.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor],
-        [panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor constant:20.0],
-        [panel.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor constant:-20.0],
-        [panel.widthAnchor constraintEqualToConstant:320.0],
-        [titleLabel.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:22.0],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [bodyLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:10.0],
-        [bodyLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [bodyLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [okButton.topAnchor constraintEqualToAnchor:bodyLabel.bottomAnchor constant:20.0],
-        [okButton.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
-        [okButton.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
-        [okButton.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-16.0],
-        [okButton.heightAnchor constraintEqualToConstant:46.0],
-    ]];
-
-    [dismissControl addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [okButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [controller.view addSubview:overlay];
-    [UIView animateWithDuration:0.22 animations:^{
-        overlay.alpha = 1.0;
-        panel.transform = CGAffineTransformIdentity;
-    }];
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:(title.length ? title : LGLocalized(@"prefs.info.title"))
+                         message:(message.length ? message : @"")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.ok")
+                  style:UIAlertActionStyleDefault
+                handler:nil]];
+    [controller presentViewController:alert animated:YES completion:nil];
 }
 
 void LGPresentConfirmationSheet(UIViewController *controller,
@@ -989,107 +565,22 @@ void LGPresentConfirmationSheet(UIViewController *controller,
                                 BOOL destructive,
                                 void (^confirmBlock)(void)) {
     if (!controller.view.window) return;
-    UIView *existing = [controller.view viewWithTag:0x1AD5];
-    if (existing) [existing removeFromSuperview];
-
-    UIView *overlay = [[UIView alloc] initWithFrame:controller.view.bounds];
-    overlay.tag = 0x1AD5;
-    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    overlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.24];
-    overlay.alpha = 0.0;
-
-    UIControl *dismissControl = [[UIControl alloc] initWithFrame:overlay.bounds];
-    dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [overlay addSubview:dismissControl];
-
-    UIVisualEffectView *panel =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
-    panel.translatesAutoresizingMaskIntoConstraints = NO;
-    panel.layer.cornerRadius = 32.0;
-    panel.layer.cornerCurve = kCACornerCurveContinuous;
-    panel.layer.masksToBounds = YES;
-    panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
-
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    titleLabel.text = title.length ? title : @"";
-    titleLabel.font = [UIFont systemFontOfSize:24.0 weight:UIFontWeightBold];
-    titleLabel.numberOfLines = 0;
-
-    UILabel *bodyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    bodyLabel.text = message.length ? message : @"";
-    bodyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
-    bodyLabel.textColor = [UIColor secondaryLabelColor];
-    bodyLabel.numberOfLines = 0;
-
-    UIButton *cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    cancelButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [cancelButton setTitle:(cancelTitle.length ? cancelTitle : LGLocalized(@"prefs.button.cancel")) forState:UIControlStateNormal];
-    [cancelButton setTitleColor:[UIColor secondaryLabelColor] forState:UIControlStateNormal];
-    cancelButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    cancelButton.backgroundColor = [UIColor tertiarySystemFillColor];
-    cancelButton.layer.cornerRadius = 23.0;
-    cancelButton.layer.cornerCurve = kCACornerCurveContinuous;
-    cancelButton.layer.masksToBounds = YES;
-
-    UIButton *confirmButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    confirmButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [confirmButton setTitle:(confirmTitle.length ? confirmTitle : LGLocalized(@"prefs.button.ok")) forState:UIControlStateNormal];
-    [confirmButton setTitleColor:(destructive ? [UIColor systemRedColor] : [UIColor whiteColor]) forState:UIControlStateNormal];
-    confirmButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-    confirmButton.backgroundColor = destructive ? [UIColor tertiarySystemFillColor] : [UIColor systemBlueColor];
-    confirmButton.layer.cornerRadius = 23.0;
-    confirmButton.layer.cornerCurve = kCACornerCurveContinuous;
-    confirmButton.layer.masksToBounds = YES;
-
-    UIStackView *buttonRow = [[UIStackView alloc] initWithArrangedSubviews:@[cancelButton, confirmButton]];
-    buttonRow.translatesAutoresizingMaskIntoConstraints = NO;
-    buttonRow.axis = UILayoutConstraintAxisHorizontal;
-    buttonRow.spacing = 12.0;
-    buttonRow.distribution = UIStackViewDistributionFillEqually;
-
-    [overlay addSubview:panel];
-    [panel.contentView addSubview:titleLabel];
-    [panel.contentView addSubview:bodyLabel];
-    [panel.contentView addSubview:buttonRow];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
-        [panel.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor],
-        [panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor constant:20.0],
-        [panel.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor constant:-20.0],
-        [panel.widthAnchor constraintEqualToConstant:320.0],
-        [titleLabel.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:22.0],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [bodyLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:10.0],
-        [bodyLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
-        [bodyLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
-        [buttonRow.topAnchor constraintEqualToAnchor:bodyLabel.bottomAnchor constant:20.0],
-        [buttonRow.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
-        [buttonRow.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
-        [buttonRow.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-16.0],
-        [cancelButton.heightAnchor constraintEqualToConstant:46.0],
-        [confirmButton.heightAnchor constraintEqualToConstant:46.0],
-    ]];
-
-    [dismissControl addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-    [cancelButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-    [confirmButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
-        LGDismissOverlayPanel(overlay, panel);
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:(title.length ? title : @"")
+                         message:(message.length ? message : @"")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:(cancelTitle.length ? cancelTitle : LGLocalized(@"prefs.button.cancel"))
+                  style:UIAlertActionStyleCancel
+                handler:nil]];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:(confirmTitle.length ? confirmTitle : LGLocalized(@"prefs.button.ok"))
+                  style:(destructive ? UIAlertActionStyleDestructive
+                                     : UIAlertActionStyleDefault)
+                handler:^(__unused UIAlertAction *action) {
         if (confirmBlock) confirmBlock();
-    }] forControlEvents:UIControlEventTouchUpInside];
-
-    [controller.view addSubview:overlay];
-    [UIView animateWithDuration:0.22 animations:^{
-        overlay.alpha = 1.0;
-        panel.transform = CGAffineTransformIdentity;
-    }];
+    }]];
+    [controller presentViewController:alert animated:YES completion:nil];
 }
 
 void LGPresentTextInputSheet(UIViewController *controller,
@@ -1572,34 +1063,19 @@ static UIView *LGMakeRespringBar(id target, SEL respringAction, SEL laterAction)
     card.hidden = YES;
     card.transform = CGAffineTransformMakeTranslation(0.0, 10.0);
 
-    LGSharedGlassView *glassView = [[LGSharedGlassView alloc] initWithFrame:CGRectZero sourceImage:nil sourceOrigin:CGPointZero];
+    LGLiveBackdropView *glassView = [[LGLiveBackdropView alloc]
+        initWithFrame:CGRectZero groupName:nil
+        filterType:LGFilterTypeForHostPrefix(@"PrefsButton")];
     glassView.translatesAutoresizingMaskIntoConstraints = NO;
     glassView.userInteractionEnabled = NO;
-    glassView.releasesSourceAfterUpload = NO;
-    glassView.bezelWidth = 24.0;
-    glassView.glassThickness = 100.0;
-    glassView.refractionScale = 1.5;
-    glassView.refractiveIndex = 1.5;
-    glassView.specularOpacity = 0.8;
-    glassView.blur = 5.0;
-    glassView.sourceScale = 1.0;
-    glassView.cornerRadius = 26.0;
-    glassView.hidden = YES;
+    glassView.layer.cornerRadius = 26.0;
     [card addSubview:glassView];
     objc_setAssociatedObject(card, kLGRespringBarGlassViewKey, glassView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    UIView *blurView = LGMakeLowBlurFallbackView();
-    blurView.translatesAutoresizingMaskIntoConstraints = NO;
-    blurView.userInteractionEnabled = NO;
-    [card addSubview:blurView];
-    LGApplyLowBlurRadiusToView(blurView);
-    objc_setAssociatedObject(card, kLGRespringBarBlurViewKey, blurView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     UIView *tintView = [[UIView alloc] initWithFrame:CGRectZero];
     tintView.translatesAutoresizingMaskIntoConstraints = NO;
     tintView.userInteractionEnabled = NO;
-    UIColor *customTint = LGCustomTintColorForKey(@"Preferences.RespringBar.CustomTintColor");
-    tintView.backgroundColor = customTint ?: [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
+    tintView.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
         if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
             return [[UIColor whiteColor] colorWithAlphaComponent:0.04];
         }
@@ -1650,10 +1126,6 @@ static UIView *LGMakeRespringBar(id target, SEL respringAction, SEL laterAction)
         [glassView.leadingAnchor constraintEqualToAnchor:card.leadingAnchor],
         [glassView.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
         [glassView.bottomAnchor constraintEqualToAnchor:card.bottomAnchor],
-        [blurView.topAnchor constraintEqualToAnchor:card.topAnchor],
-        [blurView.leadingAnchor constraintEqualToAnchor:card.leadingAnchor],
-        [blurView.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
-        [blurView.bottomAnchor constraintEqualToAnchor:card.bottomAnchor],
         [tintView.topAnchor constraintEqualToAnchor:card.topAnchor],
         [tintView.leadingAnchor constraintEqualToAnchor:card.leadingAnchor],
         [tintView.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
@@ -1688,4 +1160,438 @@ static UIView *LGMakeRespringBar(id target, SEL respringAction, SEL laterAction)
     ]];
     LGRefreshRespringBarGlass(card);
     return card;
+}
+UIColor *LGColorFromRGBAHex(NSString *hex) {
+    NSString *value = [[hex ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+        stringByReplacingOccurrencesOfString:@"#" withString:@""];
+    if (value.length != 6 && value.length != 8) return UIColor.clearColor;
+
+    unsigned parsed = 0;
+    if (![[NSScanner scannerWithString:value] scanHexInt:&parsed]) return UIColor.clearColor;
+
+    CGFloat red, green, blue, alpha;
+    if (value.length == 6) {
+        red = ((parsed >> 16) & 0xff) / 255.0;
+        green = ((parsed >> 8) & 0xff) / 255.0;
+        blue = (parsed & 0xff) / 255.0;
+        alpha = 1.0;
+    } else {
+        red = ((parsed >> 24) & 0xff) / 255.0;
+        green = ((parsed >> 16) & 0xff) / 255.0;
+        blue = ((parsed >> 8) & 0xff) / 255.0;
+        alpha = (parsed & 0xff) / 255.0;
+    }
+    return [UIColor colorWithRed:red green:green blue:blue alpha:alpha];
+}
+
+NSString *LGRGBAHexFromColor(UIColor *color) {
+    CGFloat red = 1.0, green = 1.0, blue = 1.0, alpha = 0.0;
+    if (![color getRed:&red green:&green blue:&blue alpha:&alpha]) return @"#FFFFFF00";
+    return [NSString stringWithFormat:@"#%02X%02X%02X%02X",
+            (int)lrint(red * 255.0), (int)lrint(green * 255.0),
+            (int)lrint(blue * 255.0), (int)lrint(alpha * 255.0)];
+}
+
+UILabel *LGMakeAboutMarkdownLabel(NSString *text, UIFont *font, UIColor *color) {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.text = text;
+    label.numberOfLines = 0;
+    label.font = font;
+    label.textColor = color;
+    return label;
+}
+
+static NSString *LGLatestBundledChangelogPath(NSBundle *bundle) {
+    NSString *directoryPath = [bundle pathForResource:@"changelogs" ofType:nil];
+    if (!directoryPath.length) return nil;
+
+    NSArray<NSString *> *filenames = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directoryPath error:nil];
+    NSMutableArray<NSString *> *markdownFilenames = [NSMutableArray array];
+    for (NSString *filename in filenames) {
+        if ([filename.pathExtension isEqualToString:@"md"]) [markdownFilenames addObject:filename];
+    }
+    if (!markdownFilenames.count) return nil;
+    [markdownFilenames sortUsingComparator:^NSComparisonResult(NSString *first, NSString *second) {
+        return [[first stringByDeletingPathExtension] localizedStandardCompare:[second stringByDeletingPathExtension]];
+    }];
+    return [directoryPath stringByAppendingPathComponent:markdownFilenames.lastObject];
+}
+
+NSString *LGAboutChangelogMarkdownText(NSBundle *bundle, NSString *version) {
+    NSString *path = version.length ? [bundle pathForResource:version ofType:@"md" inDirectory:@"changelogs"] : nil;
+    if (!path.length) path = LGLatestBundledChangelogPath(bundle);
+    return path.length ? ([NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] ?: @"") : @"";
+}
+
+void LGAppendAboutMarkdownLine(NSString *line, UIStackView *stack) {
+    NSString *trimmed = [line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!trimmed.length) {
+        UIView *spacer = [[UIView alloc] initWithFrame:CGRectZero];
+        spacer.translatesAutoresizingMaskIntoConstraints = NO;
+        [spacer.heightAnchor constraintEqualToConstant:4.0].active = YES;
+        [stack addArrangedSubview:spacer];
+        return;
+    }
+
+    NSUInteger headingLevel = 0;
+    while (headingLevel < trimmed.length && [trimmed characterAtIndex:headingLevel] == '#') headingLevel++;
+    if (headingLevel > 0 && headingLevel < trimmed.length && [trimmed characterAtIndex:headingLevel] == ' ') {
+        NSString *heading = [[trimmed substringFromIndex:headingLevel + 1] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        [stack addArrangedSubview:LGMakeAboutMarkdownLabel(heading,
+                                                            [UIFont systemFontOfSize:headingLevel == 1 ? 20.0 : 17.0 weight:UIFontWeightBold],
+                                                            UIColor.labelColor)];
+        return;
+    }
+
+    BOOL isBullet = [trimmed hasPrefix:@"- "] || [trimmed hasPrefix:@"* "];
+    NSString *body = isBullet ? [trimmed substringFromIndex:2] : trimmed;
+    if (!isBullet) {
+        [stack addArrangedSubview:LGMakeAboutMarkdownLabel(body,
+                                                            [UIFont systemFontOfSize:15.0 weight:UIFontWeightRegular],
+                                                            UIColor.labelColor)];
+        return;
+    }
+
+    UIView *row = [[UIView alloc] initWithFrame:CGRectZero];
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *bullet = LGMakeAboutMarkdownLabel(@"•", [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold], UIColor.secondaryLabelColor);
+    UILabel *label = LGMakeAboutMarkdownLabel(body, [UIFont systemFontOfSize:15.0 weight:UIFontWeightRegular], UIColor.labelColor);
+    [row addSubview:bullet];
+    [row addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[
+        [bullet.topAnchor constraintEqualToAnchor:row.topAnchor constant:1.0],
+        [bullet.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+        [bullet.widthAnchor constraintEqualToConstant:18.0],
+        [label.topAnchor constraintEqualToAnchor:row.topAnchor],
+        [label.leadingAnchor constraintEqualToAnchor:bullet.trailingAnchor],
+        [label.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+        [label.bottomAnchor constraintEqualToAnchor:row.bottomAnchor],
+    ]];
+    [stack addArrangedSubview:row];
+}
+
+UIView *LGMakeDonationRow(UIViewController *controller,
+                          NSString *name,
+                          NSString *network,
+                          NSString *symbol,
+                          UIColor *color,
+                          NSString *address) {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentFill;
+    button.contentVerticalAlignment = UIControlContentVerticalAlignmentFill;
+    button.contentEdgeInsets = UIEdgeInsetsZero;
+    __weak UIViewController *weakController = controller;
+    [button addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        (void)action;
+        if (!address.length) return;
+        UIPasteboard.generalPasteboard.string = address;
+        LGPresentInfoSheet(weakController, @"Copied", @"Wallet address copied to clipboard.");
+    }] forControlEvents:UIControlEventTouchUpInside];
+
+    UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
+    body.userInteractionEnabled = NO;
+    body.translatesAutoresizingMaskIntoConstraints = NO;
+    [button addSubview:body];
+
+    UILabel *badge = [[UILabel alloc] initWithFrame:CGRectZero];
+    badge.translatesAutoresizingMaskIntoConstraints = NO;
+    badge.text = symbol;
+    badge.textAlignment = NSTextAlignmentCenter;
+    badge.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightBold];
+    badge.textColor = UIColor.whiteColor;
+    badge.backgroundColor = color;
+    badge.layer.cornerRadius = 14.0;
+    badge.layer.cornerCurve = kCACornerCurveContinuous;
+    badge.layer.masksToBounds = YES;
+
+    UILabel *nameLabel = LGMakeAboutMarkdownLabel(name, [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold], UIColor.labelColor);
+    UILabel *networkLabel = LGMakeAboutMarkdownLabel(network, [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium], UIColor.secondaryLabelColor);
+    UILabel *addressLabel = LGMakeAboutMarkdownLabel(address, [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightRegular], UIColor.tertiaryLabelColor);
+    addressLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    addressLabel.numberOfLines = 1;
+
+    UIImageView *copyIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"doc.on.doc"]];
+    copyIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    copyIcon.tintColor = UIColor.tertiaryLabelColor;
+    copyIcon.contentMode = UIViewContentModeScaleAspectFit;
+
+    UIView *titleRow = [[UIView alloc] initWithFrame:CGRectZero];
+    titleRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [titleRow addSubview:nameLabel];
+    [titleRow addSubview:networkLabel];
+    UIStackView *textStack = [[UIStackView alloc] initWithArrangedSubviews:@[titleRow, addressLabel]];
+    textStack.translatesAutoresizingMaskIntoConstraints = NO;
+    textStack.axis = UILayoutConstraintAxisVertical;
+    textStack.spacing = 3.0;
+    [body addSubview:badge];
+    [body addSubview:textStack];
+    [body addSubview:copyIcon];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [body.topAnchor constraintEqualToAnchor:button.topAnchor],
+        [body.leadingAnchor constraintEqualToAnchor:button.leadingAnchor],
+        [body.trailingAnchor constraintEqualToAnchor:button.trailingAnchor],
+        [body.bottomAnchor constraintEqualToAnchor:button.bottomAnchor],
+        [badge.leadingAnchor constraintEqualToAnchor:body.leadingAnchor constant:14.0],
+        [badge.centerYAnchor constraintEqualToAnchor:body.centerYAnchor],
+        [badge.widthAnchor constraintEqualToConstant:28.0],
+        [badge.heightAnchor constraintEqualToConstant:28.0],
+        [copyIcon.trailingAnchor constraintEqualToAnchor:body.trailingAnchor constant:-14.0],
+        [copyIcon.centerYAnchor constraintEqualToAnchor:body.centerYAnchor],
+        [copyIcon.widthAnchor constraintEqualToConstant:18.0],
+        [copyIcon.heightAnchor constraintEqualToConstant:18.0],
+        [nameLabel.topAnchor constraintEqualToAnchor:titleRow.topAnchor],
+        [nameLabel.leadingAnchor constraintEqualToAnchor:titleRow.leadingAnchor],
+        [nameLabel.bottomAnchor constraintEqualToAnchor:titleRow.bottomAnchor],
+        [networkLabel.firstBaselineAnchor constraintEqualToAnchor:nameLabel.firstBaselineAnchor],
+        [networkLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:nameLabel.trailingAnchor constant:8.0],
+        [networkLabel.trailingAnchor constraintEqualToAnchor:titleRow.trailingAnchor],
+        [textStack.topAnchor constraintEqualToAnchor:body.topAnchor constant:10.0],
+        [textStack.leadingAnchor constraintEqualToAnchor:badge.trailingAnchor constant:12.0],
+        [textStack.trailingAnchor constraintEqualToAnchor:copyIcon.leadingAnchor constant:-12.0],
+        [textStack.bottomAnchor constraintEqualToAnchor:body.bottomAnchor constant:-10.0],
+    ]];
+    return button;
+}
+
+UIView *LGMakeDonationCard(UIViewController *controller) {
+    UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
+    card.translatesAutoresizingMaskIntoConstraints = NO;
+    card.backgroundColor = LGSubpageCardBackgroundColor();
+    card.layer.cornerRadius = 23.25;
+    card.layer.cornerCurve = kCACornerCurveContinuous;
+    card.layer.masksToBounds = YES;
+
+    UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 0.0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [card addSubview:stack];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectZero];
+    header.translatesAutoresizingMaskIntoConstraints = NO;
+    UIStackView *headerStack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    headerStack.axis = UILayoutConstraintAxisVertical;
+    headerStack.spacing = 3.0;
+    headerStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [header addSubview:headerStack];
+    [headerStack addArrangedSubview:LGMakeAboutMarkdownLabel(@"Donate", [UIFont systemFontOfSize:20.0 weight:UIFontWeightBold], UIColor.labelColor)];
+    [headerStack addArrangedSubview:LGMakeAboutMarkdownLabel(@"Crypto only for now. Tap a row to copy the address.", [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium], UIColor.secondaryLabelColor)];
+    [stack addArrangedSubview:header];
+
+    NSArray<NSDictionary *> *methods = @[
+        @{@"name": @"BTC", @"network": @"Bitcoin", @"symbol": @"B", @"color": UIColor.systemOrangeColor, @"address": @"bc1qlv830emqsffqslns2e3kglkgcdnlag0nfnyj4k"},
+        @{@"name": @"ETH", @"network": @"Ethereum", @"symbol": @"E", @"color": UIColor.systemIndigoColor, @"address": @"0x6245EF47c749D1b5c2830b145cB943a8aD826bea"},
+        @{@"name": @"LTC", @"network": @"Litecoin", @"symbol": @"L", @"color": UIColor.systemGrayColor, @"address": @"ltc1q7j6vlgvymxdtwm46u0n22h7m4890cexfp22vfm"},
+        @{@"name": @"DOGE", @"network": @"Dogecoin", @"symbol": @"D", @"color": UIColor.systemYellowColor, @"address": @"D76nuR1HWSymSLhFYYhkfpc4JHg1HjvgWD"},
+        @{@"name": @"SOL", @"network": @"Solana", @"symbol": @"S", @"color": UIColor.systemPurpleColor, @"address": @"F1rH3PSMHFHXbGLGQiWXGLRaahfYoVULUwhsvrewM37W"},
+        @{@"name": @"TRX", @"network": @"Tron", @"symbol": @"T", @"color": UIColor.systemRedColor, @"address": @"TVuW2KcYBMcr2VAMhYVqYmoT15N3MbZ8eX"},
+        @{@"name": @"USDC", @"network": @"Polygon", @"symbol": @"U", @"color": UIColor.systemBlueColor, @"address": @"0x6245EF47c749D1b5c2830b145cB943a8aD826bea"},
+        @{@"name": @"USDT", @"network": @"Tron TRC-20", @"symbol": @"U", @"color": UIColor.systemGreenColor, @"address": @"TVuW2KcYBMcr2VAMhYVqYmoT15N3MbZ8eX"},
+    ];
+    for (NSUInteger index = 0; index < methods.count; index++) {
+        NSDictionary *method = methods[index];
+        [stack addArrangedSubview:LGMakeDonationRow(controller, method[@"name"], method[@"network"], method[@"symbol"], method[@"color"], method[@"address"])];
+        if (index + 1 == methods.count) continue;
+        UIView *dividerRow = [[UIView alloc] initWithFrame:CGRectZero];
+        dividerRow.translatesAutoresizingMaskIntoConstraints = NO;
+        UIView *divider = LGMakeSectionDivider();
+        [dividerRow addSubview:divider];
+        [NSLayoutConstraint activateConstraints:@[
+            [divider.leadingAnchor constraintEqualToAnchor:dividerRow.leadingAnchor constant:54.0],
+            [divider.trailingAnchor constraintEqualToAnchor:dividerRow.trailingAnchor constant:-14.0],
+            [divider.centerYAnchor constraintEqualToAnchor:dividerRow.centerYAnchor],
+        ]];
+        [stack addArrangedSubview:dividerRow];
+    }
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:card.topAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor],
+        [headerStack.topAnchor constraintEqualToAnchor:header.topAnchor constant:16.0],
+        [headerStack.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16.0],
+        [headerStack.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16.0],
+        [headerStack.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-13.0],
+    ]];
+    return card;
+}
+
+UIView *LGMakeAboutContentView(UIViewController *controller, NSBundle *bundle, NSString *packageVersion) {
+    UIView *container = [[UIView alloc] initWithFrame:CGRectZero];
+    container.backgroundColor = UIColor.clearColor;
+    UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.alignment = UIStackViewAlignmentCenter;
+    stack.spacing = 7.0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [container addSubview:stack];
+
+    UIImage *icon = [UIImage imageNamed:@"original" inBundle:bundle compatibleWithTraitCollection:nil];
+    if (!icon) icon = [UIImage imageNamed:@"icon" inBundle:bundle compatibleWithTraitCollection:nil];
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:icon];
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+    iconView.layer.cornerRadius = 19.0;
+    iconView.layer.cornerCurve = kCACornerCurveContinuous;
+    iconView.layer.masksToBounds = YES;
+    [iconView.widthAnchor constraintEqualToConstant:82.0].active = YES;
+    [iconView.heightAnchor constraintEqualToConstant:82.0].active = YES;
+
+    UILabel *nameLabel = LGMakeAboutMarkdownLabel(LGLocalized(@"prefs.app_name"), [UIFont systemFontOfSize:28.0 weight:UIFontWeightBold], UIColor.labelColor);
+    nameLabel.textAlignment = NSTextAlignmentCenter;
+    UILabel *subtitleLabel = LGMakeAboutMarkdownLabel(LGLocalized(@"prefs.hero.subtitle"), [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium], UIColor.secondaryLabelColor);
+    subtitleLabel.textAlignment = NSTextAlignmentCenter;
+
+    UIView *markdownCard = [[UIView alloc] initWithFrame:CGRectZero];
+    markdownCard.translatesAutoresizingMaskIntoConstraints = NO;
+    markdownCard.backgroundColor = LGSubpageCardBackgroundColor();
+    markdownCard.layer.cornerRadius = 23.25;
+    markdownCard.layer.cornerCurve = kCACornerCurveContinuous;
+    markdownCard.layer.masksToBounds = YES;
+    UIStackView *markdownStack = [[UIStackView alloc] initWithFrame:CGRectZero];
+    markdownStack.axis = UILayoutConstraintAxisVertical;
+    markdownStack.alignment = UIStackViewAlignmentFill;
+    markdownStack.spacing = 7.0;
+    markdownStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [markdownCard addSubview:markdownStack];
+
+    NSString *markdownText = LGAboutChangelogMarkdownText(bundle, packageVersion);
+    if (markdownText.length) {
+        for (NSString *line in [markdownText componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+            LGAppendAboutMarkdownLine(line, markdownStack);
+        }
+    } else {
+        [markdownStack addArrangedSubview:LGMakeAboutMarkdownLabel([NSString stringWithFormat:@"No changelog found for %@.", packageVersion], [UIFont systemFontOfSize:15.0 weight:UIFontWeightRegular], UIColor.secondaryLabelColor)];
+    }
+
+    UIView *donationCard = LGMakeDonationCard(controller);
+    [stack addArrangedSubview:iconView];
+    [stack addArrangedSubview:nameLabel];
+    [stack addArrangedSubview:subtitleLabel];
+    [stack setCustomSpacing:18.0 afterView:subtitleLabel];
+    [stack addArrangedSubview:markdownCard];
+    [stack setCustomSpacing:12.0 afterView:markdownCard];
+    [stack addArrangedSubview:donationCard];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:container.topAnchor constant:8.0],
+        [stack.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-8.0],
+        [nameLabel.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor constant:18.0],
+        [nameLabel.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor constant:-18.0],
+        [subtitleLabel.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor constant:22.0],
+        [subtitleLabel.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor constant:-22.0],
+        [markdownCard.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor],
+        [markdownCard.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor],
+        [donationCard.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor],
+        [donationCard.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor],
+        [markdownStack.topAnchor constraintEqualToAnchor:markdownCard.topAnchor constant:16.0],
+        [markdownStack.leadingAnchor constraintEqualToAnchor:markdownCard.leadingAnchor constant:16.0],
+        [markdownStack.trailingAnchor constraintEqualToAnchor:markdownCard.trailingAnchor constant:-16.0],
+        [markdownStack.bottomAnchor constraintEqualToAnchor:markdownCard.bottomAnchor constant:-16.0],
+    ]];
+    return container;
+}
+
+void LGPresentThirdPartyRWBEditor(UIViewController *controller) {
+    id storedValue = LGReadPreferenceObject(@"RWB.ThirdPartyBundleIDs", LGRWBDefaultWidgetBundleIDsText());
+    NSString *existing = [storedValue isKindOfClass:[NSString class]]
+        ? storedValue
+        : LGRWBDefaultWidgetBundleIDsText();
+    LGPresentMultilineTextInputSheet(controller,
+                                     LGLocalized(@"prefs.misc.rwb_third_party.title"),
+                                     LGLocalized(@"prefs.misc.rwb_third_party.editor_body"),
+                                     existing,
+                                     LGLocalized(@"prefs.misc.rwb_third_party.placeholder"),
+                                     ^(NSString *text) {
+        NSMutableOrderedSet<NSString *> *lines = [NSMutableOrderedSet orderedSet];
+        [[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] enumerateObjectsUsingBlock:^(NSString *rawLine, NSUInteger idx, BOOL *stop) {
+            (void)idx;
+            (void)stop;
+            NSString *line = [rawLine stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if (line.length) [lines addObject:line];
+        }];
+        NSString *normalized = [lines.array componentsJoinedByString:@"\n"];
+
+        LGWritePreferenceObject(@"RWB.ThirdPartyBundleIDs", normalized);
+    });
+}
+
+void LGPresentGlobalControlsExclusionEditor(UIViewController *controller) {
+    NSString *defaults = @"NewTerm\nFilza\nTikTok\nDiscord\ncom.spotify.client";
+    id storedValue = LGReadPreferenceObject(@"GlobalControls.Exclusions", defaults);
+    NSString *existing = [storedValue isKindOfClass:NSString.class] ? storedValue : defaults;
+    LGPresentMultilineTextInputSheet(controller,
+                                     LGLocalized(@"prefs.global_controls.exclusions.title"),
+                                     LGLocalized(@"prefs.global_controls.exclusions.body"),
+                                     existing,
+                                     LGLocalized(@"prefs.global_controls.exclusions.placeholder"),
+                                     ^(NSString *text) {
+        NSMutableOrderedSet<NSString *> *entries = [NSMutableOrderedSet orderedSet];
+        NSCharacterSet *separators = [NSCharacterSet characterSetWithCharactersInString:@"\n,;"];
+        for (NSString *rawEntry in [text componentsSeparatedByCharactersInSet:separators]) {
+            NSString *entry = [rawEntry stringByTrimmingCharactersInSet:
+                NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if (entry.length) [entries addObject:entry];
+        }
+        NSString *normalized = [entries.array componentsJoinedByString:@"\n"];
+
+        LGWritePreferenceObject(@"GlobalControls.Exclusions", normalized);
+    });
+}
+
+void LGPresentPreferencesExport(UIViewController *controller) {
+    NSString *jsonString = LGExportPreferencesJSONString();
+    if (!jsonString.length) {
+        LGPresentInfoSheet(controller,
+                           LGLocalized(@"prefs.misc.export_prefs.title"),
+                           LGLocalized(@"prefs.export_prefs.error"));
+        return;
+    }
+
+    NSError *writeError = nil;
+    NSURL *exportURL = LGTemporaryPreferencesExportURL();
+    if (![jsonString writeToURL:exportURL atomically:YES encoding:NSUTF8StringEncoding error:&writeError]) {
+        LGPresentInfoSheet(controller,
+                           LGLocalized(@"prefs.misc.export_prefs.title"),
+                           writeError.localizedDescription ?: LGLocalized(@"prefs.export_prefs.error"));
+        return;
+    }
+
+    UIActivityViewController *activityController =
+        [[UIActivityViewController alloc] initWithActivityItems:@[exportURL] applicationActivities:nil];
+    UIPopoverPresentationController *popover = activityController.popoverPresentationController;
+    if (popover) {
+        popover.sourceView = controller.view;
+        popover.sourceRect = CGRectMake(CGRectGetMidX(controller.view.bounds),
+                                        CGRectGetMidY(controller.view.bounds), 1.0, 1.0);
+    }
+    [controller presentViewController:activityController animated:YES completion:nil];
+}
+
+BOOL LGImportPreferencesFromURL(UIViewController *controller, NSURL *url) {
+    if (!url) return NO;
+
+    BOOL scoped = [url startAccessingSecurityScopedResource];
+    NSError *readError = nil;
+    NSString *jsonString = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:&readError];
+    if (scoped) [url stopAccessingSecurityScopedResource];
+
+    if (!jsonString.length) {
+        LGPresentInfoSheet(controller,
+                           LGLocalized(@"prefs.misc.import_prefs.title"),
+                           readError.localizedDescription ?: LGLocalized(@"prefs.import_prefs.error_read"));
+        return NO;
+    }
+
+    NSError *importError = nil;
+    if (!LGImportPreferencesJSONString(jsonString, &importError)) {
+        LGPresentInfoSheet(controller,
+                           LGLocalized(@"prefs.misc.import_prefs.title"),
+                           importError.localizedDescription ?: LGLocalized(@"prefs.import_prefs.error_invalid"));
+        return NO;
+    }
+    return YES;
 }

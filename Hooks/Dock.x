@@ -1,10 +1,7 @@
-#import "../LiquidGlass.h"
-#import "../Shared/LGHookSupport.h"
-#import "../Shared/LGBannerCaptureSupport.h"
-#import "../Shared/LGPrefAccessors.h"
+#import <UIKit/UIKit.h>
+#import "../Shared/LGLiveBackdropView.h"
+#import "../Shared/LGGlassKit.h"
 #import <objc/runtime.h>
-
-static const NSInteger kDockTintTag       = 0xD0CC;
 
 typedef NS_ENUM(NSInteger, LGDockMode) {
     LGDockModeNone = 0,
@@ -12,554 +9,88 @@ typedef NS_ENUM(NSInteger, LGDockMode) {
     LGDockModeFloating,
 };
 
-static void LGDockRefreshAllHosts(void);
-static void LGDockRefreshAttachedHosts(void);
+static const void *kDockHomeButtonBorderKey = &kDockHomeButtonBorderKey;
 
-static LGDisplayLinkState sDockDisplayLinkState = {0};
-static NSHashTable<UIView *> *sDockHosts = nil;
-
-LG_ENABLED_BOOL_PREF_FUNC(LGDockEnabled, "Dock.Enabled", YES)
-LG_FLOAT_PREF_FUNC(LGDockCornerRadiusHomeButton, "Dock.CornerRadiusHomeButton", 0.0)
-LG_FLOAT_PREF_FUNC(LGDockCornerRadiusFullScreen, "Dock.CornerRadiusFullScreen", 34.0)
-LG_FLOAT_PREF_FUNC(LGDockCornerRadiusFloating, "Dock.CornerRadiusFloating", 30.5)
-LG_FLOAT_PREF_FUNC(LGDockBezelWidth, "Dock.BezelWidth", 30.0)
-LG_FLOAT_PREF_FUNC(LGDockGlassThickness, "Dock.GlassThickness", 150.0)
-LG_FLOAT_PREF_FUNC(LGDockRefractionScale, "Dock.RefractionScale", 1.5)
-LG_FLOAT_PREF_FUNC(LGDockRefractiveIndex, "Dock.RefractiveIndex", 1.5)
-LG_FLOAT_PREF_FUNC(LGDockSpecularOpacity, "Dock.SpecularOpacity", 0.3)
-LG_FLOAT_PREF_FUNC(LGDockBlur, "Dock.Blur", 10.0)
-LG_FLOAT_PREF_FUNC(LGDockWallpaperScale, "Dock.WallpaperScale", 0.25)
-LG_FLOAT_PREF_FUNC(LGDockLightTintAlpha, "Dock.LightTintAlpha", 0.1)
-LG_FLOAT_PREF_FUNC(LGDockDarkTintAlpha, "Dock.DarkTintAlpha", 0.0)
-LG_FLOAT_PREF_FUNC(LGDockLiveCaptureFPS, "Dock.LiveCaptureFPS", 22.0)
-
-static NSHashTable<UIView *> *LGDockHostRegistry(void) {
-    if (!sDockHosts) {
-        sDockHosts = [NSHashTable weakObjectsHashTable];
-    }
-    return sDockHosts;
-}
-
-static BOOL isInsideCategoryStackBackground(UIView *view) {
-    UIView *v = view;
-    while (v) {
-        NSString *name = NSStringFromClass(v.class);
-        if (name && [name containsString:@"StackViewBackground"]) return YES;
-        v = v.superview;
+static BOOL dockInsideCategoryStackBackground(UIView *view) {
+    for (UIView *ancestor = view; ancestor; ancestor = ancestor.superview) {
+        if ([NSStringFromClass(ancestor.class) containsString:@"StackViewBackground"])
+            return YES;
     }
     return NO;
 }
 
-static BOOL LGHasFloatingDockWindow(void) {
-    static Class floatingWindowCls;
-    if (!floatingWindowCls) floatingWindowCls = NSClassFromString(@"SBFloatingDockWindow");
-    if (!floatingWindowCls) return NO;
+static LGDockMode dockModeForMaterial(UIView *material) {
+    // each dock family exposes different host geometry
+    if (!isExactClass(material, @"MTMaterialView") ||
+        dockInsideCategoryStackBackground(material)) return LGDockModeNone;
 
-    UIApplication *app = UIApplication.sharedApplication;
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-                if ([window isKindOfClass:floatingWindowCls]) return YES;
-            }
-        }
-        return NO;
+    CGSize size = material.bounds.size;
+    if (size.width < 160.0 || size.height < 40.0) return LGDockModeNone;
+
+    if (hasAncestorOfClassName(material, @"SBFloatingDockPlatterView") &&
+        size.width >= size.height * 2.0) {
+        return LGDockModeFloating;
     }
-
-    for (UIWindow *window in LGApplicationWindows(app))
-        if ([window isKindOfClass:floatingWindowCls]) return YES;
-    return NO;
-}
-
-static BOOL isInsideRegularDock(UIView *view) {
-    static Class cls;
-    if (!cls) cls = NSClassFromString(@"SBDockView");
-    return LGHasAncestorClass(view, cls);
-}
-
-static BOOL isInsideFloatingDock(UIView *view) {
-    static Class cls;
-    if (!cls) cls = NSClassFromString(@"SBFloatingDockPlatterView");
-    return LGHasAncestorClass(view, cls);
-}
-
-static BOOL isReasonableDockMaterialBoundsForMode(CGRect bounds, BOOL insideFloating, BOOL insideRegular) {
-    CGFloat width = CGRectGetWidth(bounds);
-    CGFloat height = CGRectGetHeight(bounds);
-    if (width < 1.0 || height < 1.0) return NO;
-    if (insideFloating) {
-        return width >= 160.0 && height >= 40.0 && width >= height * 2.0;
+    if (hasAncestorOfClassName(material, @"SBDockView")) {
+        return LGDockModeRegular;
     }
-    if (insideRegular) {
-        return width >= 160.0 && height >= 40.0;
-    }
-    return NO;
-}
-
-static void *kDockRetryKey = &kDockRetryKey;
-static void *kDockAttachedKey = &kDockAttachedKey;
-static void *kDockModeKey = &kDockModeKey;
-static void *kDockTintKey = &kDockTintKey;
-static void *kDockGlassKey = &kDockGlassKey;
-static void *kDockOriginalFrameKey = &kDockOriginalFrameKey;
-static void *kDockOriginalSuperviewClipsKey = &kDockOriginalSuperviewClipsKey;
-static void *kDockLastLiveCaptureTimeKey = &kDockLastLiveCaptureTimeKey;
-static void *kDockBackdropViewKey = &kDockBackdropViewKey;
-
-static LGDockMode LGResolveDockModeForView(UIView *view) {
-    if (isInsideCategoryStackBackground(view)) return LGDockModeNone;
-    BOOL insideFloating = isInsideFloatingDock(view);
-    BOOL insideRegular = isInsideRegularDock(view);
-    if (!insideFloating && !insideRegular) return LGDockModeNone;
-    if (!isReasonableDockMaterialBoundsForMode(view.bounds, insideFloating, insideRegular)) return LGDockModeNone;
-    if (insideFloating && LGHasFloatingDockWindow()) return LGDockModeFloating;
-    if (insideRegular) return LGDockModeRegular;
-    if (insideFloating) return LGDockModeFloating;
     return LGDockModeNone;
 }
 
-static NSString *LGDockModeName(LGDockMode mode) {
-    switch (mode) {
-        case LGDockModeRegular: return @"regular";
-        case LGDockModeFloating: return @"floating";
-        default: return @"none";
-    }
+static BOOL dockIsFullScreenPhone(UIView *material) {
+    UIEdgeInsets safeArea = material.window.safeAreaInsets;
+    return safeArea.top > 20.0 || safeArea.bottom > 0.0;
 }
 
-static void startDockDisplayLink(void) {
-    NSInteger fps = LG_prefersLiveCapture(@"Dock.RenderingMode")
-        ? LGPreferredLiveCaptureFramesPerSecond(LGDockLiveCaptureFPS())
-        : LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 1);
-    LGStartDisplayLinkStateWithPreferenceKey(&sDockDisplayLinkState,
-                                             fps,
-                                             @"DisplayLink.Dock.Enabled",
-                                             ^{
-        NSInteger nextFPS = LG_prefersLiveCapture(@"Dock.RenderingMode")
-            ? LGPreferredLiveCaptureFramesPerSecond(LGDockLiveCaptureFPS())
-            : LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 1);
-        LGSetDisplayLinkStatePreferredFPS(&sDockDisplayLinkState, nextFPS);
-        if (LG_prefersLiveCapture(@"Dock.RenderingMode")) LGDockRefreshAttachedHosts();
-        else LG_updateRegisteredGlassViews(LGUpdateGroupDock);
-    });
-}
-
-static void stopDockDisplayLink(void) {
-    LGStopDisplayLinkState(&sDockDisplayLinkState);
-}
-
-static BOOL LGDockNeedsLegacyPadding(LGDockMode mode) {
-    if (mode != LGDockModeRegular) return NO;
-    if (!LGIsAtLeastiOS16()) return NO;
-    return !LG_isFullScreenDevice();
-}
-
-static CGRect LGDockOverlayFrameForHost(UIView *host, LGDockMode mode) {
-    return host.bounds;
-}
-
-static void LGRestoreDockHostFrameIfNeeded(UIView *host) {
-    if (!host) return;
-    NSValue *originalFrameValue = objc_getAssociatedObject(host, kDockOriginalFrameKey);
-    if (originalFrameValue) {
-        host.frame = originalFrameValue.CGRectValue;
-        objc_setAssociatedObject(host, kDockOriginalFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    }
-
-    UIView *superview = host.superview;
-    NSNumber *originalSuperviewClips = objc_getAssociatedObject(host, kDockOriginalSuperviewClipsKey);
-    if (superview && originalSuperviewClips) {
-        superview.clipsToBounds = originalSuperviewClips.boolValue;
-        superview.layer.masksToBounds = superview.clipsToBounds;
-        objc_setAssociatedObject(host, kDockOriginalSuperviewClipsKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    }
-}
-
-static void LGApplyDockHostPaddingIfNeeded(UIView *host, LGDockMode mode) {
-    if (!host) return;
-    if (!LGDockNeedsLegacyPadding(mode)) {
-        LGRestoreDockHostFrameIfNeeded(host);
+static void dockUpdateHomeButtonBorder(LGLiveBackdropView *glass,
+                                       BOOL needsBorder) {
+    CAShapeLayer *border =
+        objc_getAssociatedObject(glass, kDockHomeButtonBorderKey);
+    if (!needsBorder) {
+        [border removeFromSuperlayer];
+        objc_setAssociatedObject(glass, kDockHomeButtonBorderKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
         return;
     }
-
-    UIView *superview = host.superview;
-    if (!superview) return;
-
-    objc_setAssociatedObject(host, kDockOriginalFrameKey, [NSValue valueWithCGRect:host.frame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!objc_getAssociatedObject(host, kDockOriginalSuperviewClipsKey)) {
-        objc_setAssociatedObject(host, kDockOriginalSuperviewClipsKey, @(superview.clipsToBounds), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!border) {
+        border = [CAShapeLayer layer];
+        border.fillColor = UIColor.clearColor.CGColor;
+        border.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.42].CGColor;
+        objc_setAssociatedObject(glass, kDockHomeButtonBorderKey, border,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
-    static const CGFloat kLegacyDockHorizontalPadding = 8.0;
-    static const CGFloat kLegacyDockBottomPadding = 8.0;
-    CGRect frame = host.frame;
-    frame.origin.x -= kLegacyDockHorizontalPadding;
-    frame.size.width += (kLegacyDockHorizontalPadding * 2.0);
-    frame.size.height += kLegacyDockBottomPadding;
-    host.frame = frame;
-
-    superview.clipsToBounds = NO;
-    superview.layer.masksToBounds = NO;
+    [glass.layer addSublayer:border];
+    CGFloat scale = glass.window.screen.scale;
+    if (scale <= 0.0) scale = UIScreen.mainScreen.scale;
+    CGFloat lineWidth = 1.0 / MAX(scale, 1.0);
+    CGRect borderRect = CGRectInset(glass.bounds, lineWidth * 0.5,
+                                    lineWidth * 0.5);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    border.frame = glass.bounds;
+    border.contentsScale = scale;
+    border.lineWidth = lineWidth;
+    border.path = [UIBezierPath bezierPathWithRect:borderRect].CGPath;
+    [CATransaction commit];
 }
 
-static UIColor *dockTintColorForView(UIView *view) {
-    return LGDefaultTintColorForViewWithOverrideKey(view, LGDockLightTintAlpha(), LGDockDarkTintAlpha(), @"Dock.TintOverrideMode");
+static void configureDockGlass(UIView *material, LGLiveBackdropView *glass) {
+    // home button docks use a border instead of specular
+    LGDockMode mode = dockModeForMaterial(material);
+    BOOL homeButtonDock = mode == LGDockModeRegular &&
+                          !dockIsFullScreenPhone(material);
+    glass.lgSpecularEnabledOverride = homeButtonDock ? @NO : nil;
+    dockUpdateHomeButtonBorder(glass, homeButtonDock);
 }
-
-static void ensureDockTintOverlay(UIView *host) {
-    if (!host) return;
-    LGDockMode mode = (LGDockMode)[objc_getAssociatedObject(host, kDockModeKey) integerValue];
-    CGRect overlayFrame = LGDockOverlayFrameForHost(host, mode);
-    UIView *tint = LGEnsureTintOverlayView(host,
-                                           kDockTintKey,
-                                           kDockTintTag,
-                                           overlayFrame,
-                                           UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
-    tint.frame = overlayFrame;
-    LGConfigureTintOverlayView(tint,
-                               dockTintColorForView(host),
-                               host.layer.cornerRadius,
-                               host.layer,
-                               NO);
-    [host bringSubviewToFront:tint];
-}
-
-static void removeDockOverlays(UIView *host) {
-    if (!host) return;
-    LiquidGlassView *glass = objc_getAssociatedObject(host, kDockGlassKey);
-    UIView *tint = objc_getAssociatedObject(host, kDockTintKey);
-    if (glass || tint) {
-        LGDebugLog(@"dock cleanup host=%@ frame=%@ glass=%d tint=%d",
-                   NSStringFromClass(host.class),
-                   NSStringFromCGRect(host.frame),
-                   glass != nil,
-                   tint != nil);
-    }
-    LGRemoveAssociatedSubview(host, kDockTintKey);
-    if (glass) [glass removeFromSuperview];
-    objc_setAssociatedObject(host, kDockGlassKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    LGRemoveLiveBackdropCaptureView(host, kDockBackdropViewKey);
-    LGRestoreDockHostFrameIfNeeded(host);
-}
-
-static BOOL LGDockShouldRecaptureLiveBackdrop(UIView *host, BOOL hadGlass) {
-    if (!LG_prefersLiveCapture(@"Dock.RenderingMode")) return YES;
-    if (!hadGlass) return YES;
-    CGFloat fps = MAX(1.0, LGDockLiveCaptureFPS());
-    CFTimeInterval minInterval = 1.0 / fps;
-    CFTimeInterval now = CACurrentMediaTime();
-    NSNumber *lastCaptureNumber = objc_getAssociatedObject(host, kDockLastLiveCaptureTimeKey);
-    CFTimeInterval lastCapture = lastCaptureNumber ? lastCaptureNumber.doubleValue : 0.0;
-    if (lastCapture <= 0.0 || now - lastCapture >= minInterval) return YES;
-    return NO;
-}
-
-static void LGDockMarkLiveBackdropCaptured(UIView *host) {
-    if (!host) return;
-    if (!LG_prefersLiveCapture(@"Dock.RenderingMode")) return;
-    objc_setAssociatedObject(host, kDockLastLiveCaptureTimeKey, @(CACurrentMediaTime()), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void injectIntoDock(UIView *self_) {
-    CFTimeInterval profileStart = LGProfileBegin();
-    if (!LGDockEnabled()) {
-        removeDockOverlays(self_);
-        LGProfileEnd(@"dock.inject", profileStart);
-        return;
-    }
-    NSNumber *modeNumber = objc_getAssociatedObject(self_, kDockModeKey);
-    LGDockMode mode = (LGDockMode)modeNumber.integerValue;
-    if (mode == LGDockModeNone) {
-        LGDebugLog(@"dock inject skip reason=no-mode host=%@ frame=%@ bounds=%@",
-                   NSStringFromClass(self_.class),
-                   NSStringFromCGRect(self_.frame),
-                   NSStringFromCGRect(self_.bounds));
-        LGProfileEnd(@"dock.inject", profileStart);
-        return;
-    }
-    LGDebugLog(@"dock inject begin host=%@ mode=%@ frame=%@ bounds=%@ render=%@",
-               NSStringFromClass(self_.class),
-               LGDockModeName(mode),
-               NSStringFromCGRect(self_.frame),
-               NSStringFromCGRect(self_.bounds),
-               LG_prefString(@"Dock.RenderingMode", LGDefaultRenderingModeForKey(@"Dock.RenderingMode")));
-    LGApplyDockHostPaddingIfNeeded(self_, mode);
-
-    CGPoint wallpaperOrigin = CGPointZero;
-    UIImage *wallpaper = LG_getHomescreenSnapshot(&wallpaperOrigin);
-    if (!wallpaper && !LG_prefersLiveCapture(@"Dock.RenderingMode")) {
-        LGDebugLog(@"dock inject bail reason=no-snapshot mode=%@ host=%@",
-                   LGDockModeName(mode),
-                   NSStringFromClass(self_.class));
-        if ([objc_getAssociatedObject(self_, kDockRetryKey) boolValue]) return;
-        objc_setAssociatedObject(self_, kDockRetryKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            objc_setAssociatedObject(self_, kDockRetryKey, nil, OBJC_ASSOCIATION_ASSIGN);
-            injectIntoDock(self_);
-        });
-        LGProfileEnd(@"dock.inject", profileStart);
-        return;
-    }
-
-    LiquidGlassView *glass = objc_getAssociatedObject(self_, kDockGlassKey);
-    BOOL hadGlass = glass != nil;
-    CGRect glassFrame = LGDockOverlayFrameForHost(self_, mode);
-
-    if (!glass) {
-        glass = [[LiquidGlassView alloc]
-            initWithFrame:glassFrame wallpaper:wallpaper wallpaperOrigin:wallpaperOrigin];
-        glass.autoresizingMask = UIViewAutoresizingFlexibleWidth |
-                                 UIViewAutoresizingFlexibleHeight;
-        glass.userInteractionEnabled = NO;
-        [self_ addSubview:glass];
-        objc_setAssociatedObject(self_, kDockGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else {
-        glass.userInteractionEnabled = NO;
-        if (!LG_prefersLiveCapture(@"Dock.RenderingMode")) {
-            glass.wallpaperImage = wallpaper;
-        }
-        if (glass.superview != self_) {
-            [glass removeFromSuperview];
-            [self_ addSubview:glass];
-        }
-    }
-
-    glass.frame = glassFrame;
-    glass.cornerRadius    = (mode == LGDockModeFloating)
-        ? LGDockCornerRadiusFloating()
-        : (LG_isFullScreenDevice() ? LGDockCornerRadiusFullScreen() : LGDockCornerRadiusHomeButton());
-    glass.bezelWidth      = LGDockBezelWidth();
-    glass.glassThickness  = LGDockGlassThickness();
-    glass.refractionScale = LGDockRefractionScale();
-    glass.refractiveIndex = LGDockRefractiveIndex();
-    glass.specularOpacity = LGDockSpecularOpacity();
-    glass.blur            = LGDockBlur();
-    glass.wallpaperScale  = LGDockWallpaperScale();
-    glass.updateGroup     = LGUpdateGroupDock;
-    if (LG_prefersLiveCapture(@"Dock.RenderingMode") &&
-        !LGDockShouldRecaptureLiveBackdrop(self_, hadGlass)) {
-        [glass updateOrigin];
-        ensureDockTintOverlay(self_);
-        LGProfileEnd(@"dock.inject", profileStart);
-        return;
-    }
-    if (!LGApplyRenderingModeToGlassHost(self_,
-                                         glass,
-                                         @"Dock.RenderingMode",
-                                         kDockBackdropViewKey,
-                                         wallpaper,
-                                         wallpaperOrigin)) {
-        LGDebugLog(@"dock inject bail reason=rendering-mode-failed mode=%@",
-                   LG_prefString(@"Dock.RenderingMode", LGDefaultRenderingModeForKey(@"Dock.RenderingMode")));
-        objc_setAssociatedObject(self_, kDockRetryKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        LGProfileEnd(@"dock.inject", profileStart);
-        return;
-    }
-    LGDockMarkLiveBackdropCaptured(self_);
-    ensureDockTintOverlay(self_);
-    objc_setAssociatedObject(self_, kDockRetryKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    LGDebugLog(@"dock inject ok host=%@ mode=%@ frame=%@ glass=%@ radius=%.2f snapshot=%@ origin=%@",
-               NSStringFromClass(self_.class),
-               LGDockModeName(mode),
-               NSStringFromCGRect(self_.frame),
-               NSStringFromCGRect(glass.frame),
-               glass.cornerRadius,
-               wallpaper ? NSStringFromCGSize(wallpaper.size) : @"{0,0}",
-               NSStringFromCGPoint(wallpaperOrigin));
-    LGProfileEnd(@"dock.inject", profileStart);
-}
-
-static void LGDockRefreshAllHosts(void) {
-    CFTimeInterval profileStart = LGProfileBegin();
-    UIApplication *app = UIApplication.sharedApplication;
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-                LGTraverseViews(window, ^(UIView *view) {
-                    if (![view isKindOfClass:NSClassFromString(@"MTMaterialView")]) return;
-                    if (isInsideCategoryStackBackground(view)) {
-                        removeDockOverlays(view);
-                        return;
-                    }
-                    LGDockMode mode = LGResolveDockModeForView(view);
-                    if (mode == LGDockModeNone) return;
-                    objc_setAssociatedObject(view, kDockModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                    injectIntoDock(view);
-                    ensureDockTintOverlay(view);
-                });
-            }
-        }
-    } else {
-        for (UIWindow *window in LGApplicationWindows(app)) {
-            LGTraverseViews(window, ^(UIView *view) {
-                if (![view isKindOfClass:NSClassFromString(@"MTMaterialView")]) return;
-                if (isInsideCategoryStackBackground(view)) {
-                    removeDockOverlays(view);
-                    return;
-                }
-                LGDockMode mode = LGResolveDockModeForView(view);
-                if (mode == LGDockModeNone) return;
-                objc_setAssociatedObject(view, kDockModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                injectIntoDock(view);
-                ensureDockTintOverlay(view);
-            });
-        }
-    }
-    LGProfileEnd(@"dock.refresh_all_hosts", profileStart);
-}
-
-static void LGDockRefreshAttachedHosts(void) {
-    CFTimeInterval profileStart = LGProfileBegin();
-    for (UIView *view in LGDockHostRegistry().allObjects) {
-        if (!view.window) continue;
-        if (isInsideCategoryStackBackground(view)) {
-            removeDockOverlays(view);
-            continue;
-        }
-        LGDockMode mode = LGResolveDockModeForView(view);
-        if (mode == LGDockModeNone) continue;
-        objc_setAssociatedObject(view, kDockModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        injectIntoDock(view);
-        ensureDockTintOverlay(view);
-    }
-    LGProfileEnd(@"dock.refresh_attached_hosts", profileStart);
-}
-
-static void LGDockPrefsChanged(CFNotificationCenterRef center,
-                               void *observer,
-                               CFStringRef name,
-                               const void *object,
-                               CFDictionaryRef userInfo) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        LGDockRefreshAllHosts();
-    });
-}
-
-%group LGDockSpringBoard
-
-%hook MTMaterialView
-
-- (void)didMoveToWindow {
-    %orig;
-    UIView *self_ = (UIView *)self;
-    if (!LGDockEnabled()) {
-        removeDockOverlays(self_);
-        return;
-    }
-    if (isInsideCategoryStackBackground(self_)) {
-        removeDockOverlays(self_);
-        objc_setAssociatedObject(self_, kDockModeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        return;
-    }
-
-    if (!self_.window) {
-        objc_setAssociatedObject(self_, kDockModeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        LGDebugLog(@"dock host offwindow class=%@ frame=%@",
-                   NSStringFromClass(self_.class),
-                   NSStringFromCGRect(self_.frame));
-        return;
-    }
-
-    LGDockMode mode = LGResolveDockModeForView(self_);
-    if (mode == LGDockModeNone) {
-        LGDebugLog(@"dock host skip reason=resolve-none class=%@ frame=%@ bounds=%@ super=%@",
-                   NSStringFromClass(self_.class),
-                   NSStringFromCGRect(self_.frame),
-                   NSStringFromCGRect(self_.bounds),
-                   self_.superview ? NSStringFromClass(self_.superview.class) : @"nil");
-        return;
-    }
-    objc_setAssociatedObject(self_, kDockModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    self_.backgroundColor       = [UIColor clearColor];
-    self_.layer.backgroundColor = nil;
-    self_.layer.contents        = nil;
-    LGDebugLog(@"dock host attach class=%@ mode=%@ frame=%@ bounds=%@",
-               NSStringFromClass(self_.class),
-               LGDockModeName(mode),
-               NSStringFromCGRect(self_.frame),
-               NSStringFromCGRect(self_.bounds));
-    injectIntoDock(self_);
-    ensureDockTintOverlay(self_);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        ensureDockTintOverlay(self_);
-    });
-    if (![objc_getAssociatedObject(self_, kDockAttachedKey) boolValue]) {
-        objc_setAssociatedObject(self_, kDockAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [LGDockHostRegistry() addObject:self_];
-        sDockDisplayLinkState.activeCount++;
-        LGDisplayLinkStateDidChangeActivity(&sDockDisplayLinkState);
-        startDockDisplayLink();
-    }
-}
-
-- (void)layoutSubviews {
-    %orig;
-    UIView *self_ = (UIView *)self;
-    if (!LGDockEnabled()) {
-        removeDockOverlays(self_);
-        return;
-    }
-    if (isInsideCategoryStackBackground(self_)) {
-        removeDockOverlays(self_);
-        objc_setAssociatedObject(self_, kDockModeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        return;
-    }
-    LGDockMode mode = (LGDockMode)[objc_getAssociatedObject(self_, kDockModeKey) integerValue];
-    if (mode == LGDockModeNone) {
-        mode = LGResolveDockModeForView(self_);
-        if (mode != LGDockModeNone) {
-            objc_setAssociatedObject(self_, kDockModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            self_.backgroundColor = [UIColor clearColor];
-            self_.layer.backgroundColor = nil;
-            self_.layer.contents = nil;
-            LGDebugLog(@"dock host relayout attach class=%@ mode=%@ frame=%@ bounds=%@",
-                       NSStringFromClass(self_.class),
-                       LGDockModeName(mode),
-                       NSStringFromCGRect(self_.frame),
-                       NSStringFromCGRect(self_.bounds));
-            injectIntoDock(self_);
-            ensureDockTintOverlay(self_);
-            if (![objc_getAssociatedObject(self_, kDockAttachedKey) boolValue]) {
-                objc_setAssociatedObject(self_, kDockAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                [LGDockHostRegistry() addObject:self_];
-                sDockDisplayLinkState.activeCount++;
-                LGDisplayLinkStateDidChangeActivity(&sDockDisplayLinkState);
-                startDockDisplayLink();
-            }
-        }
-    }
-    if (mode == LGDockModeNone) return;
-    self_.backgroundColor       = [UIColor clearColor];
-    self_.layer.backgroundColor = nil;
-    for (UIView *sub in self_.subviews)
-        if ([sub isKindOfClass:[LiquidGlassView class]])
-            [(LiquidGlassView *)sub updateOrigin];
-    ensureDockTintOverlay(self_);
-}
-
-- (void)willMoveToWindow:(UIWindow *)newWindow {
-    UIView *self_ = (UIView *)self;
-    if (!newWindow && [objc_getAssociatedObject(self_, kDockAttachedKey) boolValue]) {
-        objc_setAssociatedObject(self_, kDockAttachedKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        objc_setAssociatedObject(self_, kDockModeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        objc_setAssociatedObject(self_, kDockLastLiveCaptureTimeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        [LGDockHostRegistry() removeObject:self_];
-        sDockDisplayLinkState.activeCount = MAX(0, sDockDisplayLinkState.activeCount - 1);
-        LGDisplayLinkStateDidChangeActivity(&sDockDisplayLinkState);
-        if (sDockDisplayLinkState.activeCount == 0) stopDockDisplayLink();
-    }
-    %orig;
-}
-
-%end
-
-%end
 
 %ctor {
-    if (!LGIsSpringBoardProcess()) return;
-    LGObservePreferenceChanges(^{
-        LGDockPrefsChanged(NULL, NULL, NULL, NULL, NULL);
+    LGRegisterMaterialHost(@"Dock", 80, ^BOOL(UIView *material) {
+        return dockModeForMaterial(material) != LGDockModeNone;
+    }, UIEdgeInsetsZero, ^CGFloat(__unused UIView *material) {
+
+        return -1.0;
+    }, nil, ^(UIView *material, LGLiveBackdropView *glass) {
+        configureDockGlass(material, glass);
     });
-    %init(LGDockSpringBoard);
 }

@@ -1,20 +1,16 @@
 #import "LGPrefsLiquidSlider.h"
-#import "../Shared/LGLiquidMotion.h"
-#import "../Shared/LGGlassRenderer.h"
+#import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGSharedSupport.h"
+#import "../Shared/LGLiquidMotion.h"
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
-void * const kLGPrefsSliderUseLiveCaptureKey = (void *)&kLGPrefsSliderUseLiveCaptureKey;
-void * const kLGPrefsSliderExtraCaptureInsetsKey = (void *)&kLGPrefsSliderExtraCaptureInsetsKey;
-void * const kLGPrefsSliderLabelCaptureRegionKey = (void *)&kLGPrefsSliderLabelCaptureRegionKey;
 void * const kLGPrefsSliderSegmentedKey = (void *)&kLGPrefsSliderSegmentedKey;
 void * const kLGPrefsSliderSegmentCountKey = (void *)&kLGPrefsSliderSegmentCountKey;
 void * const kLGPrefsSliderSegmentCentersKey = (void *)&kLGPrefsSliderSegmentCentersKey;
 void * const kLGPrefsSliderEndpointCentersKey = (void *)&kLGPrefsSliderEndpointCentersKey;
 
 static const CGFloat kLGPrefsSliderContractedThumbWidth = 36.0;
-static const CFTimeInterval kLGPrefsSliderTrackingSnapshotInterval = (1.0 / 60.0);
 
 static UIImage *LGTransparentThumbImage(CGSize size) {
     if (size.width <= 0 || size.height <= 0) return nil;
@@ -22,38 +18,6 @@ static UIImage *LGTransparentThumbImage(CGSize size) {
     UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
     return image;
-}
-
-static UIImage *LGCaptureSliderBackdropImage(UIView *captureView, CGRect captureRect) {
-    if (!captureView || CGRectIsEmpty(captureRect)) return nil;
-    UIGraphicsBeginImageContextWithOptions(captureRect.size, NO, 0.0);
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    CGContextTranslateCTM(context, -CGRectGetMinX(captureRect), -CGRectGetMinY(captureRect));
-    [captureView.layer renderInContext:context];
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
-}
-
-static UIImage *LGCompositeSliderCaptureRegion(UIImage *baseImage,
-                                               UIView *captureView,
-                                               CGRect captureRect,
-                                               CGRect regionRectInCapture) {
-    if (!baseImage || !captureView || CGRectIsEmpty(captureRect) || CGRectIsEmpty(regionRectInCapture)) return baseImage;
-    CGRect clippedRegion = CGRectIntersection(CGRectMake(0.0, 0.0, CGRectGetWidth(captureRect), CGRectGetHeight(captureRect)),
-                                              regionRectInCapture);
-    if (CGRectIsEmpty(clippedRegion)) return baseImage;
-
-    CGRect regionRectInView = CGRectOffset(clippedRegion, CGRectGetMinX(captureRect), CGRectGetMinY(captureRect));
-    UIImage *regionImage = LGCaptureSliderBackdropImage(captureView, regionRectInView);
-    if (!regionImage) return baseImage;
-
-    UIGraphicsBeginImageContextWithOptions(baseImage.size, NO, baseImage.scale);
-    [baseImage drawAtPoint:CGPointZero];
-    [regionImage drawInRect:clippedRegion];
-    UIImage *composited = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return composited ?: baseImage;
 }
 
 static BOOL LGSliderUsesSegmentedMode(UISlider *slider) {
@@ -89,6 +53,7 @@ static NSArray<NSNumber *> *LGSliderEndpointCenters(UISlider *slider) {
 }
 
 static CGFloat LGSliderThumbCenterXForValue(UISlider *slider, float value) {
+    // segmented and continuous tracks share one visual motion path
     NSInteger snapPointCount = LGSliderSnapPointCount(slider);
     NSArray<NSNumber *> *segmentCenters = LGSliderSegmentCenters(slider);
     float range = slider.maximumValue - slider.minimumValue;
@@ -146,34 +111,6 @@ static float LGSliderNearestSegmentValueForCenterX(UISlider *slider, CGFloat cen
     return bestValue;
 }
 
-static void LGDebugSegmentedSliderSnap(UISlider *slider, NSString *phase, CGFloat centerX, float snappedValue) {
-    NSArray<NSNumber *> *segmentCenters = LGSliderSegmentCenters(slider);
-    NSArray<NSNumber *> *endpointCenters = LGSliderEndpointCenters(slider);
-    LGDebugLog(@"settings segmented slider phase=%@ slider=%p value=%.3f center=%.3f snapped=%.3f min=%.3f max=%.3f points=%ld endpoints=%@ centers=%@",
-               phase,
-               slider,
-               slider.value,
-               centerX,
-               snappedValue,
-               slider.minimumValue,
-               slider.maximumValue,
-               (long)LGSliderSnapPointCount(slider),
-               endpointCenters ?: @[],
-               segmentCenters ?: @[]);
-}
-
-static UIColor *LGSliderFallbackTrackColor(void) {
-    if (@available(iOS 13.0, *)) {
-        return [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
-            if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
-                return [UIColor colorWithWhite:1.0 alpha:0.18];
-            }
-            return [UIColor quaternaryLabelColor];
-        }];
-    }
-    return [[UIColor blackColor] colorWithAlphaComponent:0.14];
-}
-
 static BOOL LGSliderColorLooksTooDarkForAccent(UIColor *color) {
     if (!color) return YES;
     CGFloat r = 0.0, g = 0.0, b = 0.0, a = 0.0;
@@ -216,131 +153,18 @@ static UIColor *LGSliderIdleThumbColor(UITraitCollection *traitCollection) {
     return UIColor.whiteColor;
 }
 
-static UIColor *LGSliderBackdropSheenColor(UITraitCollection *traitCollection) {
-    if (LGSliderIsDarkMode(traitCollection)) {
-        return [UIColor colorWithWhite:1.0 alpha:0.045];
-    }
-    return [UIColor colorWithWhite:1.0 alpha:0.12];
+static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
+    return LGSliderIsDarkMode(traitCollection)
+        ? [UIColor colorWithWhite:1.0 alpha:0.24]
+        : [UIColor colorWithWhite:0.0 alpha:0.20];
 }
-
-static UIColor *LGSliderActiveGlassLiftColor(UITraitCollection *traitCollection) {
-    if (LGSliderIsDarkMode(traitCollection)) {
-        return [UIColor colorWithWhite:1.0 alpha:0.105];
-    }
-    return [UIColor colorWithWhite:1.0 alpha:0.0];
-}
-
-static UIImage *LGApplySliderGlassLiftOverlayInRegion(UIImage *baseImage,
-                                                      UIColor *glassLiftColor,
-                                                      CGRect localTrackRect,
-                                                      CGRect regionRect) {
-    if (!baseImage || CGColorGetAlpha(glassLiftColor.CGColor) <= 0.001) return baseImage;
-    UIGraphicsBeginImageContextWithOptions(baseImage.size, NO, baseImage.scale);
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    [baseImage drawAtPoint:CGPointZero];
-    if (!CGRectIsNull(regionRect) && !CGRectIsEmpty(regionRect)) {
-        CGContextSaveGState(context);
-        CGContextClipToRect(context, regionRect);
-    }
-    UIBezierPath *liftPath = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(localTrackRect, -34.0, -16.0)
-                                                        cornerRadius:CGRectGetHeight(localTrackRect) * 3.4];
-    [glassLiftColor setFill];
-    [liftPath fill];
-    if (!CGRectIsNull(regionRect) && !CGRectIsEmpty(regionRect)) {
-        CGContextRestoreGState(context);
-    }
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image ?: baseImage;
-}
-
-static UIImage *LGApplySliderGlassLiftOverlay(UIImage *baseImage,
-                                              UIColor *glassLiftColor,
-                                              CGRect localTrackRect) {
-    return LGApplySliderGlassLiftOverlayInRegion(baseImage, glassLiftColor, localTrackRect, CGRectNull);
-}
-
-static UIImage *LGRenderSliderBackdropImage(CGSize size,
-                                            UIColor *backgroundColor,
-                                            UIColor *trackColor,
-                                            UIColor *fillColor,
-                                            UIColor *sheenColor,
-                                            UIColor *glassLiftColor,
-                                            CGRect localTrackRect,
-                                            CGFloat fillEndX) {
-    if (size.width <= 0.0 || size.height <= 0.0) return nil;
-    UIGraphicsBeginImageContextWithOptions(size, NO, 0);
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    [backgroundColor setFill];
-    CGContextFillRect(context, CGRectMake(0, 0, size.width, size.height));
-
-    UIBezierPath *trackPath = [UIBezierPath bezierPathWithRoundedRect:localTrackRect
-                                                         cornerRadius:CGRectGetHeight(localTrackRect) * 0.5];
-    [trackColor setFill];
-    [trackPath fill];
-
-    CGFloat clampedFillEndX = fmax(CGRectGetMinX(localTrackRect), fmin(fillEndX, CGRectGetMaxX(localTrackRect)));
-    CGRect fillRect = CGRectMake(CGRectGetMinX(localTrackRect),
-                                 CGRectGetMinY(localTrackRect),
-                                 clampedFillEndX - CGRectGetMinX(localTrackRect),
-                                 CGRectGetHeight(localTrackRect));
-    if (fillRect.size.width > 0.0) {
-        UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect
-                                                            cornerRadius:CGRectGetHeight(fillRect) * 0.5];
-        [fillColor setFill];
-        [fillPath fill];
-    }
-
-    CGContextSetBlendMode(context, kCGBlendModeNormal);
-    [sheenColor setFill];
-    CGContextFillRect(context, CGRectMake(0, 0, size.width, fmin(12.0, size.height * 0.35)));
-
-    if (CGColorGetAlpha(glassLiftColor.CGColor) > 0.001) {
-        UIBezierPath *liftPath = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(localTrackRect, -34.0, -16.0)
-                                                            cornerRadius:CGRectGetHeight(localTrackRect) * 3.4];
-        [glassLiftColor setFill];
-        [liftPath fill];
-    }
-
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
-}
-
-@interface LGInsetShadowView : UIView
-@end
-
-@implementation LGInsetShadowView
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (!self) return nil;
-    self.userInteractionEnabled = NO;
-    self.backgroundColor = UIColor.clearColor;
-    self.layer.compositingFilter = @"multiplyBlendMode";
-    return self;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGFloat shadowRadius = 3.5;
-    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.bounds, -1.0, -shadowRadius * 0.5)
-                                                    cornerRadius:CGRectGetHeight(self.bounds) * 0.5];
-    UIBezierPath *inner = [[UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.bounds, 0.0, shadowRadius * 0.55)
-                                                      cornerRadius:CGRectGetHeight(self.bounds) * 0.5] bezierPathByReversingPath];
-    [path appendPath:inner];
-    self.layer.shadowPath = path.CGPath;
-    self.layer.shadowColor = [UIColor colorWithWhite:0.0 alpha:1.0].CGColor;
-    self.layer.shadowOpacity = 0.18;
-    self.layer.shadowRadius = shadowRadius;
-    self.layer.shadowOffset = CGSizeMake(0.0, shadowRadius * 0.75);
-}
-
-@end
 
 @interface LGPrefsLiquidSlider ()
-@property (nonatomic, strong) LGSharedGlassView *glassThumbView;
-@property (nonatomic, strong) LGInsetShadowView *glassInsetShadowView;
+@property (nonatomic, strong) LGLiveBackdropView *glassThumbView;
+@property (nonatomic, strong) UIView *trackBackgroundView;
+@property (nonatomic, strong) UIView *magneticFillView;
+@property (nonatomic, strong) UIColor *liquidAccentColor;
+@property (nonatomic, strong) UIColor *liquidTrackColor;
 @property (nonatomic, strong) UIView *contractedThumbView;
 @property (nonatomic, strong) UIImpactFeedbackGenerator *lightFeedbackGenerator;
 @property (nonatomic, strong) UIImpactFeedbackGenerator *mediumFeedbackGenerator;
@@ -366,7 +190,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
 @property (nonatomic, assign) BOOL hasRenderedThumbState;
 @property (nonatomic, strong) CADisplayLink *thumbDisplayLink;
 @property (nonatomic, assign) CFTimeInterval lastDisplayLinkTimestamp;
-@property (nonatomic, assign) CFTimeInterval lastSnapshotRefreshTimestamp;
 @end
 
 @implementation LGPrefsLiquidSlider
@@ -401,11 +224,40 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     UIImage *clearImage = LGTransparentThumbImage(self.contractedThumbSize);
     [self setThumbImage:clearImage forState:UIControlStateNormal];
     [self setThumbImage:clearImage forState:UIControlStateHighlighted];
+    [self enforceCustomTrackOnly];
     self.thumbTintColor = UIColor.clearColor;
     self.lightFeedbackGenerator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     self.mediumFeedbackGenerator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [self ensureGlassThumbView];
     [self ensureContractedThumbView];
+    [self ensureTrackBackgroundView];
+    [self ensureMagneticFillView];
+    [self updateThumbMaterialColors];
+}
+
+- (void)enforceCustomTrackOnly {
+    UIImage *transparentTrack = [LGTransparentThumbImage(CGSizeMake(2.0, 2.0))
+        resizableImageWithCapInsets:UIEdgeInsetsZero resizingMode:UIImageResizingModeStretch];
+    [self setMinimumTrackImage:transparentTrack forState:UIControlStateNormal];
+    [self setMinimumTrackImage:transparentTrack forState:UIControlStateHighlighted];
+    [self setMaximumTrackImage:transparentTrack forState:UIControlStateNormal];
+    [self setMaximumTrackImage:transparentTrack forState:UIControlStateHighlighted];
+    [super setMinimumTrackTintColor:UIColor.clearColor];
+    [super setMaximumTrackTintColor:UIColor.clearColor];
+}
+
+- (void)setMinimumTrackTintColor:(UIColor *)color {
+
+    if (color && color != UIColor.clearColor) self.liquidAccentColor = color;
+    [super setMinimumTrackTintColor:UIColor.clearColor];
+    [self enforceCustomTrackOnly];
+    [self updateThumbMaterialColors];
+}
+
+- (void)setMaximumTrackTintColor:(UIColor *)color {
+    if (color && color != UIColor.clearColor) self.liquidTrackColor = color;
+    [super setMaximumTrackTintColor:UIColor.clearColor];
+    [self enforceCustomTrackOnly];
     [self updateThumbMaterialColors];
 }
 
@@ -414,7 +266,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     if (!self.window) {
         [self stopThumbDisplayLink];
     }
-    [self refreshGlassSnapshotIfNeeded:YES];
     [self syncRenderedThumbStateImmediately];
     [self updateGlassThumbFrameAnimated:NO];
 }
@@ -423,6 +274,8 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     [super layoutSubviews];
     [self ensureGlassThumbView];
     [self ensureContractedThumbView];
+    [self ensureTrackBackgroundView];
+    [self ensureMagneticFillView];
     [self updateThumbMaterialColors];
     if (!self.hasRenderedThumbState) {
         [self syncRenderedThumbStateImmediately];
@@ -435,7 +288,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     if (@available(iOS 13.0, *)) {
         if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
             [self updateThumbMaterialColors];
-            [self refreshGlassSnapshotIfNeeded:YES];
             [self updateGlassThumbFrameAnimated:NO];
         }
     }
@@ -476,7 +328,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     [self startThumbDisplayLinkIfNeeded];
     [self.lightFeedbackGenerator prepare];
     [self.mediumFeedbackGenerator prepare];
-    [self refreshGlassSnapshotIfNeeded:YES];
     [self setThumbExpanded:YES animated:YES];
     [self updateGlassThumbFrameAnimated:NO];
     return YES;
@@ -488,7 +339,7 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     CFTimeInterval now = CACurrentMediaTime();
     CFTimeInterval dt = MAX(now - self.lastTouchTime, 0.001);
     CGFloat rawVelocity = (touchX - self.lastTouchX) / dt;
-    self.thumbVelocityX = self.thumbVelocityX * 0.35 + rawVelocity * 0.65;
+    self.thumbVelocityX = LGLiquidFilteredVelocity(self.thumbVelocityX, rawVelocity);
     self.lastTouchX = touchX;
     self.lastTouchTime = now;
     [self updatePresentedThumbForTouchX:touchX];
@@ -507,7 +358,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     if (LGSliderUsesSegmentedMode(self)) {
         CGFloat snapCenterX = self.hasPresentedThumbCenter ? self.logicalThumbCenterX : [self resolvedThumbCenterX];
         float snappedValue = LGSliderNearestSegmentValueForCenterX(self, snapCenterX);
-        LGDebugSegmentedSliderSnap(self, @"end", snapCenterX, snappedValue);
         [super setValue:snappedValue animated:NO];
         [self sendActionsForControlEvents:UIControlEventValueChanged];
     }
@@ -527,7 +377,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     if (LGSliderUsesSegmentedMode(self)) {
         CGFloat snapCenterX = self.hasPresentedThumbCenter ? self.logicalThumbCenterX : [self resolvedThumbCenterX];
         float snappedValue = LGSliderNearestSegmentValueForCenterX(self, snapCenterX);
-        LGDebugSegmentedSliderSnap(self, @"cancel", snapCenterX, snappedValue);
         [super setValue:snappedValue animated:NO];
         [self sendActionsForControlEvents:UIControlEventValueChanged];
     }
@@ -580,6 +429,7 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
 }
 
 - (void)updatePresentedThumbForTouchX:(CGFloat)touchX {
+    // logical value stays clamped while the visible thumb can overhang
     CGFloat minX = [self minimumThumbCenterX];
     CGFloat maxX = [self maximumThumbCenterX];
     CGFloat clampedX = fmax(minX, fmin(touchX, maxX));
@@ -635,17 +485,10 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
 
 - (void)ensureGlassThumbView {
     if (self.glassThumbView) return;
-    LGEnsureSharedGlassPipelinesReady();
-    LGSharedGlassView *glass = [[LGSharedGlassView alloc] initWithFrame:CGRectZero sourceImage:nil sourceOrigin:CGPointZero];
+    LGLiveBackdropView *glass = [[LGLiveBackdropView alloc] initWithFrame:CGRectZero
+                                                               groupName:nil
+                                                              filterType:LGFilterTypeForHostPrefix(@"PrefsSlider")];
     glass.userInteractionEnabled = NO;
-    glass.releasesSourceAfterUpload = YES;
-    glass.bezelWidth = 10.0;
-    glass.glassThickness = 30.0;
-    glass.refractionScale = 1.2;
-    glass.refractiveIndex = 1.5;
-    glass.specularOpacity = 0.04;
-    glass.blur = 0.0;
-    glass.sourceScale = 1.0;
     glass.layer.shadowColor = UIColor.blackColor.CGColor;
     glass.layer.shadowOpacity = 0.08;
     glass.layer.shadowRadius = 4.0;
@@ -655,11 +498,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     self.glassThumbView = glass;
     [self addSubview:glass];
 
-    LGInsetShadowView *insetShadow = [[LGInsetShadowView alloc] initWithFrame:glass.bounds];
-    insetShadow.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    insetShadow.alpha = 1.0;
-    [glass addSubview:insetShadow];
-    self.glassInsetShadowView = insetShadow;
 }
 
 - (void)ensureContractedThumbView {
@@ -675,17 +513,36 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     [self addSubview:thumb];
 }
 
+- (void)ensureMagneticFillView {
+    if (self.magneticFillView) return;
+    [self ensureTrackBackgroundView];
+    UIView *fill = [[UIView alloc] initWithFrame:CGRectZero];
+    fill.userInteractionEnabled = NO;
+    fill.clipsToBounds = YES;
+    self.magneticFillView = fill;
+
+    [self insertSubview:fill belowSubview:self.glassThumbView];
+}
+
+- (void)ensureTrackBackgroundView {
+    if (self.trackBackgroundView) return;
+    UIView *track = [[UIView alloc] initWithFrame:CGRectZero];
+    track.userInteractionEnabled = NO;
+    self.trackBackgroundView = track;
+    [self insertSubview:track belowSubview:self.glassThumbView];
+}
+
 - (void)updateThumbMaterialColors {
     BOOL darkMode = LGSliderIsDarkMode(self.traitCollection);
     self.contractedThumbView.backgroundColor = LGSliderIdleThumbColor(self.traitCollection);
     self.contractedThumbView.layer.shadowOpacity = 0.12;
     self.contractedThumbView.layer.shadowRadius = 5.0;
-    self.glassThumbView.specularOpacity = darkMode ? 0.02 : 0.0;
     self.glassThumbView.layer.shadowOpacity = darkMode ? 0.12 : 0.08;
     self.glassThumbView.layer.shadowRadius = darkMode ? 7.0 : 4.0;
     self.glassThumbView.layer.shadowOffset = darkMode ? CGSizeMake(0.0, 2.0) : CGSizeMake(0.0, 1.0);
     self.glassThumbView.layer.shadowColor = UIColor.blackColor.CGColor;
-    self.glassInsetShadowView.alpha = darkMode ? 0.68 : 1.0;
+    self.magneticFillView.backgroundColor = self.liquidAccentColor ?: LGSliderEffectiveAccentColor(self);
+    self.trackBackgroundView.backgroundColor = self.liquidTrackColor ?: LGSliderInactiveTrackColor(self.traitCollection);
 }
 
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
@@ -704,7 +561,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     [self.thumbDisplayLink invalidate];
     self.thumbDisplayLink = nil;
     self.lastDisplayLinkTimestamp = 0.0;
-    self.lastSnapshotRefreshTimestamp = 0.0;
 }
 
 - (void)syncRenderedThumbStateImmediately {
@@ -732,7 +588,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
         self.renderedThumbSize = CGSizeMake(nextState.width, nextState.height);
         self.renderedExpansion += (self.targetExpansion - self.renderedExpansion) * expansionLerp;
     }
-    [self refreshGlassSnapshotIfNeeded:YES];
     [self updateGlassThumbFrameAnimated:NO];
 
     BOOL settledCenter = fabs(targetCenterX - self.renderedThumbCenterX) < 0.08;
@@ -747,97 +602,6 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     }
 }
 
-- (void)refreshGlassSnapshotIfNeeded:(BOOL)force {
-    if (!self.window) return;
-    if (!force && self.glassThumbView.sourceImage) return;
-    CFTimeInterval now = CACurrentMediaTime();
-    if ((self.trackingActive || self.thumbDisplayLink) && self.lastSnapshotRefreshTimestamp > 0.0) {
-        if ((now - self.lastSnapshotRefreshTimestamp) < kLGPrefsSliderTrackingSnapshotInterval) {
-            return;
-        }
-    }
-    UIView *captureView = self.superview ?: self;
-    CGRect sliderRectInCapture = [self convertRect:self.bounds toView:captureView];
-    CGRect captureRect = CGRectInset(sliderRectInCapture, -20.0, -20.0);
-    NSValue *insetsValue = objc_getAssociatedObject(self, kLGPrefsSliderExtraCaptureInsetsKey);
-    if (insetsValue) {
-        UIEdgeInsets insets = [insetsValue UIEdgeInsetsValue];
-        captureRect = UIEdgeInsetsInsetRect(captureRect, UIEdgeInsetsMake(-insets.top, -insets.left, -insets.bottom, -insets.right));
-    }
-    captureRect = CGRectIntersection(captureView.bounds, captureRect);
-    CGPoint captureOriginInScreen = [captureView convertPoint:captureRect.origin toView:nil];
-    CGRect trackRect = [self trackRectForBounds:self.bounds];
-    CGRect trackRectInCapture = CGRectOffset(trackRect, CGRectGetMinX(sliderRectInCapture) - CGRectGetMinX(captureRect),
-                                             CGRectGetMinY(sliderRectInCapture) - CGRectGetMinY(captureRect));
-    CGFloat trackMinX = CGRectGetMinX(trackRectInCapture);
-    CGFloat trackMaxX = CGRectGetMaxX(trackRectInCapture);
-    CGFloat valueRange = self.maximumValue - self.minimumValue;
-    CGFloat normalizedValue = valueRange > 0.0 ? ((self.value - self.minimumValue) / valueRange) : 0.0;
-    normalizedValue = fmax(0.0, fmin(1.0, normalizedValue));
-    CGFloat presentedCenterX = (self.hasRenderedThumbState ? self.renderedThumbCenterX : [self resolvedThumbCenterX]);
-    CGFloat presentedFillEndX = presentedCenterX + CGRectGetMinX(sliderRectInCapture) - CGRectGetMinX(captureRect);
-    CGFloat snapZone = fmin(34.0, CGRectGetWidth(trackRectInCapture) * 0.20);
-    CGFloat fillEndX = presentedFillEndX;
-    if (normalizedValue <= 0.0001) {
-        fillEndX = trackMinX;
-    } else if (normalizedValue >= 0.9999) {
-        fillEndX = trackMaxX;
-    } else if (presentedFillEndX < trackMinX + snapZone) {
-        CGFloat t = fmax(0.0, fmin((presentedFillEndX - trackMinX) / snapZone, 1.0));
-        CGFloat eased = t * t;
-        fillEndX = trackMinX + (presentedFillEndX - trackMinX) * eased;
-    } else if (presentedFillEndX > trackMaxX - snapZone) {
-        CGFloat t = fmax(0.0, fmin((trackMaxX - presentedFillEndX) / snapZone, 1.0));
-        CGFloat eased = t * t;
-        fillEndX = trackMaxX - (trackMaxX - presentedFillEndX) * eased;
-    }
-    UIColor *backgroundColor = captureView.backgroundColor ?: (self.superview.backgroundColor ?: [UIColor systemBackgroundColor]);
-    UIColor *trackColor = self.maximumTrackTintColor ?: LGSliderFallbackTrackColor();
-    UIColor *fillColor = LGSliderEffectiveAccentColor(self);
-    UIColor *sheenColor = LGSliderBackdropSheenColor(self.traitCollection);
-    UIColor *glassLiftColor = LGSliderActiveGlassLiftColor(self.traitCollection);
-    BOOL segmented = LGSliderUsesSegmentedMode(self);
-    UIImage *snapshot = nil;
-    BOOL wasHidden = self.hidden;
-    CGFloat previousAlpha = self.alpha;
-    if (segmented) {
-        fillColor = UIColor.clearColor;
-        fillEndX = CGRectGetMinX(trackRectInCapture);
-        snapshot = LGRenderSliderBackdropImage(captureRect.size, backgroundColor, trackColor, fillColor, sheenColor, glassLiftColor,
-                                               trackRectInCapture, fillEndX);
-        CGRect segmentRegion = CGRectInset(trackRectInCapture, -14.0, -12.0);
-        self.hidden = YES;
-        self.alpha = 0.0;
-        snapshot = LGCompositeSliderCaptureRegion(snapshot, captureView, captureRect, segmentRegion);
-        self.hidden = wasHidden;
-        self.alpha = previousAlpha;
-        snapshot = LGApplySliderGlassLiftOverlay(snapshot, glassLiftColor, trackRectInCapture);
-    } else {
-        snapshot = LGRenderSliderBackdropImage(captureRect.size, backgroundColor, trackColor, fillColor, sheenColor, glassLiftColor,
-                                               trackRectInCapture, fillEndX);
-    }
-    if ([objc_getAssociatedObject(self, kLGPrefsSliderUseLiveCaptureKey) boolValue]) {
-        NSValue *labelRegionValue = objc_getAssociatedObject(self, kLGPrefsSliderLabelCaptureRegionKey);
-        CGRect labelRegion = labelRegionValue ? [labelRegionValue CGRectValue] : CGRectZero;
-        if (!CGRectIsEmpty(labelRegion)) {
-            labelRegion = CGRectOffset(labelRegion,
-                                       CGRectGetMinX(sliderRectInCapture) - CGRectGetMinX(captureRect),
-                                       CGRectGetMinY(sliderRectInCapture) - CGRectGetMinY(captureRect));
-        }
-        self.hidden = YES;
-        self.alpha = 0.0;
-        snapshot = LGCompositeSliderCaptureRegion(snapshot, captureView, captureRect, labelRegion);
-        self.hidden = wasHidden;
-        self.alpha = previousAlpha;
-        snapshot = LGApplySliderGlassLiftOverlayInRegion(snapshot, glassLiftColor, trackRectInCapture, labelRegion);
-    }
-    if (!snapshot) return;
-    self.lastSnapshotRefreshTimestamp = now;
-    self.glassThumbView.sourceOrigin = captureOriginInScreen;
-    self.glassThumbView.sourceImage = snapshot;
-    [self.glassThumbView scheduleDraw];
-}
-
 - (void)setThumbExpanded:(BOOL)expanded animated:(BOOL)animated {
     CGSize nextSize = expanded ? self.expandedThumbSize : self.contractedThumbSize;
     self.currentThumbSize = nextSize;
@@ -846,8 +610,7 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     if (expanded || self.hasRenderedThumbState) {
         [self startThumbDisplayLinkIfNeeded];
     }
-    self.glassThumbView.cornerRadius = nextSize.height * 0.5;
-    [self refreshGlassSnapshotIfNeeded:expanded];
+    self.glassThumbView.layer.cornerRadius = nextSize.height * 0.5;
     (void)animated;
     [self updateGlassThumbFrameAnimated:NO];
 }
@@ -855,6 +618,8 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
 - (void)updateGlassThumbFrameAnimated:(BOOL)animated {
     [self ensureGlassThumbView];
     [self ensureContractedThumbView];
+    [self ensureTrackBackgroundView];
+    [self ensureMagneticFillView];
     if (!self.trackingActive && !self.thumbDisplayLink) {
         [self syncRenderedThumbStateImmediately];
     }
@@ -862,7 +627,7 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     CGRect contractedFrame = CGRectInset(frame,
                                          (frame.size.width - self.contractedThumbSize.width) * 0.5,
                                          (frame.size.height - self.contractedThumbSize.height) * 0.5);
-    self.glassThumbView.cornerRadius = CGRectGetHeight(frame) * 0.5;
+    self.glassThumbView.layer.cornerRadius = CGRectGetHeight(frame) * 0.5;
     (void)animated;
     CGFloat expansion = fmax(0.0, fmin(self.renderedExpansion, 1.0));
     CGFloat visualExpansion = expansion * expansion * (3.0 - (2.0 * expansion));
@@ -879,12 +644,54 @@ static UIImage *LGRenderSliderBackdropImage(CGSize size,
     self.glassThumbView.transform = CGAffineTransformMakeScale(glassScaleX, glassScaleY);
     self.contractedThumbView.transform = CGAffineTransformMakeScale(contractedScale, contractedScale);
     self.contractedThumbView.layer.cornerRadius = CGRectGetHeight(contractedFrame) * 0.5;
-    self.glassThumbView.shapeMaskImage = nil;
     self.glassThumbView.hidden = visualExpansion < 0.01;
     self.contractedThumbView.hidden = visualExpansion > 0.99;
-    if (self.trackingActive || fabs(self.rubberBandOffset) > 0.001) {
-        [self.glassThumbView updateOrigin];
+    [self updateMagneticFill];
+}
+
+- (void)updateMagneticFill {
+    CGRect track = [self trackRectForBounds:self.bounds];
+    if (CGRectIsEmpty(track) || LGSliderUsesSegmentedMode(self)) {
+        self.trackBackgroundView.hidden = YES;
+        self.magneticFillView.hidden = YES;
+        return;
     }
+
+    self.trackBackgroundView.hidden = NO;
+    self.trackBackgroundView.frame = track;
+    self.trackBackgroundView.layer.cornerRadius = CGRectGetHeight(track) * 0.5;
+    self.trackBackgroundView.layer.cornerCurve = kCACornerCurveContinuous;
+
+    CGFloat range = self.maximumValue - self.minimumValue;
+    CGFloat normalized = range > FLT_EPSILON ? (self.value - self.minimumValue) / range : 0.0;
+    normalized = fmax(0.0, fmin(1.0, normalized));
+    CGFloat minX = CGRectGetMinX(track), maxX = CGRectGetMaxX(track);
+    CGFloat presentedX = self.hasRenderedThumbState ? self.renderedThumbCenterX : [self resolvedThumbCenterX];
+    CGFloat fillEnd = presentedX;
+    CGFloat minimumThumbX = [self minimumThumbCenterX];
+    CGFloat maximumThumbX = [self maximumThumbCenterX];
+
+    CGFloat startSnapZone = fmin(8.0, CGRectGetWidth(track) * 0.05);
+    CGFloat endSnapZone = fmin(8.0, CGRectGetWidth(track) * 0.05);
+    if (normalized <= 0.0001 || presentedX <= minimumThumbX + 0.5) {
+        fillEnd = minX;
+    } else if (normalized >= 0.9999 || presentedX >= maximumThumbX - 0.5) {
+        fillEnd = maxX;
+    } else if (presentedX < minimumThumbX + startSnapZone) {
+        CGFloat t = fmax(0.0, fmin((presentedX - minimumThumbX) / startSnapZone, 1.0));
+        fillEnd = minX + (presentedX - minX) * t * t;
+    } else if (presentedX > maximumThumbX - endSnapZone) {
+        CGFloat t = fmax(0.0, fmin((maximumThumbX - presentedX) / endSnapZone, 1.0));
+        fillEnd = maxX - (maxX - presentedX) * t * t;
+    }
+
+    CGFloat seamOverlap = fillEnd > minX + 0.01 ? 1.25 : 0.0;
+    CGFloat width = fmax(0.0, fmin(fillEnd + seamOverlap, maxX) - minX);
+    self.magneticFillView.hidden = width < 0.5;
+    self.magneticFillView.frame = CGRectMake(minX, CGRectGetMinY(track), width, CGRectGetHeight(track));
+    self.magneticFillView.layer.cornerRadius = CGRectGetHeight(track) * 0.5;
+    self.magneticFillView.layer.cornerCurve = kCACornerCurveContinuous;
+
 }
 
 @end

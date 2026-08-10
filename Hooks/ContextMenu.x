@@ -1,72 +1,37 @@
-#import "../LiquidGlass.h"
-#import "../Shared/LGHookSupport.h"
-#import "../Shared/LGBannerCaptureSupport.h"
-#import "../Shared/LGPrefAccessors.h"
+#import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
+#import "../Shared/LGLiveBackdropView.h"
+#import "../Shared/LGGlassKit.h"
 #import <objc/runtime.h>
 
-static const NSInteger kContextMenuGlassTag     = 0xBEEF;
-static const NSInteger kContextMenuTintTag      = 0xDEAD;
-static const NSInteger kContextMenuDividerTag   = 0xD171;
-static void *kContextMenuReusableOriginalBackgroundKey = &kContextMenuReusableOriginalBackgroundKey;
-static void *kContextMenuOriginalCornerRadiusKey = &kContextMenuOriginalCornerRadiusKey;
-static void *kContextMenuOriginalCornerCurveKey = &kContextMenuOriginalCornerCurveKey;
-static void *kContextMenuBackdropViewKey = &kContextMenuBackdropViewKey;
-static void *kContextMenuLastLiveCaptureTimeKey = &kContextMenuLastLiveCaptureTimeKey;
-static NSHashTable<UIVisualEffectView *> *sContextMenuEffectHosts = nil;
+static const NSInteger kCtxDividerTag    = 0xD171;
+static const CGFloat   kCtxCornerRadius  = 22.0;
+static const CGFloat   kCtxRowInset      = 16.0;
+static const CGFloat   kCtxIconSpacing   = 12.0;
+static void *kCtxGlassKey         = &kCtxGlassKey;
+static void *kCtxGapOriginalBgKey = &kCtxGapOriginalBgKey;
+static void *kCtxOriginalAlphaKey = &kCtxOriginalAlphaKey;
+static void *kCtxOriginalHiddenKey = &kCtxOriginalHiddenKey;
+static void *kCtxOriginalRadiusKey = &kCtxOriginalRadiusKey;
+static void *kCtxOriginalCurveKey = &kCtxOriginalCurveKey;
+static void *kCtxOriginalFrameKey = &kCtxOriginalFrameKey;
 
-static BOOL LGContextMenuColorIsEffectivelyTransparent(UIColor *color) {
-    if (!color) return YES;
-    CGColorRef cgColor = color.CGColor;
-    return CGColorGetAlpha(cgColor) <= 0.001;
+static void ctxRememberVisualState(UIView *view) {
+    if (!view) return;
+    if (!objc_getAssociatedObject(view, kCtxOriginalAlphaKey)) {
+        objc_setAssociatedObject(view, kCtxOriginalAlphaKey, @(view.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(view, kCtxOriginalHiddenKey, @(view.hidden), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(view, kCtxOriginalRadiusKey, @(view.layer.cornerRadius), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(view, kCtxOriginalCurveKey, view.layer.cornerCurve ?: @"", OBJC_ASSOCIATION_COPY_NONATOMIC);
+    }
 }
 
-LG_ENABLED_BOOL_PREF_FUNC(LGContextMenuEnabled, "ContextMenu.Enabled", YES)
-static CGFloat LGContextMenuCornerRadius(void) { return LGDynamicDefaultFloat(@"ContextMenu.CornerRadius", 22.0); }
-LG_FLOAT_PREF_FUNC(LGContextMenuBezelWidth, "ContextMenu.BezelWidth", 18.0)
-LG_FLOAT_PREF_FUNC(LGContextMenuGlassThickness, "ContextMenu.GlassThickness", 100.0)
-LG_FLOAT_PREF_FUNC(LGContextMenuRefraction, "ContextMenu.RefractionScale", 1.8)
-LG_FLOAT_PREF_FUNC(LGContextMenuRefractiveIndex, "ContextMenu.RefractiveIndex", 1.2)
-LG_FLOAT_PREF_FUNC(LGContextMenuSpecular, "ContextMenu.SpecularOpacity", 0.8)
-LG_FLOAT_PREF_FUNC(LGContextMenuBlur, "ContextMenu.Blur", 10.0)
-LG_FLOAT_PREF_FUNC(LGContextMenuLightTintAlpha, "ContextMenu.LightTintAlpha", 0.8)
-LG_FLOAT_PREF_FUNC(LGContextMenuDarkTintAlpha, "ContextMenu.DarkTintAlpha", 0.6)
-LG_FLOAT_PREF_FUNC(LGContextMenuWallpaperScale, "ContextMenu.WallpaperScale", 0.1)
-LG_FLOAT_PREF_FUNC(LGContextMenuRowInset, "ContextMenu.RowInset", 16.0)
-LG_FLOAT_PREF_FUNC(LGContextMenuIconSpacing, "ContextMenu.IconSpacing", 12.0)
-LG_FLOAT_PREF_FUNC(LGContextMenuLiveCaptureFPS, "ContextMenu.LiveCaptureFPS", 25.0)
-
-static void LGContextMenuRefreshAllHosts(void);
-static void LGContextMenuRefreshAttachedHosts(void);
-static void LGStyleContextMenuListSubviews(UIView *listView);
-static CGFloat LGResolvedContextMenuCornerRadiusForView(UIView *view);
-
-static LGDisplayLinkState sContextMenuDisplayLinkState = {0};
-static void *kCtxContainerAttachedKey  = &kCtxContainerAttachedKey;
-static void *kContextMenuBackdropAlphaKey = &kContextMenuBackdropAlphaKey;
-
-static void startContextMenuLink(void) {
-    NSInteger fps = LG_prefersLiveCapture(@"ContextMenu.RenderingMode")
-        ? LGPreferredLiveCaptureFramesPerSecond(LGContextMenuLiveCaptureFPS())
-        : LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 1);
-    LGStartDisplayLinkStateWithPreferenceKey(&sContextMenuDisplayLinkState,
-                                             fps,
-                                             @"DisplayLink.ContextMenu.Enabled",
-                                             ^{
-        NSInteger nextFPS = LG_prefersLiveCapture(@"ContextMenu.RenderingMode")
-            ? LGPreferredLiveCaptureFramesPerSecond(LGContextMenuLiveCaptureFPS())
-            : LGPreferredFramesPerSecondForKey(@"Homescreen.FPS", 1);
-        LGSetDisplayLinkStatePreferredFPS(&sContextMenuDisplayLinkState, nextFPS);
-        if (LG_prefersLiveCapture(@"ContextMenu.RenderingMode")) LGContextMenuRefreshAttachedHosts();
-        else LG_updateRegisteredGlassViews(LGUpdateGroupContextMenu);
-    });
+static void ctxRememberFrame(UIView *view) {
+    if (view && !objc_getAssociatedObject(view, kCtxOriginalFrameKey))
+        objc_setAssociatedObject(view, kCtxOriginalFrameKey, [NSValue valueWithCGRect:view.frame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-static void stopContextMenuLink(void) {
-    LGStopDisplayLinkState(&sContextMenuDisplayLinkState);
-}
-
-static UIView *findDescendantMatching(UIView *root, BOOL (^match)(UIView *view)) {
-    if (!root) return nil;
+static UIView *findDescendantMatching(UIView *root, BOOL (^match)(UIView *v)) {
     for (UIView *sub in root.subviews) {
         if (match(sub)) return sub;
         UIView *found = findDescendantMatching(sub, match);
@@ -75,155 +40,101 @@ static UIView *findDescendantMatching(UIView *root, BOOL (^match)(UIView *view))
     return nil;
 }
 
-static NSHashTable<UIVisualEffectView *> *LGContextMenuEffectRegistry(void) {
-    if (!sContextMenuEffectHosts) {
-        sContextMenuEffectHosts = [NSHashTable weakObjectsHashTable];
-    }
-    return sContextMenuEffectHosts;
+static BOOL isInsideContextMenu(UIView *v) {
+    return hasAncestorOfClassName(v, @"_UIContextMenuContainerView") ||
+           hasAncestorOfClassName(v, @"_UIContextMenuListView");
 }
 
-static BOOL LGContextMenuCellContextViewIsStock(UIView *view) {
-    if (!view) return NO;
-    if (![NSStringFromClass(view.class) isEqualToString:@"_UIContextMenuCellContextView"]) return NO;
-
-    UIView *parent = view.superview;
-    if (!parent || ![NSStringFromClass(parent.class) isEqualToString:@"_UIContextMenuCell"]) return NO;
-
-    return findDescendantMatching(view, ^BOOL(UIView *candidate) {
-        return [candidate isKindOfClass:[UIStackView class]];
+static BOOL ctxCellContextViewIsStock(UIView *view) {
+    if (!isExactClass(view, @"_UIContextMenuCellContextView")) return NO;
+    if (!isExactClass(view.superview, @"_UIContextMenuCell")) return NO;
+    return findDescendantMatching(view, ^BOOL(UIView *c) {
+        return [c isKindOfClass:[UIStackView class]];
     }) != nil;
 }
 
-static BOOL LGIsContextMenuCellContentView(UIView *view) {
-    if (!view) return NO;
-    return [NSStringFromClass(view.class) isEqualToString:@"_UIContextMenuCellContentView"];
+static BOOL shouldRoundContextMenuSubview(UIView *view) {
+    if (isExactClass(view, @"_UIContextMenuCellContextView"))
+        return ctxCellContextViewIsStock(view);
+    CGSize s = view.bounds.size;
+    return s.width >= 20.0 && s.height >= 20.0;
 }
 
-static BOOL shouldRoundContextMenuSubview(UIView *view) {
-    NSString *clsName = NSStringFromClass(view.class);
-    if ([clsName isEqualToString:@"_UIContextMenuCellContextView"]) {
-        return LGContextMenuCellContextViewIsStock(view);
+static void applyContextMenuRoundedStyle(UIView *view) {
+    ctxRememberVisualState(view);
+    CGFloat r = kCtxCornerRadius;
+    if (isExactClass(view, @"_UIContextMenuCellContentView") ||
+        isExactClass(view, @"_UIContextMenuCellContextView")) {
+        CGFloat pill = CGRectGetHeight(view.bounds) * 0.5;
+        if (pill > 0.0) r = pill;
     }
-
-    CGSize size = view.bounds.size;
-    if (size.width < 20.0 || size.height < 20.0) return NO;
-    if (size.width <= 2.0 || size.height <= 2.0) return NO;
-    return YES;
+    if (fabs(view.layer.cornerRadius - r) > 0.5) view.layer.cornerRadius = r;
+    view.layer.cornerCurve = kCACornerCurveContinuous;
 }
 
 static BOOL shouldHideContextMenuSeparatorView(UIView *view) {
-    if (!view || [view isKindOfClass:[LiquidGlassView class]]) return NO;
-    if (view.tag == kContextMenuTintTag || view.tag == kContextMenuGlassTag || view.tag == kContextMenuDividerTag) return NO;
+    if ([view isKindOfClass:[LGLiveBackdropView class]]) return NO;
+    if (view.tag == kCtxDividerTag) return NO;
     if ([view isKindOfClass:[UIVisualEffectView class]]) return NO;
-
-    NSString *clsName = NSStringFromClass(view.class);
-    if ([clsName isEqualToString:@"_UIContextMenuReusableSeparatorView"]) return YES;
-    if ([clsName containsString:@"Separator"]) {
-        return YES;
-    }
-
-    CGSize size = view.bounds.size;
-    BOOL thinHorizontal = size.height > 0.0 && size.height <= 2.0 && size.width >= 24.0;
-    BOOL thinVertical = size.width > 0.0 && size.width <= 2.0 && size.height >= 24.0;
-    if (thinHorizontal || thinVertical) {
-        if (view.backgroundColor || view.layer.backgroundColor) return YES;
-    }
-    return NO;
+    NSString *cls = NSStringFromClass(view.class);
+    if ([cls containsString:@"Separator"]) return YES;
+    CGSize s = view.bounds.size;
+    BOOL thinH = s.height > 0.0 && s.height <= 2.0 && s.width  >= 24.0;
+    BOOL thinV = s.width  > 0.0 && s.width  <= 2.0 && s.height >= 24.0;
+    return (thinH || thinV) && (view.backgroundColor || view.layer.backgroundColor);
 }
 
 static BOOL isContextMenuReusableGapView(UIView *view) {
-    if (!view) return NO;
-    return [NSStringFromClass(view.class) isEqualToString:@"UICollectionReusableView"];
+    return isExactClass(view, @"UICollectionReusableView");
 }
 
-static UIColor *contextMenuDividerColorForView(UIView *view) {
-    if (@available(iOS 12.0, *)) {
-        UITraitCollection *traits = view.traitCollection ?: UIScreen.mainScreen.traitCollection;
-        if (traits.userInterfaceStyle == UIUserInterfaceStyleDark)
-            return [UIColor colorWithWhite:1.0 alpha:0.16];
-    }
+static UIColor *contextMenuDividerColor(UIView *view) {
+    UITraitCollection *traits = view.traitCollection ?: UIScreen.mainScreen.traitCollection;
+    if (traits.userInterfaceStyle == UIUserInterfaceStyleDark)
+        return [UIColor colorWithWhite:1.0 alpha:0.16];
     return [UIColor colorWithWhite:0.0 alpha:0.10];
 }
 
-static void restoreContextMenuReusableGapView(UIView *view) {
-    if (!view) return;
-    UIView *divider = [view viewWithTag:kContextMenuDividerTag];
-    [divider removeFromSuperview];
-    for (UIView *inner in view.subviews) {
-        inner.hidden = NO;
-        inner.alpha = 1.0;
-        inner.layer.opacity = 1.0f;
-    }
-    view.hidden = NO;
-    view.alpha = 1.0;
-    view.layer.opacity = 1.0f;
-    UIColor *originalBackground = objc_getAssociatedObject(view, kContextMenuReusableOriginalBackgroundKey);
-    if (LGContextMenuColorIsEffectivelyTransparent(originalBackground)) {
-        originalBackground = [UIColor separatorColor];
-    }
-    view.backgroundColor = originalBackground;
-}
-
 static void styleContextMenuReusableGapView(UIView *view) {
-    if (!view) return;
-    if (!LGContextMenuEnabled()) {
-        restoreContextMenuReusableGapView(view);
-        return;
-    }
-    UIColor *currentBackground = view.backgroundColor;
-    UIColor *storedBackground = objc_getAssociatedObject(view, kContextMenuReusableOriginalBackgroundKey);
-    if (!LGContextMenuColorIsEffectivelyTransparent(currentBackground)
-        && (LGContextMenuColorIsEffectivelyTransparent(storedBackground) || !storedBackground)) {
-        objc_setAssociatedObject(view,
-                                 kContextMenuReusableOriginalBackgroundKey,
-                                 currentBackground,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    ctxRememberVisualState(view);
+    UIColor *bg = view.backgroundColor;
+    if (bg && CGColorGetAlpha(bg.CGColor) > 0.001 &&
+        !objc_getAssociatedObject(view, kCtxGapOriginalBgKey))
+        objc_setAssociatedObject(view, kCtxGapOriginalBgKey, bg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     view.hidden = NO;
-    view.alpha = 1.0;
+    view.alpha  = 1.0;
     view.backgroundColor = UIColor.clearColor;
 
-    UIView *divider = [view viewWithTag:kContextMenuDividerTag];
+    UIView *divider = [view viewWithTag:kCtxDividerTag];
     if (!divider) {
         divider = [[UIView alloc] initWithFrame:CGRectZero];
-        divider.tag = kContextMenuDividerTag;
+        divider.tag = kCtxDividerTag;
         divider.userInteractionEnabled = NO;
         [view addSubview:divider];
     }
-
-    CGFloat inset = MAX(18.0, LGContextMenuRowInset());
+    CGFloat inset = MAX(18.0, kCtxRowInset);
     CGFloat lineHeight = 2.0;
     CGFloat width = MAX(0.0, view.bounds.size.width - inset * 2.0);
     CGFloat y = round((view.bounds.size.height - lineHeight) * 0.5);
     divider.frame = CGRectMake(inset, y, width, lineHeight);
-    divider.backgroundColor = contextMenuDividerColorForView(view);
-    divider.layer.cornerRadius = lineHeight * 0.5;
+    divider.backgroundColor = contextMenuDividerColor(view);
+    divider.layer.cornerRadius  = lineHeight * 0.5;
     divider.layer.masksToBounds = YES;
 
     for (UIView *inner in view.subviews) {
         if (inner == divider) continue;
+        ctxRememberVisualState(inner);
         inner.hidden = YES;
-        inner.alpha = 0.0;
+        inner.alpha  = 0.0;
     }
-}
-
-static BOOL LGIsContextMenuCollectionView(UICollectionView *collectionView) {
-    if (!collectionView) return NO;
-    static Class menuListCls;
-    if (!menuListCls) menuListCls = NSClassFromString(@"_UIContextMenuListView");
-    UIView *view = collectionView;
-    while (view) {
-        if (menuListCls && [view isKindOfClass:menuListCls]) return YES;
-        view = view.superview;
-    }
-    return NO;
 }
 
 static void hideContextMenuSeparators(UIView *root) {
     for (UIView *sub in root.subviews) {
         if (shouldHideContextMenuSeparatorView(sub)) {
+            ctxRememberVisualState(sub);
             sub.hidden = YES;
-            sub.alpha = 0.0;
+            sub.alpha  = 0.0;
         } else if (isContextMenuReusableGapView(sub)) {
             styleContextMenuReusableGapView(sub);
         }
@@ -231,516 +142,226 @@ static void hideContextMenuSeparators(UIView *root) {
     }
 }
 
-static void restoreContextMenuSeparators(UIView *root) {
-    for (UIView *sub in root.subviews) {
-        if (shouldHideContextMenuSeparatorView(sub)) {
-            sub.hidden = NO;
-            sub.alpha = 1.0;
-        } else if (isContextMenuReusableGapView(sub)) {
-            restoreContextMenuReusableGapView(sub);
-        }
-        restoreContextMenuSeparators(sub);
-    }
-}
-
-static UIColor *contextMenuTintColorForView(UIView *view) {
-    return LGDefaultTintColorForViewWithOverrideKey(view, LGContextMenuLightTintAlpha(), LGContextMenuDarkTintAlpha(), @"ContextMenu.TintOverrideMode");
-}
-
-static void rememberContextMenuOriginalCornerStyle(UIView *view) {
-    if (!view) return;
-    if (!objc_getAssociatedObject(view, kContextMenuOriginalCornerRadiusKey)) {
-        objc_setAssociatedObject(view,
-                                 kContextMenuOriginalCornerRadiusKey,
-                                 @(view.layer.cornerRadius),
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if (LGIsContextMenuCellContentView(view)) {
-            CGFloat radius = CGRectGetHeight(view.bounds) * 0.5;
-            if (radius > 0.0) {
-                LGCacheDynamicDefaultFloat(@"ContextMenu.CornerRadius", radius);
-            }
-        } else {
-            LGCacheDynamicDefaultFloat(@"ContextMenu.CornerRadius", view.layer.cornerRadius);
-        }
-    }
-    if (@available(iOS 13.0, *)) {
-        if (!objc_getAssociatedObject(view, kContextMenuOriginalCornerCurveKey)) {
-            objc_setAssociatedObject(view,
-                                     kContextMenuOriginalCornerCurveKey,
-                                     view.layer.cornerCurve,
-                                     OBJC_ASSOCIATION_COPY_NONATOMIC);
-        }
-    }
-}
-
-static CGFloat LGResolvedContextMenuCornerRadiusForView(UIView *view) {
-    if (LGHasExplicitPreferenceValue(@"ContextMenu.CornerRadius")) {
-        return LGContextMenuCornerRadius();
-    }
-    if (LGIsContextMenuCellContentView(view)) {
-        CGFloat radius = CGRectGetHeight(view.bounds) * 0.5;
-        if (radius > 0.0) {
-            LGCacheDynamicDefaultFloat(@"ContextMenu.CornerRadius", radius);
-            return radius;
-        }
-    }
-    return LGContextMenuCornerRadius();
-}
-
-static void applyContextMenuRoundedStyle(UIView *view) {
-    if (!view) return;
-    rememberContextMenuOriginalCornerStyle(view);
-    view.layer.cornerRadius = LGResolvedContextMenuCornerRadiusForView(view);
-    if (@available(iOS 13.0, *))
-        view.layer.cornerCurve = kCACornerCurveContinuous;
-}
-
-static void restoreContextMenuOriginalCornerStyle(UIView *view) {
-    if (!view) return;
-    NSNumber *originalRadius = objc_getAssociatedObject(view, kContextMenuOriginalCornerRadiusKey);
-    if (!originalRadius) return;
-    view.layer.cornerRadius = [originalRadius doubleValue];
-    if (@available(iOS 13.0, *)) {
-        NSString *originalCurve = objc_getAssociatedObject(view, kContextMenuOriginalCornerCurveKey);
-        if (originalCurve) {
-            view.layer.cornerCurve = originalCurve;
-        }
-    }
-}
-
-static void applyContextMenuTintStyle(UIView *tintView) {
-    if (!tintView) return;
-    tintView.backgroundColor = contextMenuTintColorForView(tintView.superview ?: tintView);
-    tintView.layer.cornerRadius = LGContextMenuCornerRadius();
-    tintView.layer.cornerCurve = kCACornerCurveContinuous;
-    tintView.layer.masksToBounds = YES;
-}
-
-static void refreshContextMenuTint(UIView *root) {
-    for (UIView *sub in root.subviews) {
-        if (sub.tag == kContextMenuTintTag)
-            applyContextMenuTintStyle(sub);
-        refreshContextMenuTint(sub);
-    }
-}
-
-static void removeContextMenuInjectedSubviews(UIView *root) {
-    NSMutableArray<UIView *> *toRemove = [NSMutableArray array];
-    LGTraverseViews(root, ^(UIView *view) {
-        if ([view isKindOfClass:[LiquidGlassView class]] || view.tag == kContextMenuTintTag || view.tag == kContextMenuDividerTag) {
-            [toRemove addObject:view];
-        }
-    });
-    for (UIView *view in toRemove) {
-        [view removeFromSuperview];
-    }
-}
-
-static void restoreContextMenuRoundedSubviews(UIView *listView) {
-    if (!listView) return;
-    LGTraverseViews(listView, ^(UIView *view) {
-        if (view == listView) return;
-        if (!shouldRoundContextMenuSubview(view)) return;
-        restoreContextMenuOriginalCornerStyle(view);
-    });
-}
-
-
-static void relayoutContextMenuCellContent(UIView *contentView) {
-    if (!LGContextMenuEnabled()) return;
-    if (contentView.bounds.size.width < 40.0 || contentView.bounds.size.height < 20.0) return;
-
-    UIImageView *iconView = (UIImageView *)findDescendantMatching(contentView, ^BOOL(UIView *view) {
-        if (![view isKindOfClass:[UIImageView class]]) return NO;
-        UIImageView *imageView = (UIImageView *)view;
-        return imageView.image && imageView.bounds.size.width > 8.0 && imageView.bounds.size.height > 8.0;
-    });
-    if (!iconView) return;
-
-    UIView *textView = findDescendantMatching(contentView, ^BOOL(UIView *view) {
-        if ([view isKindOfClass:[UIStackView class]]) {
-            for (UIView *sub in view.subviews)
-                if ([sub isKindOfClass:[UILabel class]]) return YES;
-        }
-        return [view isKindOfClass:[UILabel class]];
-    });
-    if (!textView || textView == iconView) return;
-
-    CGSize iconSize = iconView.bounds.size;
-    if (iconSize.width <= 0.0 || iconSize.height <= 0.0)
-        iconSize = CGSizeMake(18.0, 18.0);
-
-    CGFloat iconX = LGContextMenuRowInset();
-    CGFloat iconY = round((contentView.bounds.size.height - iconSize.height) * 0.5);
-    iconView.frame = CGRectMake(iconX, iconY, iconSize.width, iconSize.height);
-
-    CGRect textFrame = textView.frame;
-    CGFloat textX = CGRectGetMaxX(iconView.frame) + LGContextMenuIconSpacing();
-    CGFloat maxWidth = contentView.bounds.size.width - textX - LGContextMenuRowInset();
-    if (maxWidth < 20.0) return;
-    textFrame.origin.x = textX;
-    textFrame.size.width = maxWidth;
-    textView.frame = CGRectIntegral(textFrame);
-}
-
-static void setBackdropHiddenInEffectView(UIView *effectView, BOOL hidden) {
-    static Class backdropCls;
+static void setBackdropHiddenInEffectView(UIView *effectView) {
     for (UIView *sub in effectView.subviews) {
-        if (!backdropCls && [NSStringFromClass(sub.class) containsString:@"Backdrop"])
-            backdropCls = sub.class;
-        if (backdropCls && [sub isKindOfClass:backdropCls]) {
-            if (!objc_getAssociatedObject(sub, kContextMenuBackdropAlphaKey))
-                objc_setAssociatedObject(sub, kContextMenuBackdropAlphaKey, @(sub.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            NSNumber *originalAlpha = objc_getAssociatedObject(sub, kContextMenuBackdropAlphaKey);
-            sub.alpha = hidden ? 0.0 : (originalAlpha ? [originalAlpha doubleValue] : 1.0);
-            return;
-        }
+        if ([sub isKindOfClass:[LGLiveBackdropView class]]) continue;
+        if ([NSStringFromClass(sub.class) containsString:@"Backdrop"]) { ctxRememberVisualState(sub); sub.alpha = 0.0; return; }
         for (UIView *inner in sub.subviews) {
-            if (!backdropCls && [NSStringFromClass(inner.class) containsString:@"Backdrop"])
-                backdropCls = inner.class;
-            if (backdropCls && [inner isKindOfClass:backdropCls]) {
-                if (!objc_getAssociatedObject(inner, kContextMenuBackdropAlphaKey))
-                    objc_setAssociatedObject(inner, kContextMenuBackdropAlphaKey, @(inner.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                NSNumber *originalAlpha = objc_getAssociatedObject(inner, kContextMenuBackdropAlphaKey);
-                inner.alpha = hidden ? 0.0 : (originalAlpha ? [originalAlpha doubleValue] : 1.0);
-                return;
-            }
+            if ([inner isKindOfClass:[LGLiveBackdropView class]]) continue;
+            if ([NSStringFromClass(inner.class) containsString:@"Backdrop"]) { ctxRememberVisualState(inner); inner.alpha = 0.0; return; }
         }
     }
 }
 
-static void injectGlassIntoEffectView(UIVisualEffectView *fxView, int attempt) {
-    UIView *container = fxView.contentView;
-
-    if (!LGContextMenuEnabled()) {
-        LGRemoveLiveBackdropCaptureView(fxView, kContextMenuBackdropViewKey);
-        LGRemoveLiveBackdropCaptureView(container, kContextMenuBackdropViewKey);
-        removeContextMenuInjectedSubviews(container);
-        return;
-    }
-
-    if (container.bounds.size.width < 10 || container.bounds.size.height < 10) {
-        // springboard sometimes gives us zero-ish bounds for a bit
+static void injectGlassIntoContextEffectView(UIVisualEffectView *fx, int attempt) {
+    if (!lgHostEnabled(@"ContextMenu")) return;
+    UIView *container = fx.contentView;
+    // springboard sometimes gives us zero-ish bounds for a bit
+    if (CGRectGetWidth(container.bounds) < 10.0 || CGRectGetHeight(container.bounds) < 10.0) {
         if (attempt >= 10) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            if (fxView.window) injectGlassIntoEffectView(fxView, attempt + 1);
+            if (fx.window) injectGlassIntoContextEffectView(fx, attempt + 1);
         });
         return;
     }
 
-    UIImage *wallpaper = LG_getCachedContextMenuSnapshot();
-    if (!wallpaper && !LG_prefersLiveCapture(@"ContextMenu.RenderingMode")) return;
-
-    LiquidGlassView *glass = nil;
-    for (UIView *sub in container.subviews) {
-        if ([sub isKindOfClass:[LiquidGlassView class]]) {
-            glass = (LiquidGlassView *)sub;
-            break;
-        }
-    }
-    BOOL hadGlass = (glass != nil);
+    LGLiveBackdropView *glass = objc_getAssociatedObject(fx, kCtxGlassKey);
     if (!glass) {
-        glass = [[LiquidGlassView alloc]
-            initWithFrame:container.bounds wallpaper:wallpaper wallpaperOrigin:CGPointZero];
-        glass.autoresizingMask = UIViewAutoresizingFlexibleWidth |
-                                 UIViewAutoresizingFlexibleHeight;
-        glass.userInteractionEnabled = NO;
+        glass = LGCreateRegisteredGlass(container.bounds, nil, @"ContextMenu");
+        if (!glass) return;
+        glass.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         [container insertSubview:glass atIndex:0];
-    } else {
-        glass.frame = container.bounds;
-        if (!LG_prefersLiveCapture(@"ContextMenu.RenderingMode")) {
-            glass.wallpaperImage = wallpaper;
-        }
+        objc_setAssociatedObject(fx, kCtxGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    glass.cornerRadius    = LGContextMenuCornerRadius();
-    glass.blur            = LGContextMenuBlur();
-    glass.refractionScale = LGContextMenuRefraction();
-    glass.refractiveIndex = LGContextMenuRefractiveIndex();
-    glass.bezelWidth      = LGContextMenuBezelWidth();
-    glass.glassThickness  = LGContextMenuGlassThickness();
-    glass.specularOpacity = LGContextMenuSpecular();
-    glass.releasesWallpaperAfterUpload = YES;
-    glass.wallpaperScale  = LGContextMenuWallpaperScale();
-    glass.updateGroup     = LGUpdateGroupContextMenu;
     if (glass.superview != container) [container insertSubview:glass atIndex:0];
-    [LGContextMenuEffectRegistry() addObject:fxView];
-    if (!LGShouldRefreshLiveCaptureForHost(fxView,
-                                           @"ContextMenu.RenderingMode",
-                                           kContextMenuLastLiveCaptureTimeKey,
-                                           LGContextMenuLiveCaptureFPS(),
-                                           hadGlass)) {
-        [glass updateOrigin];
-    } else if (!LGApplyRenderingModeToGlassHost(fxView,
-                                               glass,
-                                               @"ContextMenu.RenderingMode",
-                                               kContextMenuBackdropViewKey,
-                                               wallpaper,
-                                               CGPointZero)) {
-        if (!hadGlass) [glass removeFromSuperview];
-        return;
-    } else if (LG_prefersLiveCapture(@"ContextMenu.RenderingMode")) {
-        LGMarkLiveCaptureRefreshedForHost(fxView, kContextMenuLastLiveCaptureTimeKey);
-    }
-
-    UIView *tint = [container viewWithTag:kContextMenuTintTag];
-    if (!tint) {
-        tint = [[UIView alloc] initWithFrame:container.bounds];
-        tint.tag                    = kContextMenuTintTag;
-        tint.autoresizingMask       = UIViewAutoresizingFlexibleWidth |
-                                      UIViewAutoresizingFlexibleHeight;
-        tint.userInteractionEnabled = NO;
-    }
-    tint.frame = container.bounds;
-    applyContextMenuTintStyle(tint);
-    if (tint.superview != container) [container insertSubview:tint aboveSubview:glass];
-    else [container bringSubviewToFront:tint];
-
+    glass.frame                = container.bounds;
+    glass.layer.cornerRadius   = kCtxCornerRadius;
+    glass.layer.cornerCurve    = kCACornerCurveContinuous;
+    glass.layer.masksToBounds  = YES;
+    [glass applyFilters];
 }
 
-static BOOL LGIsContextMenuContainerEffectView(UIView *view) {
-    if (!view) return NO;
-    static Class containerCls, listCls;
-    if (!containerCls) containerCls = NSClassFromString(@"_UIContextMenuContainerView");
-    if (!listCls) listCls = NSClassFromString(@"_UIContextMenuListView");
-    return (containerCls && LGHasAncestorClass(view, containerCls))
-        || (listCls && LGHasAncestorClass(view, listCls));
+static void removeGlassFromContextEffectView(UIVisualEffectView *fx) {
+    LGLiveBackdropView *glass = objc_getAssociatedObject(fx, kCtxGlassKey);
+    if (!glass) return;
+    [glass removeFromSuperview];
+    objc_setAssociatedObject(fx, kCtxGlassKey, nil, OBJC_ASSOCIATION_ASSIGN);
 }
 
-static void LGContextMenuRefreshAllHosts(void) {
-    UIApplication *app = UIApplication.sharedApplication;
-    void (^refreshWindow)(UIWindow *) = ^(UIWindow *window) {
-        LGTraverseViews(window, ^(UIView *view) {
-            static Class listCls;
-            if (!listCls) listCls = NSClassFromString(@"_UIContextMenuListView");
-            if ([view isKindOfClass:[UIVisualEffectView class]]) {
-                UIVisualEffectView *fx = (UIVisualEffectView *)view;
-                if (!(fx.tag == kContextMenuGlassTag || LGHasAncestorClass(fx, listCls))) return;
-                setBackdropHiddenInEffectView(fx, LGContextMenuEnabled());
-                if (LGContextMenuEnabled()) injectGlassIntoEffectView(fx, 0);
-                else removeContextMenuInjectedSubviews(fx.contentView);
-                return;
-            }
-            if (listCls && [view isKindOfClass:listCls]) {
-                LGStyleContextMenuListSubviews(view);
-            }
-        });
-    };
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *window in ((UIWindowScene *)scene).windows) refreshWindow(window);
-        }
-    } else {
-        for (UIWindow *window in LGApplicationWindows(app)) refreshWindow(window);
-    }
-}
+static void relayoutContextMenuCellContent(UIView *contentView) {
+    if (contentView.bounds.size.width < 40.0 || contentView.bounds.size.height < 20.0) return;
 
-static void LGContextMenuRefreshAttachedHosts(void) {
-    for (UIVisualEffectView *fx in LGContextMenuEffectRegistry().allObjects) {
-        if (!fx.window) {
-            [LGContextMenuEffectRegistry() removeObject:fx];
-            continue;
-        }
-        setBackdropHiddenInEffectView(fx, LGContextMenuEnabled());
-        injectGlassIntoEffectView(fx, 0);
-    }
-}
-
-static void LGContextMenuPrefsChanged(CFNotificationCenterRef center,
-                                      void *observer,
-                                      CFStringRef name,
-                                      const void *object,
-                                      CFDictionaryRef userInfo) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        LGContextMenuRefreshAllHosts();
+    UIImageView *iconView = (UIImageView *)findDescendantMatching(contentView, ^BOOL(UIView *v) {
+        if (![v isKindOfClass:[UIImageView class]]) return NO;
+        UIImageView *iv = (UIImageView *)v;
+        return iv.image && iv.bounds.size.width > 8.0 && iv.bounds.size.height > 8.0;
     });
+    if (!iconView) return;
+
+    UIView *textView = findDescendantMatching(contentView, ^BOOL(UIView *v) {
+        if ([v isKindOfClass:[UIStackView class]]) {
+            for (UIView *sub in v.subviews)
+                if ([sub isKindOfClass:[UILabel class]]) return YES;
+        }
+        return [v isKindOfClass:[UILabel class]];
+    });
+    if (!textView || textView == (UIView *)iconView) return;
+
+    CGSize iconSize = iconView.bounds.size;
+    if (iconSize.width <= 0.0 || iconSize.height <= 0.0) iconSize = CGSizeMake(18.0, 18.0);
+
+    CGFloat iconY = round((contentView.bounds.size.height - iconSize.height) * 0.5);
+    ctxRememberFrame(iconView);
+    iconView.frame = CGRectMake(kCtxRowInset, iconY, iconSize.width, iconSize.height);
+
+    CGRect textFrame = textView.frame;
+    CGFloat textX    = CGRectGetMaxX(iconView.frame) + kCtxIconSpacing;
+    CGFloat maxWidth = contentView.bounds.size.width - textX - kCtxRowInset;
+    if (maxWidth < 20.0) return;
+    textFrame.origin.x   = textX;
+    textFrame.size.width = maxWidth;
+    ctxRememberFrame(textView);
+    textView.frame = CGRectIntegral(textFrame);
 }
 
-%group LGContextMenuSpringBoard
+static void restoreContextMenuSubtree(UIView *view) {
+    LGLiveBackdropView *glass = objc_getAssociatedObject(view, kCtxGlassKey);
+    [glass removeFromSuperview];
+    objc_setAssociatedObject(view, kCtxGlassKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    NSNumber *alpha = objc_getAssociatedObject(view, kCtxOriginalAlphaKey);
+    if (alpha) {
+        view.alpha = alpha.doubleValue;
+        view.hidden = [objc_getAssociatedObject(view, kCtxOriginalHiddenKey) boolValue];
+        view.layer.cornerRadius = [objc_getAssociatedObject(view, kCtxOriginalRadiusKey) doubleValue];
+        NSString *curve = objc_getAssociatedObject(view, kCtxOriginalCurveKey);
+        view.layer.cornerCurve = curve.length ? curve : kCACornerCurveCircular;
+        objc_setAssociatedObject(view, kCtxOriginalAlphaKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(view, kCtxOriginalHiddenKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(view, kCtxOriginalRadiusKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(view, kCtxOriginalCurveKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+    NSValue *frame = objc_getAssociatedObject(view, kCtxOriginalFrameKey);
+    if (frame) { view.frame = frame.CGRectValue; objc_setAssociatedObject(view, kCtxOriginalFrameKey, nil, OBJC_ASSOCIATION_ASSIGN); }
+    UIColor *background = objc_getAssociatedObject(view, kCtxGapOriginalBgKey);
+    if (background) { view.backgroundColor = background; objc_setAssociatedObject(view, kCtxGapOriginalBgKey, nil, OBJC_ASSOCIATION_ASSIGN); }
+    UIView *divider = [view viewWithTag:kCtxDividerTag];
+    [divider removeFromSuperview];
+    for (UIView *sub in [view.subviews copy]) restoreContextMenuSubtree(sub);
+}
+
+static void restoreContextMenusForDisable(void) {
+    if (lgHostEnabled(@"ContextMenu")) return;
+    for (UIWindow *window in UIApplication.sharedApplication.windows)
+        restoreContextMenuSubtree(window);
+}
+
+static void ctxRoundSubtree(UIView *v) {
+    if (shouldRoundContextMenuSubview(v)) applyContextMenuRoundedStyle(v);
+    for (UIView *c in v.subviews) ctxRoundSubtree(c);
+}
+
+static void ctxHideBackdropsInSubtree(UIView *v) {
+    if ([v isKindOfClass:[UIVisualEffectView class]]) setBackdropHiddenInEffectView(v);
+    for (UIView *c in v.subviews) ctxHideBackdropsInSubtree(c);
+}
+
+static void styleContextMenuListSubviews(UIView *listView) {
+    hideContextMenuSeparators(listView);
+    for (UIView *sub in listView.subviews) ctxRoundSubtree(sub);
+}
+
+#pragma mark - hooks
 
 %hook UIVisualEffectView
-
 - (void)didMoveToWindow {
     %orig;
     UIView *self_ = (UIView *)self;
-
-    if (!self_.window) {
-        if (self_.tag == kContextMenuGlassTag) self_.tag = 0;
-        [LGContextMenuEffectRegistry() removeObject:(UIVisualEffectView *)self_];
-        LGRemoveLiveBackdropCaptureView(self_, kContextMenuBackdropViewKey);
-        objc_setAssociatedObject(self_, kContextMenuLastLiveCaptureTimeKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        return;
-    }
-
-    if (!LGIsContextMenuContainerEffectView(self_)) return;
-    setBackdropHiddenInEffectView(self_, LGContextMenuEnabled());
-
-    static Class listCls;
-    if (!listCls) listCls = NSClassFromString(@"_UIContextMenuListView");
-    if (!LGHasAncestorClass(self_, listCls)) return;
-    if (self_.tag == kContextMenuGlassTag) return;
-    self_.tag = kContextMenuGlassTag;
+    if (!self_.window) { removeGlassFromContextEffectView((UIVisualEffectView *)self_); return; }
+    if (!isInsideContextMenu(self_)) return;
+    if (!lgHostEnabled(@"ContextMenu")) { restoreContextMenuSubtree(self_); return; }
+    setBackdropHiddenInEffectView(self_);
+    if (!hasAncestorOfClassName(self_, @"_UIContextMenuListView")) return;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        if (self_.window) injectGlassIntoEffectView((UIVisualEffectView *)self_, 0);
+        if (self_.window) injectGlassIntoContextEffectView((UIVisualEffectView *)self_, 0);
     });
 }
-
 - (void)layoutSubviews {
     %orig;
     UIView *self_ = (UIView *)self;
-    if (!LGIsContextMenuContainerEffectView(self_)) return;
-    setBackdropHiddenInEffectView(self_, LGContextMenuEnabled());
-    static Class listCls;
-    if (!listCls) listCls = NSClassFromString(@"_UIContextMenuListView");
-    if (LGHasAncestorClass(self_, listCls)) {
-        refreshContextMenuTint(self_);
-    }
+    if (!isInsideContextMenu(self_)) return;
+    if (!lgHostEnabled(@"ContextMenu")) { restoreContextMenuSubtree(self_); return; }
+    setBackdropHiddenInEffectView(self_);
+    if (hasAncestorOfClassName(self_, @"_UIContextMenuListView"))
+        injectGlassIntoContextEffectView((UIVisualEffectView *)self_, 10);
 }
-
 %end
 
 %hook UICollectionReusableView
-
 - (void)didMoveToWindow {
     %orig;
     UIView *self_ = (UIView *)self;
-    static Class menuListCls;
-    if (!menuListCls) menuListCls = NSClassFromString(@"_UIContextMenuListView");
     if (!isContextMenuReusableGapView(self_)) return;
-    if (!LGHasAncestorClass(self_, menuListCls)) return;
+    if (!hasAncestorOfClassName(self_, @"_UIContextMenuListView")) return;
+    if (!lgHostEnabled(@"ContextMenu")) { restoreContextMenuSubtree(self_); return; }
     styleContextMenuReusableGapView(self_);
 }
-
 - (void)layoutSubviews {
     %orig;
     UIView *self_ = (UIView *)self;
-    static Class menuListCls;
-    if (!menuListCls) menuListCls = NSClassFromString(@"_UIContextMenuListView");
     if (!isContextMenuReusableGapView(self_)) return;
-    if (!LGHasAncestorClass(self_, menuListCls)) return;
-    styleContextMenuReusableGapView(self_);
+    if (!hasAncestorOfClassName(self_, @"_UIContextMenuListView")) return;
+    if (lgHostEnabled(@"ContextMenu")) styleContextMenuReusableGapView(self_);
+    else restoreContextMenuSubtree(self_);
 }
-
-- (id)preferredLayoutAttributesFittingAttributes:(id)attributes {
-    return %orig;
-}
-
 %end
 
 %hook UICollectionView
-
 - (void)layoutSubviews {
     %orig;
-    if (!LGIsContextMenuCollectionView(self)) return;
-    if (LGContextMenuEnabled()) hideContextMenuSeparators(self);
-    else restoreContextMenuSeparators(self);
+    if (hasAncestorOfClassName((UIView *)self, @"_UIContextMenuListView") && lgHostEnabled(@"ContextMenu"))
+        hideContextMenuSeparators((UIView *)self);
 }
-
 %end
 
 %hook _UIContextMenuContainerView
-
-- (void)didMoveToWindow {
-    %orig;
-    UIView *self_ = (UIView *)self;
-    if (self_.window) {
-        if (![objc_getAssociatedObject(self, kCtxContainerAttachedKey) boolValue]) {
-            objc_setAssociatedObject(self, kCtxContainerAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            LG_cacheContextMenuSnapshot();
-            sContextMenuDisplayLinkState.activeCount++;
-            LGDisplayLinkStateDidChangeActivity(&sContextMenuDisplayLinkState);
-            startContextMenuLink();
-        }
-    } else {
-        if ([objc_getAssociatedObject(self, kCtxContainerAttachedKey) boolValue]) {
-            objc_setAssociatedObject(self, kCtxContainerAttachedKey, nil, OBJC_ASSOCIATION_ASSIGN);
-            sContextMenuDisplayLinkState.activeCount = MAX(0, sContextMenuDisplayLinkState.activeCount - 1);
-            LGDisplayLinkStateDidChangeActivity(&sContextMenuDisplayLinkState);
-            if (sContextMenuDisplayLinkState.activeCount == 0) stopContextMenuLink();
-            LG_invalidateContextMenuSnapshot();
-        }
-    }
-}
-
 - (void)layoutSubviews {
     %orig;
-    LGTraverseViews((UIView *)self, ^(UIView *view) {
-        if (![view isKindOfClass:[UIVisualEffectView class]]) return;
-        setBackdropHiddenInEffectView(view, LGContextMenuEnabled());
-    });
+    if (lgHostEnabled(@"ContextMenu")) ctxHideBackdropsInSubtree((UIView *)self);
+    else restoreContextMenuSubtree((UIView *)self);
 }
-
 %end
 
-static void LGStyleContextMenuListSubviews(UIView *listView) {
-    if (!listView) return;
-    if (!LGContextMenuEnabled()) {
-        restoreContextMenuSeparators(listView);
-        restoreContextMenuRoundedSubviews(listView);
-        removeContextMenuInjectedSubviews(listView);
-        return;
-    }
-    hideContextMenuSeparators(listView);
-    refreshContextMenuTint(listView);
-    LGTraverseViews(listView, ^(UIView *view) {
-        if (view == listView) return;
-        if (!shouldRoundContextMenuSubview(view)) return;
-        applyContextMenuRoundedStyle(view);
-    });
-}
-
 %hook _UIContextMenuListView
-
 - (void)didAddSubview:(UIView *)subview {
     %orig;
-    if (!LGContextMenuEnabled()) {
-        LGStyleContextMenuListSubviews((UIView *)self);
-        return;
-    }
-    if ([subview isKindOfClass:[UIView class]]
-        && ![subview isKindOfClass:[UIVisualEffectView class]]
-        && shouldRoundContextMenuSubview(subview)) {
+    if (!lgHostEnabled(@"ContextMenu")) { restoreContextMenuSubtree((UIView *)self); return; }
+    if (![subview isKindOfClass:[UIVisualEffectView class]] && shouldRoundContextMenuSubview(subview))
         applyContextMenuRoundedStyle(subview);
-    }
-    LGStyleContextMenuListSubviews((UIView *)self);
+    if (lgHostEnabled(@"ContextMenu")) styleContextMenuListSubviews((UIView *)self);
+    else restoreContextMenuSubtree((UIView *)self);
 }
-
 - (void)layoutSubviews {
     %orig;
-    LGStyleContextMenuListSubviews((UIView *)self);
+    if (lgHostEnabled(@"ContextMenu")) styleContextMenuListSubviews((UIView *)self);
+    else restoreContextMenuSubtree((UIView *)self);
 }
-
 %end
 
 %hook _UIContextMenuCell
-
-- (void)setHighlighted:(BOOL)highlighted {
-    %orig(NO);
-}
-
-- (void)setSelected:(BOOL)selected {
-    %orig(NO);
-}
-
+- (void)setHighlighted:(BOOL)highlighted { %orig(lgHostEnabled(@"ContextMenu") ? NO : highlighted); }
+- (void)setSelected:(BOOL)selected { %orig(lgHostEnabled(@"ContextMenu") ? NO : selected); }
 %end
 
 %hook _UIContextMenuCellContentView
-
 - (void)layoutSubviews {
     %orig;
-    relayoutContextMenuCellContent((UIView *)self);
+    if (lgHostEnabled(@"ContextMenu")) relayoutContextMenuCellContent((UIView *)self);
+    else restoreContextMenuSubtree((UIView *)self);
 }
-
-%end
-
 %end
 
 %ctor {
-    if (!LGIsSpringBoardProcess()) return;
-    LGObservePreferenceChanges(^{
-        LGContextMenuPrefsChanged(NULL, NULL, NULL, NULL, NULL);
-    });
-    %init(LGContextMenuSpringBoard);
+    lgObservePreferenceReload(^{ restoreContextMenusForDisable(); });
 }

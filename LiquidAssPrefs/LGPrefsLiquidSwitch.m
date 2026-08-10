@@ -1,5 +1,5 @@
 #import "LGPrefsLiquidSwitch.h"
-#import "../Shared/LGGlassRenderer.h"
+#import "../Shared/LGLiveBackdropView.h"
 #import <QuartzCore/QuartzCore.h>
 
 static BOOL LGSwitchIsDarkMode(UITraitCollection *traitCollection) {
@@ -14,20 +14,6 @@ static UIColor *LGSwitchOffTrackColor(UITraitCollection *traitCollection) {
         return [UIColor colorWithWhite:1.0 alpha:0.18];
     }
     return [UIColor colorWithWhite:0.20 alpha:0.10];
-}
-
-static UIColor *LGSwitchBackdropSheenColor(UITraitCollection *traitCollection) {
-    if (LGSwitchIsDarkMode(traitCollection)) {
-        return [UIColor colorWithWhite:1.0 alpha:0.045];
-    }
-    return [UIColor colorWithWhite:1.0 alpha:0.12];
-}
-
-static UIColor *LGSwitchGlassLiftColor(UITraitCollection *traitCollection) {
-    if (LGSwitchIsDarkMode(traitCollection)) {
-        return [UIColor colorWithWhite:1.0 alpha:0.14];
-    }
-    return [UIColor colorWithWhite:1.0 alpha:0.0];
 }
 
 static BOOL LGSwitchColorLooksTooDarkForAccent(UIColor *color) {
@@ -60,97 +46,51 @@ static UIColor *LGSwitchEffectiveAccentColor(UISwitch *toggle) {
     return UIColor.systemGreenColor;
 }
 
-static UIImage *LGRenderSwitchBackdropImage(CGSize size,
-                                            UIColor *backgroundColor,
-                                            UIColor *trackColor,
-                                            UIColor *fillColor,
-                                            UIColor *sheenColor,
-                                            UIColor *glassLiftColor,
-                                            CGRect localTrackRect,
-                                            CGFloat fillEndX,
-                                            CGFloat magnification) {
-    if (size.width <= 0.0 || size.height <= 0.0) return nil;
-    UIGraphicsBeginImageContextWithOptions(size, NO, 0);
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    [backgroundColor setFill];
-    CGContextFillRect(context, CGRectMake(0, 0, size.width, size.height));
+static BOOL LGSwitchDiagnosticsEnabled(void) {
+    return NO;
+}
 
-    CGFloat scale = fmax(magnification, 0.1);
-    CGPoint canvasCenter = CGPointMake(size.width * 0.5, size.height * 0.5);
-    CGRect scaledTrackRect = CGRectMake(canvasCenter.x - (CGRectGetWidth(localTrackRect) * scale * 0.5),
-                                        canvasCenter.y - (CGRectGetHeight(localTrackRect) * scale * 0.5),
-                                        CGRectGetWidth(localTrackRect) * scale,
-                                        CGRectGetHeight(localTrackRect) * scale);
-    CGFloat scaledFillEndX = CGRectGetMinX(scaledTrackRect) + ((fillEndX - CGRectGetMinX(localTrackRect)) * scale);
+static void LGRecordSwitchLifecycle(NSString *event, LGPrefsLiquidSwitch *toggle) {
+    if (!LGSwitchDiagnosticsEnabled()) return;
+    static CFTimeInterval windowStart;
+    static NSUInteger layouts, updates, ticks, moves;
+    if ([event isEqualToString:@"layout"]) layouts++;
+    else if ([event isEqualToString:@"update"]) updates++;
+    else if ([event isEqualToString:@"tick"]) ticks++;
+    else if ([event isEqualToString:@"move"]) moves++;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (windowStart == 0.0) windowStart = now;
+    if (now - windowStart < 1.0) return;
+    LGLiveBackdropView *glass = nil;
+    CADisplayLink *displayLink = nil;
+    @try {
+        glass = [toggle valueForKey:@"glassThumbView"];
+        displayLink = [toggle valueForKey:@"displayLink"];
+    } @catch (__unused NSException *exception) {}
+    LGLog(@"[GlobalSwitchLifecycle] move=%lu layout=%lu update=%lu ticks=%lu window=%d glassHidden=%d glassAlpha=%.3f displayLink=%d frame=%s",
+               (unsigned long)moves, (unsigned long)layouts,
+               (unsigned long)updates, (unsigned long)ticks,
+               toggle.window != nil, glass.hidden,
+               glass.alpha, displayLink != nil,
+               NSStringFromCGRect(toggle.frame).UTF8String);
+    moves = layouts = updates = ticks = 0;
+    windowStart = now;
+}
 
-    CGFloat radius = CGRectGetHeight(scaledTrackRect) * 0.5;
-    UIBezierPath *trackPath = [UIBezierPath bezierPathWithRoundedRect:scaledTrackRect cornerRadius:radius];
-    [trackColor setFill];
-    [trackPath fill];
-
-    CGFloat clampedFillEndX = fmax(CGRectGetMinX(scaledTrackRect), fmin(scaledFillEndX, CGRectGetMaxX(scaledTrackRect)));
-    CGRect fillRect = CGRectMake(CGRectGetMinX(scaledTrackRect),
-                                 CGRectGetMinY(scaledTrackRect),
-                                 clampedFillEndX - CGRectGetMinX(scaledTrackRect),
-                                 CGRectGetHeight(scaledTrackRect));
-    if (fillRect.size.width > 0.0) {
-        UIBezierPath *fillPath = [UIBezierPath bezierPathWithRoundedRect:fillRect cornerRadius:radius];
-        [fillColor setFill];
-        [fillPath fill];
+static BOOL LGSwitchAncestorIsScrolling(UIView *view) {
+    for (UIView *candidate = view.superview; candidate; candidate = candidate.superview) {
+        if (![candidate isKindOfClass:UIScrollView.class]) continue;
+        UIScrollView *scrollView = (UIScrollView *)candidate;
+        if (scrollView.dragging || scrollView.decelerating) return YES;
     }
-
-    [sheenColor setFill];
-    CGContextFillRect(context, CGRectMake(0, 0, size.width, fmin(12.0, size.height * 0.35)));
-
-    if (CGColorGetAlpha(glassLiftColor.CGColor) > 0.001) {
-        UIBezierPath *liftPath = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(scaledTrackRect, -30.0, -14.0)
-                                                            cornerRadius:CGRectGetHeight(scaledTrackRect) * 3.0];
-        [glassLiftColor setFill];
-        [liftPath fill];
-    }
-
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
+    return NO;
 }
-
-@interface LGSwitchInsetShadowView : UIView
-@end
-
-@implementation LGSwitchInsetShadowView
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (!self) return nil;
-    self.userInteractionEnabled = NO;
-    self.backgroundColor = UIColor.clearColor;
-    self.layer.compositingFilter = @"multiplyBlendMode";
-    return self;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGFloat shadowRadius = 3.5;
-    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.bounds, -1.0, -shadowRadius * 0.5)
-                                                    cornerRadius:CGRectGetHeight(self.bounds) * 0.5];
-    UIBezierPath *inner = [[UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.bounds, 0.0, shadowRadius * 0.55)
-                                                      cornerRadius:CGRectGetHeight(self.bounds) * 0.5] bezierPathByReversingPath];
-    [path appendPath:inner];
-    self.layer.shadowPath = path.CGPath;
-    self.layer.shadowColor = [UIColor colorWithWhite:0.0 alpha:1.0].CGColor;
-    self.layer.shadowOpacity = 0.18;
-    self.layer.shadowRadius = shadowRadius;
-    self.layer.shadowOffset = CGSizeMake(0.0, shadowRadius * 0.75);
-}
-
-@end
 
 @interface LGPrefsLiquidSwitch ()
 @property (nonatomic, strong) UIView *trackView;
 @property (nonatomic, strong) UIView *fillView;
 @property (nonatomic, strong) UIView *contractedThumbView;
-@property (nonatomic, strong) LGSharedGlassView *glassThumbView;
-@property (nonatomic, strong) LGSwitchInsetShadowView *glassInsetShadowView;
+@property (nonatomic, strong) LGLiveBackdropView *glassThumbView;
 @property (nonatomic, strong) UIImpactFeedbackGenerator *feedbackGenerator;
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, assign) CGFloat renderedProgress;
@@ -258,26 +198,14 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
     self.contractedThumbView = contractedThumbView;
     [self addSubview:contractedThumbView];
 
-    LGEnsureSharedGlassPipelinesReady();
-    LGSharedGlassView *glass = [[LGSharedGlassView alloc] initWithFrame:CGRectZero sourceImage:nil sourceOrigin:CGPointZero];
+    LGLiveBackdropView *glass = [[LGLiveBackdropView alloc] initWithFrame:CGRectZero
+                                                               groupName:nil
+                                                              filterType:LGFilterTypeForHostPrefix(@"PrefsSwitch")];
     glass.userInteractionEnabled = NO;
-    glass.releasesSourceAfterUpload = YES;
-    glass.bezelWidth = 6.0;
-    glass.glassThickness = 20.0;
-    glass.refractionScale = 1.5;
-    glass.refractiveIndex = 1.5;
-    glass.specularOpacity = 0.04;
-    glass.blur = 0.0;
-    glass.sourceScale = 1.0;
     glass.alpha = 0.0;
     glass.hidden = YES;
     self.glassThumbView = glass;
     [self addSubview:glass];
-
-    LGSwitchInsetShadowView *insetShadow = [[LGSwitchInsetShadowView alloc] initWithFrame:glass.bounds];
-    insetShadow.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [glass addSubview:insetShadow];
-    self.glassInsetShadowView = insetShadow;
 
     [self updateMaterialColors];
     [self syncRenderedStateImmediately];
@@ -286,6 +214,7 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
+    LGRecordSwitchLifecycle(@"move", self);
     if (!self.window) {
         [self stopDisplayLink];
     }
@@ -295,9 +224,10 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
+    LGRecordSwitchLifecycle(@"layout", self);
     for (UIView *subview in self.subviews) {
         if (subview != self.trackView && subview != self.contractedThumbView && subview != self.glassThumbView) {
-            subview.alpha = 0.01;
+            subview.alpha = 0.0;
         }
     }
     [self updateMaterialColors];
@@ -349,9 +279,9 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
     self.touchBeganTime = CACurrentMediaTime();
     self.dragStartLocation = location.x;
     self.dragStartThumbCenterX = [self resolvedThumbCenterX];
-    self.targetExpansion = 1.0;
-    self.targetThumbSize = LGSettingsSwitchExpandedThumbSize();
-    [self startDisplayLinkIfNeeded];
+
+    self.targetExpansion = 0.0;
+    self.targetThumbSize = LGSettingsSwitchRestThumbSize();
     [self.feedbackGenerator prepare];
     [self refreshGlassBackdrop];
     [self updateVisualsAnimated:YES];
@@ -364,6 +294,9 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
     CFTimeInterval touchDuration = CACurrentMediaTime() - self.touchBeganTime;
     if (!self.isDragging && touchDuration >= 0.15) {
         self.isDragging = YES;
+        self.targetExpansion = 1.0;
+        self.targetThumbSize = LGSettingsSwitchExpandedThumbSize();
+        [self startDisplayLinkIfNeeded];
     }
     CGFloat currentX = [touch locationInView:self].x;
     CGFloat translation = currentX - self.dragStartLocation;
@@ -438,10 +371,11 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
     self.targetExpansion = 0.0;
     self.targetThumbSize = LGSettingsSwitchRestThumbSize();
     self.targetProgress = self.isOn ? 1.0 : 0.0;
-    [self setFillVisible:self.isOn animated:YES];
-    [self startDisplayLinkIfNeeded];
+    [self setFillVisible:self.isOn animated:NO];
+    [self syncRenderedStateImmediately];
     [self refreshGlassBackdrop];
-    [self updateVisualsAnimated:YES];
+    [self updateVisualsAnimated:NO];
+    [self stopDisplayLink];
 }
 
 - (void)lg_beginExternalPress {
@@ -603,6 +537,22 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
 }
 
 - (void)handleDisplayLink:(CADisplayLink *)link {
+    LGRecordSwitchLifecycle(@"tick", self);
+    // scrolling cancels physics so reused cells stay cheap
+    if (LGSwitchAncestorIsScrolling(self)) {
+        self.pressed = NO;
+        self.dragMoved = NO;
+        self.isDragging = NO;
+        self.pendingTapAutoContract = NO;
+        self.targetProgress = self.isOn ? 1.0 : 0.0;
+        self.targetThumbSize = LGSettingsSwitchRestThumbSize();
+        self.targetExpansion = 0.0;
+        self.targetFillAlpha = self.isOn ? 1.0 : 0.0;
+        [self syncRenderedStateImmediately];
+        [self updateVisualsAnimated:NO];
+        [self stopDisplayLink];
+        return;
+    }
     CFTimeInterval dt = self.lastDisplayLinkTimestamp > 0.0 ? (link.timestamp - self.lastDisplayLinkTimestamp) : (1.0 / 60.0);
     self.lastDisplayLinkTimestamp = link.timestamp;
     CGFloat frameFactor = fmin(MAX(dt * 60.0, 0.35), 1.4);
@@ -659,29 +609,12 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
     self.glassThumbView.layer.shadowOpacity = darkMode ? 0.12 : 0.08;
     self.glassThumbView.layer.shadowRadius = darkMode ? 7.0 : 4.0;
     self.glassThumbView.layer.shadowOffset = darkMode ? CGSizeMake(0.0, 2.0) : CGSizeMake(0.0, 1.0);
-    self.glassThumbView.specularOpacity = darkMode ? 0.02 : 0.0;
-    self.glassInsetShadowView.alpha = darkMode ? 0.68 : 1.0;
 }
 
-- (void)refreshGlassBackdrop {
-    if (!self.window) return;
-    CGRect trackFrame = [self trackFrame];
-    CGRect captureRect = CGRectInset(trackFrame, -20.0, -20.0);
-    UIColor *backgroundColor = self.superview.backgroundColor ?: (self.window.backgroundColor ?: [UIColor systemBackgroundColor]);
-    UIColor *trackColor = LGSwitchOffTrackColor(self.traitCollection);
-    UIColor *baseFillColor = self.fillView.backgroundColor ?: LGSwitchEffectiveAccentColor(self);
-    UIColor *sheenColor = LGSwitchBackdropSheenColor(self.traitCollection);
-    UIColor *liftColor = LGSwitchGlassLiftColor(self.traitCollection);
-    CGRect localTrackRect = CGRectOffset(trackFrame, -CGRectGetMinX(captureRect), -CGRectGetMinY(captureRect));
-    UIColor *fillColor = [baseFillColor colorWithAlphaComponent:self.renderedFillAlpha];
-    CGFloat fillEndX = CGRectGetMaxX(localTrackRect);
-    UIImage *image = LGRenderSwitchBackdropImage(captureRect.size, backgroundColor, trackColor, fillColor, sheenColor, liftColor, localTrackRect, fillEndX, 0.75);
-    self.glassThumbView.sourceImage = image;
-    self.glassThumbView.sourceOrigin = [self convertPoint:captureRect.origin toView:nil];
-    [self.glassThumbView scheduleDraw];
-}
+- (void)refreshGlassBackdrop {}
 
 - (void)updateVisualsAnimated:(BOOL)animated {
+    LGRecordSwitchLifecycle(@"update", self);
     CGRect trackFrame = [self trackFrame];
     self.trackView.frame = trackFrame;
     self.trackView.layer.cornerRadius = CGRectGetHeight(trackFrame) * 0.5;
@@ -701,7 +634,7 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
                                    self.renderedThumbSize.height);
 
     self.contractedThumbView.layer.cornerRadius = 12.0;
-    self.glassThumbView.cornerRadius = CGRectGetHeight(glassFrame) * 0.5;
+    self.glassThumbView.layer.cornerRadius = CGRectGetHeight(glassFrame) * 0.5;
     self.glassThumbView.hidden = NO;
     self.contractedThumbView.hidden = NO;
     (void)animated;

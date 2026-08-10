@@ -1,8 +1,8 @@
-// creds to OwnGoalStudio's Remove Widget Background
+// creds to owngoalstudios remove widget background
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
-#import "../Shared/LGRWBSupport.h"
+#import "../Shared/LGSharedSupport.h"
 
 static BOOL kIsEnabled = YES;
 static BOOL kIsEnabledForSystemWidgets = YES;
@@ -26,28 +26,22 @@ static NSArray<NSString *> *RWBParseThirdPartyBundleIDs(NSString *rawText) {
 }
 
 static void ReloadPrefs(void) {
-    static NSUserDefaults *prefs = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        prefs = [[NSUserDefaults alloc] initWithSuiteName:@"dylv.liquidassprefs"];
-    });
-
-    NSDictionary *settings = prefs.dictionaryRepresentation ?: @{};
-    NSNumber *globalEnabled = settings[@"Global.Enabled"];
-    NSNumber *widgetEnabled = settings[@"Widgets.Enabled"];
-    kIsEnabled = (globalEnabled ? globalEnabled.boolValue : NO) && (widgetEnabled ? widgetEnabled.boolValue : NO);
+    LGReloadPreferences();
+    kIsEnabled = YES;
     kIsEnabledForSystemWidgets = YES;
     kIsEnabledForMaterialView = NO;
     kForceDarkMode = YES;
     kMaxWidgetWidth = 140.0;
     kMaxWidgetHeight = 140.0;
 
-    NSString *rawBundleIDs = [settings[@"RWB.ThirdPartyBundleIDs"] isKindOfClass:[NSString class]]
-        ? settings[@"RWB.ThirdPartyBundleIDs"]
-        : LGRWBDefaultWidgetBundleIDsText();
-    NSMutableOrderedSet<NSString *> *bundleIDs = [NSMutableOrderedSet orderedSetWithArray:RWBParseThirdPartyBundleIDs(rawBundleIDs)];
+    NSString *configuredBundleIDs =
+        LGHasExplicitPreferenceValue(@"RWB.ThirdPartyBundleIDs")
+            ? LG_prefString(@"RWB.ThirdPartyBundleIDs", @"")
+            : LGRWBDefaultWidgetBundleIDsText();
+    NSMutableOrderedSet<NSString *> *bundleIDs =
+        [NSMutableOrderedSet orderedSetWithArray:
+            RWBParseThirdPartyBundleIDs(configuredBundleIDs)];
     kWidgetBundleIdentifiers = [NSSet setWithArray:bundleIDs.array];
-
 }
 
 static void RWBReloadPrefsCallback(CFNotificationCenterRef __unused center,

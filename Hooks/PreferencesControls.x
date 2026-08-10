@@ -1,152 +1,219 @@
+#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
+#import <float.h>
+#import <string.h>
 #import "../LiquidAssPrefs/LGPrefsLiquidSlider.h"
 #import "../LiquidAssPrefs/LGPrefsLiquidSwitch.h"
-#import "../Shared/LGBackButtonSupport.h"
-#import "../Shared/LGGlassRenderer.h"
-#import "../Shared/LGHookSupport.h"
+#import "../Shared/LGLiveBackdropView.h"
+#import "../Shared/LGGlassKit.h"
 #import "../Shared/LGLiquidMotion.h"
-#import "../Shared/LGPrefAccessors.h"
-#import "../Shared/LGSharedSupport.h"
-#import <QuartzCore/QuartzCore.h>
-#import <float.h>
-#import <math.h>
-#import <objc/message.h>
-#import <objc/runtime.h>
 
 static void *kLGSettingsSwitchOverlayKey = &kLGSettingsSwitchOverlayKey;
-static void *kLGSettingsSwitchOwnerOverlayKey = &kLGSettingsSwitchOwnerOverlayKey;
-static void *kLGSettingsSwitchOwnerKey = &kLGSettingsSwitchOwnerKey;
-static void *kLGSettingsSwitchVisualHostKey = &kLGSettingsSwitchVisualHostKey;
-static void *kLGSettingsSwitchRelayoutPendingKey = &kLGSettingsSwitchRelayoutPendingKey;
-static void *kLGSettingsSwitchOverlayInstalledKey = &kLGSettingsSwitchOverlayInstalledKey;
-static void *kLGSettingsSwitchOwnerDrivenSyncKey = &kLGSettingsSwitchOwnerDrivenSyncKey;
 static void *kLGSettingsSliderOverlayKey = &kLGSettingsSliderOverlayKey;
-static void *kLGSettingsSliderOwnerOverlayKey = &kLGSettingsSliderOwnerOverlayKey;
-static void *kLGSettingsSliderOwnerKey = &kLGSettingsSliderOwnerKey;
 static void *kLGSettingsSliderVisualHostKey = &kLGSettingsSliderVisualHostKey;
-static void *kLGSettingsSliderRelayoutPendingKey = &kLGSettingsSliderRelayoutPendingKey;
-static void *kLGSettingsSliderOwnerDrivenSyncKey = &kLGSettingsSliderOwnerDrivenSyncKey;
-static void *kLGSettingsSliderOriginalMinimumTrackTintKey = &kLGSettingsSliderOriginalMinimumTrackTintKey;
-static void *kLGSettingsSegmentedGlassPillKey = &kLGSettingsSegmentedGlassPillKey;
-static void *kLGSettingsSegmentedGlassTintKey = &kLGSettingsSegmentedGlassTintKey;
-static void *kLGSettingsSegmentedGlassInsetShadowKey = &kLGSettingsSegmentedGlassInsetShadowKey;
-static void *kLGSettingsSegmentedStockPillKey = &kLGSettingsSegmentedStockPillKey;
-static void *kLGSettingsSegmentedGlassActiveKey = &kLGSettingsSegmentedGlassActiveKey;
-static void *kLGSettingsSegmentedGlassTouchXKey = &kLGSettingsSegmentedGlassTouchXKey;
-static void *kLGSettingsSegmentedGlassVelocityKey = &kLGSettingsSegmentedGlassVelocityKey;
-static void *kLGSettingsSegmentedLastTouchXKey = &kLGSettingsSegmentedLastTouchXKey;
-static void *kLGSettingsSegmentedLastTouchTimeKey = &kLGSettingsSegmentedLastTouchTimeKey;
-static void *kLGSettingsSegmentedDisplayLinkKey = &kLGSettingsSegmentedDisplayLinkKey;
-static void *kLGSettingsSegmentedDisplayLinkDriverKey = &kLGSettingsSegmentedDisplayLinkDriverKey;
-static void *kLGSettingsSegmentedLastDisplayLinkTimestampKey = &kLGSettingsSegmentedLastDisplayLinkTimestampKey;
-static void *kLGSettingsSegmentedObjectScaleKey = &kLGSettingsSegmentedObjectScaleKey;
-static void *kLGSettingsSegmentedObjectScaleVelocityKey = &kLGSettingsSegmentedObjectScaleVelocityKey;
-static void *kLGSettingsSegmentedScaleXKey = &kLGSettingsSegmentedScaleXKey;
-static void *kLGSettingsSegmentedScaleXVelocityKey = &kLGSettingsSegmentedScaleXVelocityKey;
-static void *kLGSettingsSegmentedScaleYKey = &kLGSettingsSegmentedScaleYKey;
-static void *kLGSettingsSegmentedScaleYVelocityKey = &kLGSettingsSegmentedScaleYVelocityKey;
-static void *kLGSettingsSegmentedReleasedKey = &kLGSettingsSegmentedReleasedKey;
-static void *kLGSettingsSegmentedReleaseObjectScaleKey = &kLGSettingsSegmentedReleaseObjectScaleKey;
-static void *kLGSettingsSegmentedReleaseFrameKey = &kLGSettingsSegmentedReleaseFrameKey;
-static void *kLGSettingsSegmentedRenderedCenterXKey = &kLGSettingsSegmentedRenderedCenterXKey;
-static void *kLGSettingsSegmentedRenderedWidthKey = &kLGSettingsSegmentedRenderedWidthKey;
-static void *kLGSettingsSegmentedRenderedHeightKey = &kLGSettingsSegmentedRenderedHeightKey;
-static void *kLGSettingsSegmentedHasRenderedStateKey = &kLGSettingsSegmentedHasRenderedStateKey;
-static void *kLGSettingsSegmentedLastActiveStateKey = &kLGSettingsSegmentedLastActiveStateKey;
-static void *kLGSettingsSegmentedDeactivateTokenKey = &kLGSettingsSegmentedDeactivateTokenKey;
-static void *kLGSettingsSegmentedFadingOutKey = &kLGSettingsSegmentedFadingOutKey;
-static void *kLGSettingsTopFadeViewKey = &kLGSettingsTopFadeViewKey;
-static void *kLGSettingsBackButtonGlassViewKey = &kLGSettingsBackButtonGlassViewKey;
-static void *kLGSettingsBackButtonGlassFrameKey = &kLGSettingsBackButtonGlassFrameKey;
-static void *kLGSettingsBackButtonTargetKey = &kLGSettingsBackButtonTargetKey;
-static void *kLGSettingsBackButtonStockHiddenKey = &kLGSettingsBackButtonStockHiddenKey;
-static const CGFloat kLGSettingsSwitchTrailingInset = 8.0;
-static CADisplayLink *sLGSettingsBackButtonDisplayLink = nil;
-static id sLGSettingsBackButtonDisplayLinkDriver = nil;
-static NSHashTable<LGSharedBackButtonView *> *sLGSettingsBackButtonGlassViews = nil;
+static void *kLGSettingsSegmentGlassKey = &kLGSettingsSegmentGlassKey;
+static void *kLGSettingsSegmentTouchXKey = &kLGSettingsSegmentTouchXKey;
+static void *kLGSettingsSegmentActiveKey = &kLGSettingsSegmentActiveKey;
+static void *kLGSettingsSegmentReleasedKey = &kLGSettingsSegmentReleasedKey;
+static void *kLGSettingsSegmentVelocityKey = &kLGSettingsSegmentVelocityKey;
+static void *kLGSettingsSegmentLastXKey = &kLGSettingsSegmentLastXKey;
+static void *kLGSettingsSegmentLastTimeKey = &kLGSettingsSegmentLastTimeKey;
+static void *kLGSettingsSegmentRenderedKey = &kLGSettingsSegmentRenderedKey;
+static void *kLGSettingsSegmentDisplayLinkKey = &kLGSettingsSegmentDisplayLinkKey;
+static void *kLGSettingsSegmentOriginalTintKey = &kLGSettingsSegmentOriginalTintKey;
+static void *kLGSettingsSegmentFrameDeltaKey = &kLGSettingsSegmentFrameDeltaKey;
+static void *kLGSettingsSegmentLastDisplayTimeKey = &kLGSettingsSegmentLastDisplayTimeKey;
+static void *kLGSettingsSegmentFadingKey = &kLGSettingsSegmentFadingKey;
+static void *kLGSettingsTopFadeKey = &kLGSettingsTopFadeKey;
+static void *kLGSettingsBackButtonKey = &kLGSettingsBackButtonKey;
+static void *kLGLiquidAssEntryFooterKey = &kLGLiquidAssEntryFooterKey;
+static void *kLGSettingsBarBackgroundStateKey =
+    &kLGSettingsBarBackgroundStateKey;
+static void *kLGSettingsStockBackStateKey = &kLGSettingsStockBackStateKey;
+static BOOL gLGSettingsControlsEnabled = NO;
+static BOOL gLGSwitchControlsEnabled = NO;
+static BOOL gLGSliderControlsEnabled = NO;
+static BOOL gLGSegmentControlsEnabled = NO;
+static BOOL gLGControlsDiagnosticsEnabled = NO;
 
-@interface UISegmentedControl (LGSettingsSegmentedGlass)
-- (void)lg_startSettingsSegmentedDisplayLinkIfNeeded;
-- (void)lg_stopSettingsSegmentedDisplayLink;
-- (void)lg_handleSettingsSegmentedDisplayLink:(CADisplayLink *)link;
+static id LGPreferenceSpecifierProperty(id specifier, NSString *key) {
+    SEL selector = NSSelectorFromString(@"propertyForKey:");
+    if (!specifier || ![specifier respondsToSelector:selector]) return nil;
+    return ((id (*)(id, SEL, NSString *))objc_msgSend)(specifier, selector, key);
+}
+
+static BOOL LGIsLiquidAssPreferenceLoaderCell(UITableViewCell *cell) {
+    id specifier = nil;
+    if ([cell respondsToSelector:NSSelectorFromString(@"specifier")]) {
+        specifier = ((id (*)(id, SEL))objc_msgSend)(cell,
+                                                    NSSelectorFromString(@"specifier"));
+    }
+    for (NSString *key in @[@"lazy-bundle", @"bundle", @"bundlePath"]) {
+        id value = LGPreferenceSpecifierProperty(specifier, key);
+        if ([[value description] containsString:@"LiquidAssPrefs"]) return YES;
+    }
+
+    NSString *title = cell.textLabel.text ?: LGPreferenceSpecifierProperty(specifier, @"label");
+    id detail = LGPreferenceSpecifierProperty(specifier, @"detail");
+    return [title isEqualToString:@"Liquid (Gl)ass"] &&
+           [[detail description] containsString:@"LGPRootListController"];
+}
+
+static void LGUpdateLiquidAssEntryFooter(UITableViewCell *cell) {
+    UILabel *footer = objc_getAssociatedObject(cell, kLGLiquidAssEntryFooterKey);
+    if (!gLGSettingsControlsEnabled) {
+        footer.hidden = YES;
+        return;
+    }
+    if (!LGIsLiquidAssPreferenceLoaderCell(cell)) {
+        footer.hidden = YES;
+        return;
+    }
+    if (!footer) {
+        footer = [[UILabel alloc] initWithFrame:CGRectZero];
+        footer.text = @"dylv";
+        footer.font = [UIFont systemFontOfSize:10.0 weight:UIFontWeightRegular];
+        footer.textColor = UIColor.tertiaryLabelColor;
+        footer.textAlignment = NSTextAlignmentRight;
+        footer.userInteractionEnabled = NO;
+        footer.accessibilityElementsHidden = YES;
+        [cell.contentView addSubview:footer];
+        objc_setAssociatedObject(cell, kLGLiquidAssEntryFooterKey, footer,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    footer.hidden = NO;
+    [cell.contentView bringSubviewToFront:footer];
+    CGFloat width = MIN(120.0, CGRectGetWidth(cell.contentView.bounds) * 0.42);
+    footer.frame = CGRectMake(CGRectGetWidth(cell.contentView.bounds) - width - 8.0,
+                              CGRectGetHeight(cell.contentView.bounds) - 14.0,
+                              width, 12.0);
+}
+
+typedef NS_ENUM(NSUInteger, LGControlsDiagnosticKind) {
+    LGControlsDiagnosticSwitch,
+    LGControlsDiagnosticSlider,
+    LGControlsDiagnosticSegment,
+    LGControlsDiagnosticKindCount,
+};
+
+typedef struct {
+    NSUInteger calls;
+    NSUInteger created;
+    double totalMilliseconds;
+    double maximumMilliseconds;
+} LGControlsDiagnosticBucket;
+
+static LGControlsDiagnosticBucket gLGControlsDiagnosticBuckets[LGControlsDiagnosticKindCount];
+static CFTimeInterval gLGControlsDiagnosticWindowStart = 0.0;
+static NSUInteger gLGControlsSliderTrackingCalls = 0;
+static NSUInteger gLGControlsSliderOwnerMoves = 0;
+static NSUInteger gLGControlsSliderOwnerLayouts = 0;
+static NSUInteger gLGControlsSliderOverlayMoves = 0;
+static NSUInteger gLGControlsSliderOverlayLayouts = 0;
+static NSUInteger gLGControlsSliderVisualMoves = 0;
+static NSUInteger gLGControlsSliderVisualLayouts = 0;
+static NSUInteger gLGControlsSliderSetters = 0;
+static NSUInteger gLGControlsSwitchMoves = 0;
+static NSUInteger gLGControlsSwitchLayouts = 0;
+static NSUInteger gLGControlsModernSwitchMoves = 0;
+static NSUInteger gLGControlsModernSwitchLayouts = 0;
+static NSUInteger gLGControlsModernSwitchAlphaSets = 0;
+
+static void LGRecordControlsDiagnostic(LGControlsDiagnosticKind kind,
+                                       CFTimeInterval started,
+                                       BOOL created) {
+    if (!gLGControlsDiagnosticsEnabled) return;
+    double milliseconds = (CACurrentMediaTime() - started) * 1000.0;
+    LGControlsDiagnosticBucket *bucket = &gLGControlsDiagnosticBuckets[kind];
+    bucket->calls++;
+    bucket->created += created ? 1 : 0;
+    bucket->totalMilliseconds += milliseconds;
+    bucket->maximumMilliseconds = MAX(bucket->maximumMilliseconds, milliseconds);
+    CFTimeInterval now = CACurrentMediaTime();
+    if (gLGControlsDiagnosticWindowStart == 0.0) gLGControlsDiagnosticWindowStart = now;
+    if (now - gLGControlsDiagnosticWindowStart < 1.0) return;
+    LGControlsDiagnosticBucket *sw = &gLGControlsDiagnosticBuckets[LGControlsDiagnosticSwitch];
+    LGControlsDiagnosticBucket *sl = &gLGControlsDiagnosticBuckets[LGControlsDiagnosticSlider];
+    LGControlsDiagnosticBucket *sg = &gLGControlsDiagnosticBuckets[LGControlsDiagnosticSegment];
+    LGLog(@"[GlobalControlsPerf] switch calls=%lu created=%lu total=%.2fms max=%.2fms; slider calls=%lu created=%lu total=%.2fms max=%.2fms tracking=%lu; segment calls=%lu created=%lu total=%.2fms max=%.2fms",
+               (unsigned long)sw->calls, (unsigned long)sw->created,
+               sw->totalMilliseconds, sw->maximumMilliseconds,
+               (unsigned long)sl->calls, (unsigned long)sl->created,
+               sl->totalMilliseconds, sl->maximumMilliseconds,
+               (unsigned long)gLGControlsSliderTrackingCalls,
+               (unsigned long)sg->calls, (unsigned long)sg->created,
+               sg->totalMilliseconds, sg->maximumMilliseconds);
+    LGLog(@"[GlobalControlsSources] switch move=%lu layout=%lu modernMove=%lu modernLayout=%lu modernAlpha=%lu; slider ownerMove=%lu ownerLayout=%lu overlayMove=%lu overlayLayout=%lu visualMove=%lu visualLayout=%lu setters=%lu",
+               (unsigned long)gLGControlsSwitchMoves,
+               (unsigned long)gLGControlsSwitchLayouts,
+               (unsigned long)gLGControlsModernSwitchMoves,
+               (unsigned long)gLGControlsModernSwitchLayouts,
+               (unsigned long)gLGControlsModernSwitchAlphaSets,
+               (unsigned long)gLGControlsSliderOwnerMoves,
+               (unsigned long)gLGControlsSliderOwnerLayouts,
+               (unsigned long)gLGControlsSliderOverlayMoves,
+               (unsigned long)gLGControlsSliderOverlayLayouts,
+               (unsigned long)gLGControlsSliderVisualMoves,
+               (unsigned long)gLGControlsSliderVisualLayouts,
+               (unsigned long)gLGControlsSliderSetters);
+    memset(gLGControlsDiagnosticBuckets, 0, sizeof(gLGControlsDiagnosticBuckets));
+    gLGControlsSliderTrackingCalls = 0;
+    gLGControlsSliderOwnerMoves = gLGControlsSliderOwnerLayouts = 0;
+    gLGControlsSliderOverlayMoves = gLGControlsSliderOverlayLayouts = 0;
+    gLGControlsSliderVisualMoves = gLGControlsSliderVisualLayouts = 0;
+    gLGControlsSliderSetters = 0;
+    gLGControlsSwitchMoves = gLGControlsSwitchLayouts = 0;
+    gLGControlsModernSwitchMoves = gLGControlsModernSwitchLayouts = 0;
+    gLGControlsModernSwitchAlphaSets = 0;
+    gLGControlsDiagnosticWindowStart = now;
+}
+
+@interface LGSettingsLowBlurView : UIView
+@end
+
+@implementation LGSettingsLowBlurView
++ (Class)layerClass { return NSClassFromString(@"CABackdropLayer") ?: CALayer.class; }
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (!self) return nil;
+    self.userInteractionEnabled = NO;
+    self.backgroundColor = UIColor.clearColor;
+    self.opaque = NO;
+    [self lg_configure];
+    return self;
+}
+- (void)didMoveToWindow { [super didMoveToWindow]; [self lg_configure]; }
+- (void)layoutSubviews { [super layoutSubviews]; [self lg_configure]; }
+- (void)lg_configure {
+    Class backdrop = NSClassFromString(@"CABackdropLayer");
+    if (!backdrop || ![self.layer isKindOfClass:backdrop]) return;
+    @try {
+        [self.layer setValue:@NO forKey:@"layerUsesCoreImageFilters"];
+        [self.layer setValue:@YES forKey:@"windowServerAware"];
+        if (![self.layer valueForKey:@"groupName"])
+            [self.layer setValue:NSUUID.UUID.UUIDString forKey:@"groupName"];
+        Class filterClass = NSClassFromString(@"CAFilter");
+        SEL selector = NSSelectorFromString(@"filterWithName:");
+        id filter = filterClass && [filterClass respondsToSelector:selector]
+            ? ((id (*)(Class, SEL, NSString *))objc_msgSend)
+                (filterClass, selector, @"gaussianBlur") : nil;
+        if (filter) {
+            [filter setValue:@3.0 forKey:@"inputRadius"];
+            [filter setValue:@YES forKey:@"inputNormalizeEdges"];
+            self.layer.filters = @[ filter ];
+        }
+    } @catch (__unused NSException *exception) {}
+}
 @end
 
 @interface LGSettingsTopFadeView : UIView
 @end
 
-static BOOL LGSettingsIsDarkMode(UITraitCollection *traitCollection);
-typedef struct {
-    CGFloat pillAlpha;
-    CGFloat sheenAlpha;
-    CGFloat glassLiftAlpha;
-    CGFloat tintAlpha;
-    CGFloat borderAlpha;
-    CGFloat insetShadowAlpha;
-    CGFloat shadowOpacity;
-    CGFloat shadowRadius;
-    CGSize shadowOffset;
-} LGSettingsSegmentedAppearance;
-static LGSettingsSegmentedAppearance LGSettingsSegmentedAppearanceMake(UITraitCollection *traitCollection);
-static UIColor *LGSettingsSegmentedAppearanceTintColor(LGSettingsSegmentedAppearance appearance);
-static UIColor *LGSettingsSegmentedAppearanceBorderColor(LGSettingsSegmentedAppearance appearance);
-
-@interface LGSettingsSegmentedInsetShadowView : UIView
-@end
-
-@implementation LGSettingsSegmentedInsetShadowView
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (!self) return nil;
-    self.userInteractionEnabled = NO;
-    self.backgroundColor = UIColor.clearColor;
-    self.layer.compositingFilter = @"multiplyBlendMode";
-    return self;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGFloat shadowRadius = 3.5;
-    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.bounds, -1.0, -shadowRadius * 0.5)
-                                                    cornerRadius:CGRectGetHeight(self.bounds) * 0.5];
-    UIBezierPath *inner = [[UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.bounds, 0.0, shadowRadius * 0.55)
-                                                      cornerRadius:CGRectGetHeight(self.bounds) * 0.5] bezierPathByReversingPath];
-    [path appendPath:inner];
-    self.layer.shadowPath = path.CGPath;
-    self.layer.shadowColor = [UIColor colorWithWhite:0.0 alpha:1.0].CGColor;
-    self.layer.shadowOpacity = 0.18;
-    self.layer.shadowRadius = shadowRadius;
-    self.layer.shadowOffset = CGSizeMake(0.0, shadowRadius * 0.75);
-}
-
-@end
-
 @implementation LGSettingsTopFadeView {
-    UIView *_blurView;
-    CAGradientLayer *_blurMaskLayer;
-    CAGradientLayer *_tintLayer;
-}
-
-- (void)lg_updateGradientColors {
-    UIColor *maskColor = UIColor.blackColor;
-    _blurMaskLayer.colors = @[
-        (__bridge id)[maskColor colorWithAlphaComponent:1.0].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.96].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.78].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.34].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.10].CGColor,
-        (__bridge id)[maskColor colorWithAlphaComponent:0.0].CGColor
-    ];
-    _blurMaskLayer.locations = @[ @0.0, @0.34, @0.62, @0.82, @0.94, @1.0 ];
-
-    UIColor *baseColor = [UIColor systemBackgroundColor];
-    _tintLayer.colors = @[
-        (__bridge id)[baseColor colorWithAlphaComponent:0.86].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.74].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.42].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.14].CGColor,
-        (__bridge id)[baseColor colorWithAlphaComponent:0.0].CGColor
-    ];
-    _tintLayer.locations = @[ @0.0, @0.36, @0.68, @0.90, @1.0 ];
+    LGSettingsLowBlurView *_blur;
+    CAGradientLayer *_mask;
+    CAGradientLayer *_tint;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -154,236 +221,131 @@ static UIColor *LGSettingsSegmentedAppearanceBorderColor(LGSettingsSegmentedAppe
     if (!self) return nil;
     self.userInteractionEnabled = NO;
     self.backgroundColor = UIColor.clearColor;
-    _blurView = LGMakeLowBlurFallbackView();
-    _blurView.userInteractionEnabled = NO;
-    _blurView.frame = self.bounds;
-    _blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self addSubview:_blurView];
-    LGApplyLowBlurRadiusToView(_blurView);
-
-    _blurMaskLayer = [CAGradientLayer layer];
-    _blurMaskLayer.startPoint = CGPointMake(0.5, 0.0);
-    _blurMaskLayer.endPoint = CGPointMake(0.5, 1.0);
-    _blurView.layer.mask = _blurMaskLayer;
-
-    _tintLayer = [CAGradientLayer layer];
-    _tintLayer.startPoint = CGPointMake(0.5, 0.0);
-    _tintLayer.endPoint = CGPointMake(0.5, 1.0);
-    [self.layer addSublayer:_tintLayer];
-    [self lg_updateGradientColors];
+    _blur = [[LGSettingsLowBlurView alloc] initWithFrame:self.bounds];
+    _blur.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                             UIViewAutoresizingFlexibleHeight;
+    [self addSubview:_blur];
+    _mask = [CAGradientLayer layer];
+    _mask.startPoint = CGPointMake(0.5, 0.0);
+    _mask.endPoint = CGPointMake(0.5, 1.0);
+    _mask.colors = @[
+        (__bridge id)UIColor.blackColor.CGColor,
+        (__bridge id)[UIColor.blackColor colorWithAlphaComponent:0.82].CGColor,
+        (__bridge id)UIColor.clearColor.CGColor
+    ];
+    _mask.locations = @[ @0.0, @0.55, @1.0 ];
+    _blur.layer.mask = _mask;
+    _tint = [CAGradientLayer layer];
+    _tint.startPoint = _mask.startPoint;
+    _tint.endPoint = _mask.endPoint;
+    _tint.locations = _mask.locations;
+    _tint.opacity = 0.5f;
+    [self.layer addSublayer:_tint];
+    [self lg_updateTint];
     return self;
+}
+
+- (void)lg_updateTint {
+    BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    UIColor *tint = dark ? UIColor.blackColor : UIColor.whiteColor;
+    _tint.colors = @[
+        (__bridge id)tint.CGColor,
+        (__bridge id)[tint colorWithAlphaComponent:0.82].CGColor,
+        (__bridge id)[tint colorWithAlphaComponent:0.0].CGColor
+    ];
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    _blurView.frame = self.bounds;
-    _blurMaskLayer.frame = self.bounds;
-    _tintLayer.frame = self.bounds;
-    LGApplyLowBlurRadiusToView(_blurView);
+    _blur.frame = self.bounds;
+    _mask.frame = self.bounds;
+    _tint.frame = self.bounds;
 }
 
-- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
-    [super traitCollectionDidChange:previousTraitCollection];
-    if (@available(iOS 13.0, *)) {
-        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
-            [self lg_updateGradientColors];
-        }
-    } else {
-        [self lg_updateGradientColors];
-    }
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if (!previous || previous.userInterfaceStyle != self.traitCollection.userInterfaceStyle)
+        [self lg_updateTint];
 }
-
 @end
 
-static BOOL LGIsPreferencesApp(void) {
-    return [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.Preferences"];
-}
+@interface LGSettingsBackButton : UIControl
+@property (nonatomic, strong) LGLiveBackdropView *glass;
+@property (nonatomic, strong) UIImageView *glyph;
+@property (nonatomic, weak) UINavigationController *navigationController;
+@property (nonatomic, weak) UIView *stockButton;
+@property (nonatomic, strong) UIViewPropertyAnimator *pressAnimator;
+@end
 
-static BOOL LGSettingsControlsEnabled(void) {
-    return LG_prefBool(@"Global.Enabled", NO) && LG_prefBool(@"SettingsControls.Enabled", YES);
+@implementation LGSettingsBackButton
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (!self) return nil;
+    self.backgroundColor = UIColor.clearColor;
+    _glass = LGCreateRegisteredGlass(self.bounds, nil, @"PrefsButton");
+    _glass.userInteractionEnabled = NO;
+    [self addSubview:_glass];
+    UIImageSymbolConfiguration *configuration =
+        [UIImageSymbolConfiguration configurationWithPointSize:24
+                                                        weight:UIImageSymbolWeightRegular];
+    _glyph = [[UIImageView alloc] initWithImage:
+        [UIImage systemImageNamed:@"chevron.left" withConfiguration:configuration]];
+    _glyph.tintColor = UIColor.labelColor;
+    _glyph.contentMode = UIViewContentModeCenter;
+    _glyph.userInteractionEnabled = NO;
+    [self addSubview:_glyph];
+    [self addTarget:self action:@selector(lg_pop) forControlEvents:UIControlEventTouchUpInside];
+    return self;
 }
-
-static BOOL LGSettingsShouldModifyCell(UIView *cell) {
-    if ([cell isKindOfClass:%c(PSSegmentTableCell)]) return NO;
-    if ([cell isKindOfClass:%c(PSSliderTableCell)]) return NO;
-    return YES;
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    self.glass.frame = self.bounds;
+    self.glass.layer.cornerRadius = CGRectGetHeight(self.bounds) * 0.5;
+    self.glass.layer.cornerCurve = kCACornerCurveContinuous;
+    self.glass.layer.masksToBounds = YES;
+    self.glyph.frame = self.bounds;
 }
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    CALayer *presentation = self.layer.presentationLayer;
+    if (presentation) self.transform = CATransform3DGetAffineTransform(presentation.transform);
+    [self.pressAnimator stopAnimation:YES];
+    CGFloat mass = 0.8;
+    CGFloat stiffness = 300.0;
+    CGFloat damping = highlighted ? 18.0 : 12.0;
+    CGFloat velocity = highlighted ? 0.5 : 1.0;
+    CGFloat duration = highlighted ? 0.3 : 0.5;
+    UISpringTimingParameters *timing = [[UISpringTimingParameters alloc]
+        initWithMass:mass stiffness:stiffness damping:damping
+        initialVelocity:CGVectorMake(velocity, velocity)];
+    self.pressAnimator = [[UIViewPropertyAnimator alloc]
+        initWithDuration:duration timingParameters:timing];
+    __weak typeof(self) weakSelf = self;
+    [self.pressAnimator addAnimations:^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
 
-static void LGApplySettingsNavigationBarAppearance(UINavigationBar *navigationBar) {
-    if (!navigationBar) return;
-    UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
-    [appearance configureWithTransparentBackground];
-    appearance.backgroundColor = UIColor.clearColor;
-    appearance.shadowColor = UIColor.clearColor;
-    navigationBar.standardAppearance = appearance;
-    navigationBar.scrollEdgeAppearance = appearance;
-    navigationBar.compactAppearance = appearance;
-    if (@available(iOS 15.0, *)) {
-        navigationBar.compactScrollEdgeAppearance = appearance;
+        strongSelf.transform = highlighted ? CGAffineTransformMakeScale(1.16, 1.16)
+                                            : CGAffineTransformIdentity;
+    }];
+    [self.pressAnimator startAnimation];
+}
+- (BOOL)lg_invokeView:(UIView *)view {
+    if ([view isKindOfClass:UIControl.class] &&
+        ((UIControl *)view).allTargets.count > 0) {
+        [(UIControl *)view sendActionsForControlEvents:UIControlEventTouchUpInside];
+        return YES;
     }
-}
-
-static BOOL LGSettingsControllerTreeContainsLiquidAssPrefs(UIViewController *controller) {
-    if (!controller) return NO;
-    NSBundle *controllerBundle = [NSBundle bundleForClass:controller.class];
-    if ([controllerBundle.bundleIdentifier isEqualToString:@"dylv.liquidassprefs"]) return YES;
-    for (UIViewController *childController in controller.childViewControllers) {
-        if (LGSettingsControllerTreeContainsLiquidAssPrefs(childController)) return YES;
-    }
-    UIViewController *presentedController = controller.presentedViewController;
-    if (presentedController && LGSettingsControllerTreeContainsLiquidAssPrefs(presentedController)) return YES;
-    return NO;
-}
-
-static BOOL LGSettingsShouldInstallTopFadeForController(UIViewController *controller) {
-    if (!controller) return NO;
-    if (!controller.navigationController) return NO;
-    if (!controller.isViewLoaded || !controller.view.window) return NO;
-    if (controller.navigationController.navigationBarHidden) return NO;
-    if (LGSettingsControllerTreeContainsLiquidAssPrefs(controller)) return NO;
-    return YES;
-}
-
-static void LGRemoveSettingsTopFadeForController(UIViewController *controller) {
-    LGSettingsTopFadeView *fadeView = objc_getAssociatedObject(controller, kLGSettingsTopFadeViewKey);
-    if (!fadeView) return;
-    [fadeView removeFromSuperview];
-    objc_setAssociatedObject(controller, kLGSettingsTopFadeViewKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void LGUpdateSettingsTopFadeForController(UIViewController *controller) {
-    if (!LGSettingsShouldInstallTopFadeForController(controller)) {
-        LGRemoveSettingsTopFadeForController(controller);
-        return;
-    }
-    
-    UIView *superview = controller.view.superview;
-    if (!superview || ![NSStringFromClass(superview.class) isEqualToString:@"UIViewControllerWrapperView"]) {
-        LGRemoveSettingsTopFadeForController(controller);
-        return;
-    }
-    
-    LGApplySettingsNavigationBarAppearance(controller.navigationController.navigationBar);
-    UIView *targetView = controller.view;
-
-    LGSettingsTopFadeView *fadeView = objc_getAssociatedObject(controller, kLGSettingsTopFadeViewKey);
-    if (!fadeView) {
-        fadeView = [[LGSettingsTopFadeView alloc] initWithFrame:CGRectZero];
-        [targetView addSubview:fadeView];
-        objc_setAssociatedObject(controller, kLGSettingsTopFadeViewKey, fadeView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else if (fadeView.superview != targetView) {
-        [fadeView removeFromSuperview];
-        [targetView addSubview:fadeView];
-    }
-    [targetView bringSubviewToFront:fadeView];
-    CGFloat topInset = controller.view.safeAreaInsets.top;
-    CGFloat fadeHeight = MAX(60.0, topInset + 16.0);
-    CGFloat yOffset = 0.0;
-    if ([targetView isKindOfClass:[UIScrollView class]]) {
-        yOffset = ((UIScrollView *)targetView).contentOffset.y;
-    }
-    fadeView.frame = CGRectMake(0.0, yOffset, CGRectGetWidth(targetView.bounds), fadeHeight);
-}
-
-static BOOL LGSettingsViewHasExactClassName(UIView *view, NSString *className) {
-    return view && [NSStringFromClass(view.class) isEqualToString:className];
-}
-
-static BOOL LGSettingsViewBelongsToLiquidAssPrefs(UIView *view) {
-    UIResponder *responder = view;
-    while (responder) {
-        if ([responder isKindOfClass:[UIViewController class]]) {
-            NSBundle *controllerBundle = [NSBundle bundleForClass:responder.class];
-            if ([controllerBundle.bundleIdentifier isEqualToString:@"dylv.liquidassprefs"]) return YES;
-        }
-        responder = responder.nextResponder;
-    }
-    return NO;
-}
-
-static UIView *LGSettingsFirstDescendantWithClassName(UIView *root, NSString *className) {
-    if (!root || !className.length) return nil;
-    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithArray:root.subviews];
-    while (stack.count > 0) {
-        UIView *view = stack.lastObject;
-        [stack removeLastObject];
-        if (LGSettingsViewHasExactClassName(view, className)) return view;
-        for (UIView *subview in view.subviews.reverseObjectEnumerator) {
-            [stack addObject:subview];
-        }
-    }
-    return nil;
-}
-
-static CGRect LGSettingsBackButtonStockImageFrame(UIView *buttonBarButton) {
-    if (!buttonBarButton) return CGRectNull;
-    __block CGRect imageFrame = CGRectNull;
-    LGTraverseViews(buttonBarButton, ^(UIView *view) {
-        if (!CGRectIsNull(imageFrame)) return;
-        if (![view isKindOfClass:[UIImageView class]]) return;
-        if (LGHasAncestorClass(view, [LGSharedBackButtonView class])) return;
-        imageFrame = [view.superview convertRect:view.frame toView:buttonBarButton];
-    });
-    return imageFrame;
-}
-
-static void LGSettingsHideStockBackContent(UIView *buttonBarButton) {
-    if (!buttonBarButton) return;
-    for (UIView *subview in buttonBarButton.subviews) {
-        subview.hidden = YES;
-        subview.alpha = 0.0;
-        subview.userInteractionEnabled = NO;
-    }
-    buttonBarButton.hidden = YES;
-    buttonBarButton.alpha = 0.0;
-    buttonBarButton.userInteractionEnabled = NO;
-    objc_setAssociatedObject(buttonBarButton, kLGSettingsBackButtonStockHiddenKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static UINavigationController *LGSettingsNavigationControllerForView(UIView *view) {
-    UIResponder *responder = view;
-    while (responder) {
-        if ([responder isKindOfClass:[UINavigationController class]]) {
-            return (UINavigationController *)responder;
-        }
-        if ([responder isKindOfClass:[UIViewController class]]) {
-            UINavigationController *navigationController = ((UIViewController *)responder).navigationController;
-            if (navigationController) return navigationController;
-        }
-        responder = responder.nextResponder;
-    }
-    return nil;
-}
-
-static BOOL LGSettingsInvokeControlActions(UIControl *control) {
-    if (!control) return NO;
-    NSSet *targets = control.allTargets;
-    if (!targets.count) return NO;
-    [control sendActionsForControlEvents:UIControlEventTouchUpInside];
-    return YES;
-}
-
-static BOOL LGSettingsInvokeGestureActions(UIView *view) {
     for (UIGestureRecognizer *recognizer in view.gestureRecognizers) {
-        if (!recognizer.enabled) continue;
         NSArray *targets = nil;
-        @try {
-            targets = [recognizer valueForKey:@"_targets"];
-        } @catch (NSException *exception) {
-            LGDebugLog(@"settings gesture target read failed %@ %@", exception.name, exception.reason);
-            targets = nil;
-        }
+        @try { targets = [recognizer valueForKey:@"_targets"]; }
+        @catch (__unused NSException *exception) {}
         for (id targetAction in targets) {
             id target = nil;
             NSString *actionName = nil;
             @try {
                 target = [targetAction valueForKey:@"target"];
                 actionName = [targetAction valueForKey:@"action"];
-            } @catch (NSException *exception) {
-                LGDebugLog(@"settings gesture action read failed %@ %@", exception.name, exception.reason);
-                target = nil;
-                actionName = nil;
-            }
+            } @catch (__unused NSException *exception) {}
             SEL action = NSSelectorFromString(actionName);
             if (target && action && [target respondsToSelector:action]) {
                 ((void (*)(id, SEL, id))objc_msgSend)(target, action, recognizer);
@@ -391,2090 +353,1156 @@ static BOOL LGSettingsInvokeGestureActions(UIView *view) {
             }
         }
     }
+    for (UIView *subview in view.subviews)
+        if ([self lg_invokeView:subview]) return YES;
+    return NO;
+}
+- (void)lg_pop {
+    if (![self lg_invokeView:self.stockButton])
+        [self.navigationController popViewControllerAnimated:YES];
+}
+@end
+
+static BOOL LGSettingsFeatureEnabled(void) {
+    id settings = LGGlassPreferenceValue(@"SettingsControls.Enabled");
+
+    return ![settings respondsToSelector:@selector(boolValue)] ||
+           [settings boolValue];
+}
+
+static BOOL LGGlobalControlPreferenceEnabled(NSString *key) {
+    id value = LGGlassPreferenceValue(key);
+    return ![value respondsToSelector:@selector(boolValue)] || [value boolValue];
+}
+
+static BOOL LGProcessIsExcludedFromGlobalControls(void) {
+    id stored = LGGlassPreferenceValue(@"GlobalControls.Exclusions");
+    NSString *exclusions = [stored isKindOfClass:NSString.class]
+        ? (NSString *)stored : @"NewTerm\nFilza\nTikTok\nDiscord\ncom.spotify.client";
+    if (!exclusions.length) return NO;
+    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier.lowercaseString ?: @"";
+    NSString *executable = NSBundle.mainBundle.executablePath.lastPathComponent.lowercaseString ?: @"";
+    NSString *processName = NSProcessInfo.processInfo.processName.lowercaseString ?: @"";
+    NSCharacterSet *separators = [NSCharacterSet characterSetWithCharactersInString:@"\n,;"];
+    for (NSString *rawEntry in [exclusions componentsSeparatedByCharactersInSet:separators]) {
+        NSString *entry = [rawEntry stringByTrimmingCharactersInSet:
+            NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
+        if (!entry.length || [entry hasPrefix:@"#"]) continue;
+        if ([entry isEqualToString:bundleID] || [entry isEqualToString:executable] ||
+            [entry isEqualToString:processName]) return YES;
+    }
     return NO;
 }
 
-static BOOL LGSettingsInvokeStockBackButtonAction(UIView *buttonBarButton) {
-    if (!buttonBarButton) return NO;
-    if ([buttonBarButton isKindOfClass:[UIControl class]] &&
-        LGSettingsInvokeControlActions((UIControl *)buttonBarButton)) {
-        return YES;
-    }
-    if (LGSettingsInvokeGestureActions(buttonBarButton)) {
-        return YES;
-    }
-    for (UIView *subview in buttonBarButton.subviews) {
-        if (LGHasAncestorClass(subview, [LGSharedBackButtonView class])) continue;
-        if ([subview isKindOfClass:[UIControl class]] &&
-            LGSettingsInvokeControlActions((UIControl *)subview)) {
-            return YES;
-        }
-        if (LGSettingsInvokeGestureActions(subview)) {
-            return YES;
-        }
+static void LGRefreshGlobalControlEnablement(void) {
+    gLGSettingsControlsEnabled = LGSettingsFeatureEnabled();
+    BOOL allowed = gLGSettingsControlsEnabled && !LGProcessIsExcludedFromGlobalControls();
+    gLGSwitchControlsEnabled = allowed &&
+        LGGlobalControlPreferenceEnabled(@"GlobalControls.Switches.Enabled");
+    gLGSliderControlsEnabled = allowed &&
+        LGGlobalControlPreferenceEnabled(@"GlobalControls.Sliders.Enabled");
+    gLGSegmentControlsEnabled = allowed &&
+        LGGlobalControlPreferenceEnabled(@"GlobalControls.Segmented.Enabled");
+}
+
+static BOOL LGInsideLiquidAssPrefs(UIView *view) {
+    for (UIResponder *r = view; r; r = r.nextResponder) {
+        if (![r isKindOfClass:UIViewController.class]) continue;
+        NSBundle *bundle = [NSBundle bundleForClass:r.class];
+        if ([bundle.bundleIdentifier isEqualToString:@"dylv.liquidassprefs"] ||
+            [NSStringFromClass(r.class) hasPrefix:@"LG"]) return YES;
     }
     return NO;
 }
 
-static void LGSettingsStopBackButtonDisplayLinkIfIdle(void) {
-    if (sLGSettingsBackButtonGlassViews.count > 0) return;
-    LGStopDisplayLink(&sLGSettingsBackButtonDisplayLink, &sLGSettingsBackButtonDisplayLinkDriver);
+static BOOL LGControllerContainsLiquidAssPrefs(UIViewController *controller) {
+    if (!controller) return NO;
+    if ([[NSBundle bundleForClass:controller.class].bundleIdentifier
+         isEqualToString:@"dylv.liquidassprefs"] ||
+        [NSStringFromClass(controller.class) hasPrefix:@"LG"]) return YES;
+    for (UIViewController *child in controller.childViewControllers)
+        if (LGControllerContainsLiquidAssPrefs(child)) return YES;
+    return controller.presentedViewController &&
+           LGControllerContainsLiquidAssPrefs(controller.presentedViewController);
 }
 
-static void LGSettingsStartBackButtonDisplayLinkIfNeeded(void) {
-    if (sLGSettingsBackButtonDisplayLink) return;
-    LGStartDisplayLink(&sLGSettingsBackButtonDisplayLink,
-                       &sLGSettingsBackButtonDisplayLinkDriver,
-                       30,
-                       ^{
-        NSArray<LGSharedBackButtonView *> *glassViews = sLGSettingsBackButtonGlassViews.allObjects;
-        for (LGSharedBackButtonView *glassButton in glassViews) {
-            if (!glassButton.window || glassButton.hidden || glassButton.alpha <= 0.01) {
+static BOOL LGSettingsWrapperIsScreenSized(UIView *wrapper) {
+    UIWindow *window = wrapper.window;
+    if (!window || CGRectIsEmpty(wrapper.bounds)) return NO;
+    CGRect frame = [wrapper convertRect:wrapper.bounds toView:window];
+    CGRect screen = window.bounds;
+    return fabs(CGRectGetWidth(frame) - CGRectGetWidth(screen)) <= 1.0 &&
+           fabs(CGRectGetHeight(frame) - CGRectGetHeight(screen)) <= 1.0;
+}
+
+static BOOL LGSettingsWrapperIsClosestToWindow(UIView *wrapper) {
+    Class wrapperClass = NSClassFromString(@"UIViewControllerWrapperView");
+    if (!wrapper.window || !wrapperClass) return NO;
+    for (UIView *ancestor = wrapper.superview; ancestor && ancestor != wrapper.window;
+         ancestor = ancestor.superview) {
+        if ([ancestor isKindOfClass:wrapperClass]) return NO;
+    }
+    return YES;
+}
+
+static void LGUpdateSettingsTopFade(UIView *wrapper) {
+    if (!gLGSettingsControlsEnabled || !LGSettingsWrapperIsScreenSized(wrapper) ||
+        !LGSettingsWrapperIsClosestToWindow(wrapper)) {
+        [objc_getAssociatedObject(wrapper, kLGSettingsTopFadeKey) removeFromSuperview];
+        objc_setAssociatedObject(wrapper, kLGSettingsTopFadeKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return;
+    }
+    LGSettingsTopFadeView *fade =
+        objc_getAssociatedObject(wrapper, kLGSettingsTopFadeKey);
+    if (!fade) {
+        fade = [[LGSettingsTopFadeView alloc] initWithFrame:CGRectZero];
+        [wrapper addSubview:fade];
+        objc_setAssociatedObject(wrapper, kLGSettingsTopFadeKey, fade,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    CGFloat height = MAX(60.0, wrapper.safeAreaInsets.top + 16.0);
+    fade.frame = CGRectMake(0.0, 0.0, CGRectGetWidth(wrapper.bounds), height);
+    fade.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                            UIViewAutoresizingFlexibleBottomMargin;
+    [wrapper bringSubviewToFront:fade];
+}
+
+static void LGHideSettingsNavigationBarBackground(UINavigationBar *bar) {
+    Class backgroundClass = NSClassFromString(@"_UIBarBackground");
+    if (!backgroundClass) return;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithArray:bar.subviews];
+    while (stack.count) {
+        UIView *view = stack.lastObject;
+        [stack removeLastObject];
+        if ([view isKindOfClass:backgroundClass]) {
+            NSDictionary *original = objc_getAssociatedObject(
+                view, kLGSettingsBarBackgroundStateKey);
+            if (!gLGSettingsControlsEnabled) {
+                if (original) {
+                    view.hidden = [original[@"hidden"] boolValue];
+                    view.alpha = [original[@"alpha"] doubleValue];
+                    view.userInteractionEnabled =
+                        [original[@"interaction"] boolValue];
+                    objc_setAssociatedObject(
+                        view, kLGSettingsBarBackgroundStateKey, nil,
+                        OBJC_ASSOCIATION_ASSIGN);
+                }
                 continue;
             }
-            [glassButton refreshBackdropAfterScreenUpdates:NO];
+            if (!original) {
+                objc_setAssociatedObject(
+                    view, kLGSettingsBarBackgroundStateKey,
+                    @{@"hidden": @(view.hidden),
+                      @"alpha": @(view.alpha),
+                      @"interaction": @(view.userInteractionEnabled)},
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+            view.hidden = YES;
+            view.alpha = 0.0;
+            view.userInteractionEnabled = NO;
+            continue;
         }
-    });
-}
-
-static void LGSettingsRegisterBackButtonGlass(LGSharedBackButtonView *glassButton) {
-    if (!glassButton) return;
-    if (!sLGSettingsBackButtonGlassViews) {
-        sLGSettingsBackButtonGlassViews = [NSHashTable weakObjectsHashTable];
-    }
-    [sLGSettingsBackButtonGlassViews addObject:glassButton];
-    LGSettingsStartBackButtonDisplayLinkIfNeeded();
-}
-
-static void LGSettingsUnregisterBackButtonGlass(LGSharedBackButtonView *glassButton) {
-    if (!glassButton) return;
-    [sLGSettingsBackButtonGlassViews removeObject:glassButton];
-    LGSettingsStopBackButtonDisplayLinkIfIdle();
-}
-
-static void LGSettingsRemoveBackButtonReplacement(UIView *container) {
-    if (!container) return;
-    LGSharedBackButtonView *glassButton = objc_getAssociatedObject(container, kLGSettingsBackButtonGlassViewKey);
-    LGSettingsUnregisterBackButtonGlass(glassButton);
-    [glassButton cleanupBackdropCapture];
-    [glassButton removeFromSuperview];
-    objc_setAssociatedObject(container, kLGSettingsBackButtonGlassViewKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    objc_setAssociatedObject(container, kLGSettingsBackButtonTargetKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    objc_setAssociatedObject(container, kLGSettingsBackButtonGlassFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
-}
-
-static void LGSettingsInstallBackButtonGlass(UIView *buttonBarButton, UIView *container, CGRect stockImageFrame) {
-    if (!buttonBarButton || !container) return;
-    LGSharedBackButtonView *glassButton = objc_getAssociatedObject(container, kLGSettingsBackButtonGlassViewKey);
-    UIView *currentTarget = objc_getAssociatedObject(container, kLGSettingsBackButtonTargetKey);
-    if (glassButton && currentTarget && currentTarget != buttonBarButton) {
-        LGSettingsUnregisterBackButtonGlass(glassButton);
-        [glassButton cleanupBackdropCapture];
-        [glassButton removeFromSuperview];
-        objc_setAssociatedObject(container, kLGSettingsBackButtonGlassViewKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        objc_setAssociatedObject(container, kLGSettingsBackButtonGlassFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
-        glassButton = nil;
-    }
-    BOOL created = NO;
-    if (!glassButton) {
-        glassButton = [[LGSharedBackButtonView alloc] initWithTarget:buttonBarButton
-                                                               action:@selector(lg_activateLiquidAssSettingsBackButton)];
-        glassButton.userInteractionEnabled = YES;
-        [container addSubview:glassButton];
-        objc_setAssociatedObject(container, kLGSettingsBackButtonGlassViewKey, glassButton, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        LGSettingsRegisterBackButtonGlass(glassButton);
-        created = YES;
-    } else if (glassButton.superview != container) {
-        [glassButton removeFromSuperview];
-        [container addSubview:glassButton];
-        LGSettingsRegisterBackButtonGlass(glassButton);
-        created = YES;
-    }
-    objc_setAssociatedObject(container, kLGSettingsBackButtonTargetKey, buttonBarButton, OBJC_ASSOCIATION_ASSIGN);
-
-    CGSize buttonSize = CGSizeMake(44.0, 44.0);
-    CGRect buttonBounds = CGRectIsEmpty(buttonBarButton.bounds)
-        ? CGRectMake(0.0, 0.0, buttonSize.width, buttonSize.height)
-        : buttonBarButton.bounds;
-    CGPoint centerInButton = CGPointMake(CGRectGetMidX(buttonBounds),
-                                         CGRectGetMidY(buttonBounds));
-    if (!CGRectIsNull(stockImageFrame) &&
-        isfinite(CGRectGetMidX(stockImageFrame)) &&
-        isfinite(CGRectGetMidY(stockImageFrame))) {
-        centerInButton = CGPointMake(CGRectGetMidX(stockImageFrame), CGRectGetMidY(stockImageFrame));
-    }
-    CGPoint center = [buttonBarButton convertPoint:centerInButton toView:container];
-    UIEdgeInsets margins = container.layoutMargins;
-    CGFloat leadingInset = margins.left;
-    if (@available(iOS 11.0, *)) {
-        NSDirectionalEdgeInsets directionalMargins = container.directionalLayoutMargins;
-        if (container.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft) {
-            leadingInset = directionalMargins.trailing;
-        } else {
-            leadingInset = directionalMargins.leading;
-        }
-    }
-    CGRect targetFrame = CGRectMake(floor(center.x - buttonSize.width * 0.5),
-                                   floor(center.y - buttonSize.height * 0.5),
-                                   buttonSize.width,
-                                   buttonSize.height);
-    if (leadingInset > 0.0 && isfinite(leadingInset)) {
-        if (container.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft) {
-            targetFrame.origin.x = floor(CGRectGetWidth(container.bounds) - leadingInset - buttonSize.width);
-        } else {
-            targetFrame.origin.x = floor(leadingInset);
-        }
-    }
-    NSValue *lastFrameValue = objc_getAssociatedObject(container, kLGSettingsBackButtonGlassFrameKey);
-    BOOL frameChanged = !lastFrameValue || !CGRectEqualToRect(lastFrameValue.CGRectValue, targetFrame);
-    glassButton.frame = targetFrame;
-    objc_setAssociatedObject(container,
-                             kLGSettingsBackButtonGlassFrameKey,
-                             [NSValue valueWithCGRect:targetFrame],
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    glassButton.autoresizingMask = UIViewAutoresizingFlexibleRightMargin |
-                                   UIViewAutoresizingFlexibleTopMargin |
-                                   UIViewAutoresizingFlexibleBottomMargin;
-    [glassButton setGlassEnabled:YES];
-    glassButton.hidden = NO;
-    glassButton.alpha = 1.0;
-    [container bringSubviewToFront:glassButton];
-    LGSettingsHideStockBackContent(buttonBarButton);
-    if (created || frameChanged) {
-        [glassButton scheduleBackdropWarmupRefresh];
-    } else {
-        [glassButton refreshBackdropAfterScreenUpdates:NO];
+        [stack addObjectsFromArray:view.subviews];
     }
 }
 
-static void LGUpdateSettingsNavigationBackButtons(UINavigationBar *navigationBar) {
-    if (!navigationBar || LGSettingsViewBelongsToLiquidAssPrefs(navigationBar)) return;
-    UIView *contentView = nil;
-    for (UIView *subview in navigationBar.subviews) {
-        if (LGSettingsViewHasExactClassName(subview, @"_UINavigationBarContentView")) {
-            contentView = subview;
-            break;
-        }
-    }
-    if (!contentView) return;
-
-    UINavigationController *navigationController = LGSettingsNavigationControllerForView(navigationBar);
-    if (navigationController.viewControllers.count <= 1 || !navigationBar.backItem) {
-        LGSettingsRemoveBackButtonReplacement(contentView);
-        return;
-    }
-
-    BOOL installed = NO;
-    for (UIView *buttonBarButton in contentView.subviews) {
-        if (!LGSettingsViewHasExactClassName(buttonBarButton, @"_UIButtonBarButton")) continue;
-        if (!LGSettingsFirstDescendantWithClassName(buttonBarButton, @"_UIBackButtonMaskView")) continue;
-        CGRect stockImageFrame = LGSettingsBackButtonStockImageFrame(buttonBarButton);
-        if (CGRectIsNull(stockImageFrame)) continue;
-        LGSettingsHideStockBackContent(buttonBarButton);
-        LGSettingsInstallBackButtonGlass(buttonBarButton, contentView, stockImageFrame);
-        installed = YES;
-        break;
-    }
-    if (!installed) {
-        LGSettingsRemoveBackButtonReplacement(contentView);
-    }
+static void LGHideStockControlContents(UIView *control, UIView *except) {
+    for (UIView *subview in control.subviews)
+        if (subview != except) subview.alpha = 0.0;
 }
 
-static void LGUpdateSettingsRoundedCellShape(UIView *view) {
+static BOOL LGViewTreeHasSpeechRateEndpoints(UIView *root);
+
+static UISlider *LGSettingsSliderOwnerForVisualElement(UIView *view) {
+    for (UIView *candidate = view; candidate; candidate = candidate.superview)
+        if ([candidate isKindOfClass:UISlider.class]) return (UISlider *)candidate;
+    return nil;
+}
+
+static void LGSetNativeSliderTreeSuppressed(UIView *view, BOOL preserve) {
     if (!view) return;
-    CGFloat cornerRadius = view.layer.cornerRadius;
-    if (fabs(cornerRadius - 10.0) > 0.25) return;
-    CGFloat height = CGRectGetHeight(view.bounds);
-    if (height <= 0.0) return;
-    view.layer.cornerRadius = 27.0;
-}
-
-static void LGUpdateSettingsRoundedCellSubviews(UIView *root) {
-    for (UIView *subview in root.subviews) {
-        LGUpdateSettingsRoundedCellShape(subview);
-        LGUpdateSettingsRoundedCellSubviews(subview);
-    }
-}
-
-static void LGUpdateSettingsCellSeparatorInsets(UITableViewCell *cell) {
-    if (!cell) return;
-    UIEdgeInsets inset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
-    if ([cell respondsToSelector:@selector(setSeparatorInset:)]) {
-        cell.separatorInset = inset;
-    }
-    if ([cell respondsToSelector:@selector(setLayoutMargins:)]) {
-        cell.layoutMargins = inset;
-    }
-    if ([cell respondsToSelector:@selector(setPreservesSuperviewLayoutMargins:)]) {
-        cell.preservesSuperviewLayoutMargins = NO;
-    }
-}
-
-static void LGDebugSettingsSegmentedControlViewTree(UIView *view, NSInteger depth) {
-    if (!view || depth > 3) return;
-    NSString *indent = [@"" stringByPaddingToLength:(NSUInteger)(depth * 2) withString:@" " startingAtIndex:0];
-    BOOL selected = NO;
-    BOOL highlighted = NO;
-    SEL selectedSelector = NSSelectorFromString(@"isSelected");
-    SEL highlightedSelector = NSSelectorFromString(@"isHighlighted");
-    if ([view respondsToSelector:selectedSelector]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        selected = ((BOOL (*)(id, SEL))[view methodForSelector:selectedSelector])(view, selectedSelector);
-#pragma clang diagnostic pop
-    }
-    if ([view respondsToSelector:highlightedSelector]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        highlighted = ((BOOL (*)(id, SEL))[view methodForSelector:highlightedSelector])(view, highlightedSelector);
-#pragma clang diagnostic pop
-    }
-    LGDebugLog(@"settings segmented view %@class=%@ frame=%@ bounds=%@ alpha=%.2f hidden=%d cr=%.2f bg=%@ subviews=%lu",
-               indent,
-               NSStringFromClass(view.class),
-               NSStringFromCGRect(view.frame),
-               NSStringFromCGRect(view.bounds),
-               view.alpha,
-               view.hidden,
-               view.layer.cornerRadius,
-               view.backgroundColor,
-               (unsigned long)view.subviews.count);
-    if (selected || highlighted || view.layer.sublayers.count > 0) {
-        LGDebugLog(@"settings segmented meta %@selected=%d highlighted=%d sublayers=%lu",
-                   indent,
-                   selected,
-                   highlighted,
-                   (unsigned long)view.layer.sublayers.count);
-    }
-    for (UIView *subview in view.subviews) {
-        LGDebugSettingsSegmentedControlViewTree(subview, depth + 1);
-    }
-}
-
-static void LGProbeSettingsSegmentedControl(UISegmentedControl *control, NSString *phase) {
-    if (!control) return;
-    BOOL hasLaidOutSegments = NO;
-    for (UIView *subview in control.subviews) {
-        if (CGRectGetWidth(subview.bounds) > 1.0 || CGRectGetWidth(subview.frame) > 1.0) {
-            hasLaidOutSegments = YES;
-            break;
-        }
-    }
-    NSNumber *dumpedLaidOutTree = objc_getAssociatedObject(control, @selector(LGProbeSettingsSegmentedControl));
-    BOOL shouldDumpTree = hasLaidOutSegments && !dumpedLaidOutTree.boolValue;
-    if (shouldDumpTree) {
-        objc_setAssociatedObject(control, @selector(LGProbeSettingsSegmentedControl), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    NSMutableArray<NSString *> *segments = [NSMutableArray array];
-    for (NSInteger i = 0; i < control.numberOfSegments; i++) {
-        NSString *title = [control titleForSegmentAtIndex:i] ?: @"";
-        UIImage *image = [control imageForSegmentAtIndex:i];
-        [segments addObject:[NSString stringWithFormat:@"{%ld title=%@ image=%d enabled=%d width=%.1f}",
-                             (long)i,
-                             title,
-                             image != nil,
-                             [control isEnabledForSegmentAtIndex:i],
-                             [control widthForSegmentAtIndex:i]]];
-    }
-
-    LGDebugLog(@"settings segmented control phase=%@ control=%p frame=%@ bounds=%@ selected=%ld count=%ld moments=%d tracking=%d highlighted=%d segments=%@",
-               phase ?: @"?",
-               control,
-               NSStringFromCGRect(control.frame),
-               NSStringFromCGRect(control.bounds),
-               (long)control.selectedSegmentIndex,
-               (long)control.numberOfSegments,
-               control.momentary,
-               control.tracking,
-               control.highlighted,
-               segments);
-
-    if (shouldDumpTree) {
-        LGDebugSettingsSegmentedControlViewTree(control, 0);
-    }
-}
-
-static UIImage *LGCaptureSettingsSegmentedBackdropImage(UIView *captureView, CGRect captureRect) {
-    if (!captureView || CGRectIsEmpty(captureRect)) return nil;
-    UIGraphicsBeginImageContextWithOptions(captureRect.size, NO, 0.0);
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    CGContextTranslateCTM(context, -CGRectGetMinX(captureRect), -CGRectGetMinY(captureRect));
-    [captureView.layer renderInContext:context];
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
-}
-
-static UIImage *LGCompositeSettingsSegmentedCaptureRegion(UIImage *baseImage,
-                                                          UIView *captureView,
-                                                          CGRect captureRect,
-                                                          CGRect regionRectInCapture) {
-    if (!baseImage || !captureView || CGRectIsEmpty(captureRect) || CGRectIsEmpty(regionRectInCapture)) return baseImage;
-    CGRect clippedRegion = CGRectIntersection(CGRectMake(0.0, 0.0, CGRectGetWidth(captureRect), CGRectGetHeight(captureRect)),
-                                              regionRectInCapture);
-    if (CGRectIsEmpty(clippedRegion)) return baseImage;
-
-    CGRect regionRectInView = CGRectOffset(clippedRegion, CGRectGetMinX(captureRect), CGRectGetMinY(captureRect));
-    UIImage *regionImage = LGCaptureSettingsSegmentedBackdropImage(captureView, regionRectInView);
-    if (!regionImage) return baseImage;
-
-    UIGraphicsBeginImageContextWithOptions(baseImage.size, NO, baseImage.scale);
-    [baseImage drawAtPoint:CGPointZero];
-    [regionImage drawInRect:clippedRegion];
-    UIImage *composited = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return composited ?: baseImage;
-}
-
-static UIImage *LGRenderSettingsSegmentedLightModeBackdropImage(CGSize size,
-                                                                UIColor *backgroundColor,
-                                                                CGRect localPillRect) {
-    if (size.width <= 0.0 || size.height <= 0.0) return nil;
-    UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    [backgroundColor setFill];
-    CGContextFillRect(context, CGRectMake(0.0, 0.0, size.width, size.height));
-
-    UIBezierPath *pillPath = [UIBezierPath bezierPathWithRoundedRect:localPillRect
-                                                        cornerRadius:CGRectGetHeight(localPillRect) * 0.5];
-    [[UIColor colorWithWhite:1.0 alpha:0.88] setFill];
-    [pillPath fill];
-
-    CGContextSaveGState(context);
-    [pillPath addClip];
-    CGRect sheenRect = CGRectMake(CGRectGetMinX(localPillRect),
-                                  CGRectGetMinY(localPillRect),
-                                  CGRectGetWidth(localPillRect),
-                                  CGRectGetHeight(localPillRect) * 0.58);
-    UIBezierPath *sheenPath = [UIBezierPath bezierPathWithRoundedRect:sheenRect
-                                                         cornerRadius:CGRectGetHeight(localPillRect) * 0.5];
-    [[UIColor colorWithWhite:1.0 alpha:0.12] setFill];
-    [sheenPath fill];
-    CGContextRestoreGState(context);
-
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
-}
-
-static NSArray<UIView *> *LGSettingsSegmentedSelectedSegmentViews(UISegmentedControl *control) {
-    NSMutableArray<UIView *> *matches = [NSMutableArray array];
-    Class segmentClass = NSClassFromString(@"UISegment");
-    for (UIView *subview in control.subviews) {
-        if (segmentClass && ![subview isKindOfClass:segmentClass]) continue;
-        SEL selectedSelector = NSSelectorFromString(@"isSelected");
-        if (![subview respondsToSelector:selectedSelector]) continue;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        BOOL selected = ((BOOL (*)(id, SEL))[subview methodForSelector:selectedSelector])(subview, selectedSelector);
-#pragma clang diagnostic pop
-        if (selected) [matches addObject:subview];
-    }
-    return matches;
-}
-
-static void LGSettingsCollectSegmentPayloadViews(UIView *root, NSMutableArray<UIView *> *matches) {
-    if (!root) return;
-    for (UIView *subview in root.subviews) {
-        if (!subview.hidden && subview.alpha > 0.01) {
-            if ([subview isKindOfClass:[UILabel class]]) {
-                [matches addObject:subview];
-            } else if ([subview isKindOfClass:[UIImageView class]] && ((UIImageView *)subview).image) {
-                [matches addObject:subview];
-            }
-        }
-        LGSettingsCollectSegmentPayloadViews(subview, matches);
-    }
-}
-
-static CGFloat LGSettingsSegmentPayloadScore(UIView *payloadView, UIView *segment) {
-    if (!payloadView || !segment) return -CGFLOAT_MAX;
-    CGRect frameInSegment = [payloadView convertRect:payloadView.bounds toView:segment];
-    CGRect visibleFrame = CGRectIntersection(segment.bounds, frameInSegment);
-    if (CGRectIsEmpty(visibleFrame)) return -CGFLOAT_MAX;
-    CGFloat area = CGRectGetWidth(visibleFrame) * CGRectGetHeight(visibleFrame);
-    CGPoint visibleCenter = CGPointMake(CGRectGetMidX(visibleFrame), CGRectGetMidY(visibleFrame));
-    CGPoint segmentCenter = CGPointMake(CGRectGetMidX(segment.bounds), CGRectGetMidY(segment.bounds));
-    CGFloat distancePenalty = hypot(visibleCenter.x - segmentCenter.x, visibleCenter.y - segmentCenter.y) * 8.0;
-    return area - distancePenalty;
-}
-
-static UILabel *LGSettingsBestSegmentLabelView(UIView *segment) {
-    NSMutableArray<UIView *> *payloadViews = [NSMutableArray array];
-    LGSettingsCollectSegmentPayloadViews(segment, payloadViews);
-    UILabel *bestLabel = nil;
-    CGFloat bestScore = -CGFLOAT_MAX;
-    for (UIView *payloadView in payloadViews) {
-        if (![payloadView isKindOfClass:[UILabel class]]) continue;
-        CGFloat score = LGSettingsSegmentPayloadScore(payloadView, segment);
-        if (score > bestScore) {
-            bestScore = score;
-            bestLabel = (UILabel *)payloadView;
-        }
-    }
-    return bestLabel;
-}
-
-static UIImageView *LGSettingsBestSegmentImageView(UIView *segment) {
-    NSMutableArray<UIView *> *payloadViews = [NSMutableArray array];
-    LGSettingsCollectSegmentPayloadViews(segment, payloadViews);
-    UIImageView *bestImageView = nil;
-    CGFloat bestScore = -CGFLOAT_MAX;
-    for (UIView *payloadView in payloadViews) {
-        if (![payloadView isKindOfClass:[UIImageView class]]) continue;
-        CGFloat score = LGSettingsSegmentPayloadScore(payloadView, segment);
-        if (score > bestScore) {
-            bestScore = score;
-            bestImageView = (UIImageView *)payloadView;
-        }
-    }
-    return bestImageView;
-}
-
-static NSArray<UIView *> *LGSettingsSegmentedLightModeProxyContentViews(UIView *captureView,
-                                                                        NSArray<UIView *> *selectedSegments) {
-    NSMutableArray<UIView *> *proxies = [NSMutableArray array];
-    for (UIView *segment in selectedSegments) {
-        CGRect segmentFrameInCapture = [segment convertRect:segment.bounds toView:captureView];
-        UILabel *bestLabel = LGSettingsBestSegmentLabelView(segment);
-        if (bestLabel) {
-            CGSize preferredSize = [bestLabel sizeThatFits:CGSizeMake(CGRectGetWidth(segmentFrameInCapture), CGFLOAT_MAX)];
-            if (preferredSize.width <= 0.0 || preferredSize.height <= 0.0) {
-                preferredSize = [bestLabel convertRect:bestLabel.bounds toView:captureView].size;
-            }
-            CGRect centeredFrame = CGRectMake(CGRectGetMidX(segmentFrameInCapture) - preferredSize.width * 0.5,
-                                              CGRectGetMidY(segmentFrameInCapture) - preferredSize.height * 0.5,
-                                              preferredSize.width,
-                                              preferredSize.height);
-            UILabel *proxy = [[UILabel alloc] initWithFrame:CGRectIntegral(centeredFrame)];
-            proxy.text = bestLabel.text;
-            proxy.attributedText = bestLabel.attributedText;
-            proxy.font = bestLabel.font;
-            proxy.textColor = bestLabel.textColor;
-            proxy.textAlignment = bestLabel.textAlignment;
-            proxy.numberOfLines = bestLabel.numberOfLines;
-            proxy.lineBreakMode = bestLabel.lineBreakMode;
-            proxy.adjustsFontSizeToFitWidth = bestLabel.adjustsFontSizeToFitWidth;
-            proxy.minimumScaleFactor = bestLabel.minimumScaleFactor;
-            proxy.backgroundColor = UIColor.clearColor;
-            proxy.opaque = NO;
-            proxy.userInteractionEnabled = NO;
-            [captureView addSubview:proxy];
-            [proxies addObject:proxy];
-        }
-
-        UIImageView *bestImageView = LGSettingsBestSegmentImageView(segment);
-        if (bestImageView && bestImageView.image) {
-            CGSize imageSize = bestImageView.image.size;
-            CGFloat scale = 1.0;
-            if (imageSize.width > CGRectGetWidth(segmentFrameInCapture) && imageSize.width > 0.0) {
-                scale = CGRectGetWidth(segmentFrameInCapture) / imageSize.width;
-            }
-            if (imageSize.height * scale > CGRectGetHeight(segmentFrameInCapture) && imageSize.height > 0.0) {
-                scale = CGRectGetHeight(segmentFrameInCapture) / imageSize.height;
-            }
-            CGSize fittedSize = CGSizeMake(imageSize.width * scale, imageSize.height * scale);
-            CGRect centeredFrame = CGRectMake(CGRectGetMidX(segmentFrameInCapture) - fittedSize.width * 0.5,
-                                              CGRectGetMidY(segmentFrameInCapture) - fittedSize.height * 0.5,
-                                              fittedSize.width,
-                                              fittedSize.height);
-            UIImageView *proxy = [[UIImageView alloc] initWithFrame:CGRectIntegral(centeredFrame)];
-            proxy.image = bestImageView.image;
-            proxy.contentMode = bestImageView.contentMode;
-            proxy.tintColor = bestImageView.tintColor;
-            proxy.userInteractionEnabled = NO;
-            [captureView addSubview:proxy];
-            [proxies addObject:proxy];
-        }
-    }
-    return proxies;
-}
-
-static UIImageView *LGFindSettingsSegmentedStockPill(UISegmentedControl *control) {
-    UIImageView *best = nil;
-    CGFloat bestScore = -CGFLOAT_MAX;
-    for (UIView *subview in control.subviews) {
-        if (![subview isKindOfClass:[UIImageView class]]) continue;
-        if (subview.subviews.count != 0) continue;
-        CGRect frame = subview.frame;
-        if (CGRectGetWidth(frame) < 20.0 || CGRectGetHeight(frame) < CGRectGetHeight(control.bounds) + 4.0) continue;
-        CGFloat score = CGRectGetWidth(frame);
-        if (CGRectGetMinY(frame) < 0.0) score += 20.0;
-        if (CGRectGetHeight(frame) > CGRectGetHeight(control.bounds)) score += 10.0;
-        if (score > bestScore) {
-            bestScore = score;
-            best = (UIImageView *)subview;
-        }
-    }
-    return best;
-}
-
-static UIImageView *LGSettingsSegmentedStockPill(UISegmentedControl *control) {
-    return objc_getAssociatedObject(control, kLGSettingsSegmentedStockPillKey);
-}
-
-static LGSharedGlassView *LGSettingsSegmentedGlassPill(UISegmentedControl *control) {
-    return objc_getAssociatedObject(control, kLGSettingsSegmentedGlassPillKey);
-}
-
-static UIView *LGSettingsSegmentedGlassTint(UISegmentedControl *control) {
-    return objc_getAssociatedObject(control, kLGSettingsSegmentedGlassTintKey);
-}
-
-static LGSettingsSegmentedInsetShadowView *LGSettingsSegmentedGlassInsetShadow(UISegmentedControl *control) {
-    return objc_getAssociatedObject(control, kLGSettingsSegmentedGlassInsetShadowKey);
-}
-
-static void LGSetSettingsSegmentedGlassPill(UISegmentedControl *control, LGSharedGlassView *glass) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedGlassPillKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void LGSetSettingsSegmentedGlassTint(UISegmentedControl *control, UIView *tint) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedGlassTintKey, tint, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void LGSetSettingsSegmentedGlassInsetShadow(UISegmentedControl *control, LGSettingsSegmentedInsetShadowView *insetShadow) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedGlassInsetShadowKey, insetShadow, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void LGSetSettingsSegmentedStockPill(UISegmentedControl *control, UIImageView *pill) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedStockPillKey, pill, OBJC_ASSOCIATION_ASSIGN);
-}
-
-static BOOL LGSettingsSegmentedGlassActive(UISegmentedControl *control) {
-    return [objc_getAssociatedObject(control, kLGSettingsSegmentedGlassActiveKey) boolValue];
-}
-
-static void LGSetSettingsSegmentedGlassActive(UISegmentedControl *control, BOOL active) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedGlassActiveKey, @(active), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static CGFloat LGSettingsSegmentedGlassTouchX(UISegmentedControl *control) {
-    NSNumber *value = objc_getAssociatedObject(control, kLGSettingsSegmentedGlassTouchXKey);
-    return value ? value.doubleValue : NAN;
-}
-
-static void LGSetSettingsSegmentedGlassTouchX(UISegmentedControl *control, CGFloat x) {
-    if (isnan(x)) {
-        objc_setAssociatedObject(control, kLGSettingsSegmentedGlassTouchXKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else {
-        objc_setAssociatedObject(control, kLGSettingsSegmentedGlassTouchXKey, @(x), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-}
-
-static CGFloat LGSettingsSegmentedGlassVelocity(UISegmentedControl *control) {
-    NSNumber *value = objc_getAssociatedObject(control, kLGSettingsSegmentedGlassVelocityKey);
-    return value ? value.doubleValue : 0.0;
-}
-
-static void LGSetSettingsSegmentedGlassVelocity(UISegmentedControl *control, CGFloat velocity) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedGlassVelocityKey, @(velocity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static CGFloat LGSettingsSegmentedTargetCenterX(UISegmentedControl *control) {
-    UIImageView *stockPill = LGSettingsSegmentedStockPill(control);
-    if (!stockPill || stockPill.superview != control) {
-        stockPill = LGFindSettingsSegmentedStockPill(control);
-        LGSetSettingsSegmentedStockPill(control, stockPill);
-    }
-    return stockPill ? CGRectGetMidX(stockPill.frame) : CGRectGetMidX(control.bounds);
-}
-
-static CGFloat LGSettingsSegmentedSpringValue(UISegmentedControl *control, const void *key, CGFloat fallback) {
-    NSNumber *value = objc_getAssociatedObject(control, key);
-    return value ? value.doubleValue : fallback;
-}
-
-static void LGSetSettingsSegmentedSpringValue(UISegmentedControl *control, const void *key, CGFloat value) {
-    objc_setAssociatedObject(control, key, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static CADisplayLink *LGSettingsSegmentedDisplayLink(UISegmentedControl *control) {
-    return objc_getAssociatedObject(control, kLGSettingsSegmentedDisplayLinkKey);
-}
-
-static void LGSetSettingsSegmentedDisplayLink(UISegmentedControl *control, CADisplayLink *link) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedDisplayLinkKey, link, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static id LGSettingsSegmentedDisplayLinkDriver(UISegmentedControl *control) {
-    return objc_getAssociatedObject(control, kLGSettingsSegmentedDisplayLinkDriverKey);
-}
-
-static void LGSetSettingsSegmentedDisplayLinkDriver(UISegmentedControl *control, id driver) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedDisplayLinkDriverKey, driver, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static CGFloat LGSettingsSegmentedObjectScale(UISegmentedControl *control) {
-    return LGSettingsSegmentedSpringValue(control, kLGSettingsSegmentedObjectScaleKey, 1.0);
-}
-
-static BOOL LGSettingsSegmentedReleased(UISegmentedControl *control) {
-    return [objc_getAssociatedObject(control, kLGSettingsSegmentedReleasedKey) boolValue];
-}
-
-static void LGSetSettingsSegmentedReleased(UISegmentedControl *control, BOOL released) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedReleasedKey, @(released), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static void LGSetSettingsSegmentedReleaseObjectScale(UISegmentedControl *control, CGFloat scale) {
-    if (isnan(scale)) {
-        objc_setAssociatedObject(control, kLGSettingsSegmentedReleaseObjectScaleKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else {
-        objc_setAssociatedObject(control, kLGSettingsSegmentedReleaseObjectScaleKey, @(scale), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-}
-
-static CGRect LGSettingsSegmentedReleaseFrame(UISegmentedControl *control) {
-    NSValue *value = objc_getAssociatedObject(control, kLGSettingsSegmentedReleaseFrameKey);
-    return value ? value.CGRectValue : CGRectNull;
-}
-
-static void LGSetSettingsSegmentedReleaseFrame(UISegmentedControl *control, CGRect frame) {
-    if (CGRectIsNull(frame)) {
-        objc_setAssociatedObject(control, kLGSettingsSegmentedReleaseFrameKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else {
-        objc_setAssociatedObject(control, kLGSettingsSegmentedReleaseFrameKey, [NSValue valueWithCGRect:frame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-}
-
-static BOOL LGSettingsSegmentedHasRenderedState(UISegmentedControl *control) {
-    return [objc_getAssociatedObject(control, kLGSettingsSegmentedHasRenderedStateKey) boolValue];
-}
-
-static void LGSetSettingsSegmentedHasRenderedState(UISegmentedControl *control, BOOL hasState) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedHasRenderedStateKey, @(hasState), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static CGFloat LGSettingsSegmentedRenderedCenterX(UISegmentedControl *control, CGFloat fallback) {
-    NSNumber *value = objc_getAssociatedObject(control, kLGSettingsSegmentedRenderedCenterXKey);
-    return value ? value.doubleValue : fallback;
-}
-
-static CGFloat LGSettingsSegmentedRenderedWidth(UISegmentedControl *control, CGFloat fallback) {
-    NSNumber *value = objc_getAssociatedObject(control, kLGSettingsSegmentedRenderedWidthKey);
-    return value ? value.doubleValue : fallback;
-}
-
-static CGFloat LGSettingsSegmentedRenderedHeight(UISegmentedControl *control, CGFloat fallback) {
-    NSNumber *value = objc_getAssociatedObject(control, kLGSettingsSegmentedRenderedHeightKey);
-    return value ? value.doubleValue : fallback;
-}
-
-static void LGSetSettingsSegmentedRenderedFrameState(UISegmentedControl *control, CGRect frame) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedRenderedCenterXKey, @(CGRectGetMidX(frame)), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(control, kLGSettingsSegmentedRenderedWidthKey, @(CGRectGetWidth(frame)), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(control, kLGSettingsSegmentedRenderedHeightKey, @(CGRectGetHeight(frame)), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    LGSetSettingsSegmentedHasRenderedState(control, YES);
-}
-
-static CGRect LGSettingsSegmentedRenderedFrame(UISegmentedControl *control, CGRect fallbackFrame) {
-    if (!LGSettingsSegmentedHasRenderedState(control)) return fallbackFrame;
-    CGFloat centerX = LGSettingsSegmentedRenderedCenterX(control, CGRectGetMidX(fallbackFrame));
-    CGFloat width = LGSettingsSegmentedRenderedWidth(control, CGRectGetWidth(fallbackFrame));
-    CGFloat height = LGSettingsSegmentedRenderedHeight(control, CGRectGetHeight(fallbackFrame));
-    return CGRectMake(centerX - width * 0.5,
-                      CGRectGetMidY(fallbackFrame) - height * 0.5,
-                      width,
-                      height);
-}
-
-static BOOL LGSettingsSegmentedLastActiveState(UISegmentedControl *control) {
-    return [objc_getAssociatedObject(control, kLGSettingsSegmentedLastActiveStateKey) boolValue];
-}
-
-static void LGSetSettingsSegmentedLastActiveState(UISegmentedControl *control, BOOL active) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedLastActiveStateKey, @(active), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static BOOL LGSettingsSegmentedFadingOut(UISegmentedControl *control) {
-    return [objc_getAssociatedObject(control, kLGSettingsSegmentedFadingOutKey) boolValue];
-}
-
-static void LGSetSettingsSegmentedFadingOut(UISegmentedControl *control, BOOL fadingOut) {
-    objc_setAssociatedObject(control, kLGSettingsSegmentedFadingOutKey, @(fadingOut), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static NSInteger LGSettingsSegmentedDeactivateToken(UISegmentedControl *control) {
-    NSNumber *value = objc_getAssociatedObject(control, kLGSettingsSegmentedDeactivateTokenKey);
-    return value ? value.integerValue : 0;
-}
-
-static NSInteger LGAdvanceSettingsSegmentedDeactivateToken(UISegmentedControl *control) {
-    NSInteger token = LGSettingsSegmentedDeactivateToken(control) + 1;
-    objc_setAssociatedObject(control, kLGSettingsSegmentedDeactivateTokenKey, @(token), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    return token;
-}
-
-static void LGApplySettingsSegmentedAppearanceToOverlay(LGSettingsSegmentedAppearance appearance,
-                                                        LGSharedGlassView *glass,
-                                                        UIView *tint,
-                                                        LGSettingsSegmentedInsetShadowView *insetShadow) {
-    if (!glass || !tint || !insetShadow) return;
-    glass.layer.shadowOpacity = appearance.shadowOpacity;
-    glass.layer.shadowRadius = appearance.shadowRadius;
-    glass.layer.shadowOffset = appearance.shadowOffset;
-    tint.backgroundColor = LGSettingsSegmentedAppearanceTintColor(appearance);
-    tint.layer.borderColor = LGSettingsSegmentedAppearanceBorderColor(appearance).CGColor;
-    insetShadow.alpha = appearance.insetShadowAlpha;
-}
-
-static void LGRefreshSettingsSegmentedGlassBackdrop(UISegmentedControl *control, LGSharedGlassView *glass, CGRect pillFrame) {
-    UIView *captureView = control.superview ?: control;
-    if (!captureView || CGRectIsEmpty(pillFrame)) return;
-
-    BOOL oldGlassHidden = glass.hidden;
-    CGFloat oldGlassAlpha = glass.alpha;
-    UIImageView *stockPill = LGSettingsSegmentedStockPill(control);
-    BOOL oldStockHidden = stockPill.hidden;
-    CGFloat oldStockAlpha = stockPill.alpha;
-    BOOL lightMode = !LGSettingsIsDarkMode(control.traitCollection);
-    NSArray<UIView *> *selectedSegments = nil;
-    NSMutableArray<NSNumber *> *selectedSegmentAlphas = nil;
-    NSArray<UIView *> *proxyContentViews = nil;
-
-    glass.hidden = YES;
-    glass.alpha = 0.0;
-    stockPill.hidden = YES;
-    stockPill.alpha = 0.0;
-    if (lightMode) {
-        selectedSegments = LGSettingsSegmentedSelectedSegmentViews(control);
-        selectedSegmentAlphas = [NSMutableArray arrayWithCapacity:selectedSegments.count];
-        for (UIView *segment in selectedSegments) {
-            [selectedSegmentAlphas addObject:@(segment.alpha)];
-            segment.alpha = 0.0;
-        }
-        proxyContentViews = LGSettingsSegmentedLightModeProxyContentViews(captureView, selectedSegments);
-    }
-
-    CGRect pillRectInCapture = [control convertRect:pillFrame toView:captureView];
-    CGRect captureRect = CGRectInset(pillRectInCapture, -18.0, -18.0);
-    captureRect = CGRectIntersection(captureView.bounds, captureRect);
-    UIImage *snapshot = nil;
-    if (lightMode) {
-        CGRect localPillRect = CGRectOffset(pillRectInCapture, -CGRectGetMinX(captureRect), -CGRectGetMinY(captureRect));
-        UIColor *backgroundColor = captureView.backgroundColor ?: (control.superview.backgroundColor ?: UIColor.systemBackgroundColor);
-        snapshot = LGRenderSettingsSegmentedLightModeBackdropImage(captureRect.size, backgroundColor, localPillRect);
-        CGRect liveCompositeRect = CGRectInset(localPillRect, -6.0, -4.0);
-        snapshot = LGCompositeSettingsSegmentedCaptureRegion(snapshot, captureView, captureRect, liveCompositeRect);
-    } else {
-        snapshot = LGCaptureSettingsSegmentedBackdropImage(captureView, captureRect);
-    }
-    CGPoint captureOriginInScreen = [captureView convertPoint:captureRect.origin toView:nil];
-
-    glass.hidden = oldGlassHidden;
-    glass.alpha = oldGlassAlpha;
-    stockPill.hidden = oldStockHidden;
-    stockPill.alpha = oldStockAlpha;
-    for (NSUInteger idx = 0; idx < selectedSegments.count; idx++) {
-        selectedSegments[idx].alpha = selectedSegmentAlphas[idx].doubleValue;
-    }
-    for (UIView *proxy in proxyContentViews) {
-        [proxy removeFromSuperview];
-    }
-
-    glass.sourceImage = snapshot;
-    glass.sourceOrigin = captureOriginInScreen;
-}
-
-static void LGSetSettingsSegmentedGlassFrame(LGSharedGlassView *glass, UIView *tint, CGRect frame, BOOL animated) {
-    if (!glass || !tint) return;
-    void (^updates)(void) = ^{
-        glass.frame = frame;
-        glass.cornerRadius = CGRectGetHeight(frame) * 0.5;
-        tint.frame = glass.bounds;
-        tint.layer.cornerRadius = CGRectGetHeight(tint.bounds) * 0.5;
-        tint.layer.cornerCurve = kCACornerCurveContinuous;
-    };
-    if (!animated || glass.hidden || glass.alpha < 0.01) {
-        [UIView performWithoutAnimation:updates];
-        return;
-    }
-    [UIView animateWithDuration:0.16
-                          delay:0.0
-                        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionAllowUserInteraction
-                     animations:updates
-                     completion:nil];
-}
-
-static CGRect LGSettingsSegmentedGlassDragFrame(UISegmentedControl *control, CGRect stockPillFrame) {
-    CGFloat touchX = LGSettingsSegmentedGlassTouchX(control);
-    if (isnan(touchX)) return stockPillFrame;
-    CGRect releaseFrame = LGSettingsSegmentedReleaseFrame(control);
-    BOOL released = LGSettingsSegmentedReleased(control) && !CGRectIsNull(releaseFrame);
-    CGRect baseFrame = released ? releaseFrame : stockPillFrame;
-    CGFloat minCenterX = CGRectGetWidth(baseFrame) * 0.5 - 3.0;
-    CGFloat maxCenterX = CGRectGetWidth(control.bounds) - CGRectGetWidth(baseFrame) * 0.5 + 3.0;
-    CGFloat centerX = touchX;
-    CGFloat width = CGRectGetWidth(baseFrame);
-    CGFloat height = CGRectGetHeight(baseFrame);
-    if (!released) {
-        LGLiquidDragState dragState = LGLiquidDragStateMake(touchX,
-                                                            minCenterX,
-                                                            maxCenterX,
-                                                            baseFrame.size,
-                                                            LGSettingsSegmentedGlassVelocity(control),
-                                                            33.0);
-        centerX = dragState.centerX;
-        width = dragState.width;
-        height = dragState.height;
-    } else {
-        centerX = LGLiquidRubberBandedCenterX(touchX, minCenterX, maxCenterX, 1.24);
-    }
-    CGFloat minX = -3.0;
-    CGFloat maxX = CGRectGetWidth(control.bounds) - width + 3.0;
-    CGFloat originX = centerX - width * 0.5;
-    if (LGLiquidOvershootDistance(touchX, minCenterX, maxCenterX) <= 0.001) {
-        originX = fmax(minX, fmin(originX, maxX));
-    }
-    return CGRectMake(originX,
-                      CGRectGetMidY(baseFrame) - height * 0.5,
-                      width,
-                      height);
-}
-
-static UIView *LGSettingsSegmentedOverlayContainer(UISegmentedControl *control) {
-    UIView *start = control.superview ?: control;
-    UIView *best = start;
-    for (UIView *candidate = start; candidate; candidate = candidate.superview) {
-        if ([candidate isKindOfClass:[UIScrollView class]]) break;
-        best = candidate;
-    }
-    return best ?: start;
-}
-
-static void LGAllowSettingsSegmentedOverflowFromContainer(UIView *container) {
-    for (UIView *candidate = container; candidate; candidate = candidate.superview) {
-        if ([candidate isKindOfClass:[UIScrollView class]]) break;
-        candidate.clipsToBounds = NO;
-        candidate.layer.masksToBounds = NO;
-    }
-}
-
-static void LGBringSettingsSegmentedLabelsToFront(UISegmentedControl *control, UIView *glass, UIView *tint) {
-    Class segmentClass = NSClassFromString(@"UISegment");
-    BOOL active = LGSettingsSegmentedGlassActive(control);
-    if (glass.superview) {
-        [glass.superview bringSubviewToFront:glass];
-    }
-    if (tint.superview == glass) {
-        [glass bringSubviewToFront:tint];
-    }
-    if (!active) {
-        for (UIView *subview in control.subviews) {
-            if (segmentClass && [subview isKindOfClass:segmentClass]) {
-                [control bringSubviewToFront:subview];
-            }
-        }
-    }
-}
-
-static BOOL LGSettingsIsDarkMode(UITraitCollection *traitCollection) {
-    if (@available(iOS 12.0, *)) {
-        return traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
-    }
-    return NO;
-}
-
-static LGSettingsSegmentedAppearance LGSettingsSegmentedAppearanceMake(UITraitCollection *traitCollection) {
-    BOOL darkMode = LGSettingsIsDarkMode(traitCollection);
-    if (darkMode) {
-        return (LGSettingsSegmentedAppearance){
-            .pillAlpha = 0.045,
-            .sheenAlpha = 0.045,
-            .glassLiftAlpha = 0.055,
-            .tintAlpha = 0.06,
-            .borderAlpha = 0.10,
-            .insetShadowAlpha = 0.68,
-            .shadowOpacity = 0.10,
-            .shadowRadius = 4.0,
-            .shadowOffset = {0.0, 1.0},
-        };
-    }
-    return (LGSettingsSegmentedAppearance){
-        .pillAlpha = 0.88,
-        .sheenAlpha = 0.12,
-        .glassLiftAlpha = 0.18,
-        .tintAlpha = 0.095,
-        .borderAlpha = 0.12,
-        .insetShadowAlpha = 1.0,
-        .shadowOpacity = 0.08,
-        .shadowRadius = 4.0,
-        .shadowOffset = {0.0, 1.0},
-    };
-}
-
-static UIColor *LGSettingsSegmentedAppearanceTintColor(LGSettingsSegmentedAppearance appearance) {
-    return [UIColor colorWithWhite:1.0 alpha:appearance.tintAlpha];
-}
-
-static UIColor *LGSettingsSegmentedAppearanceBorderColor(LGSettingsSegmentedAppearance appearance) {
-    return [UIColor colorWithWhite:1.0 alpha:appearance.borderAlpha];
-}
-
-static void LGUpdateSettingsSegmentedControlVisuals(UISegmentedControl *control) {
-    if (!control) return;
-    UIImageView *stockPill = LGSettingsSegmentedStockPill(control);
-    if (!stockPill || stockPill.superview != control) {
-        stockPill = LGFindSettingsSegmentedStockPill(control);
-    }
-    if (!stockPill || stockPill.superview != control) return;
-
-    LGSetSettingsSegmentedStockPill(control, stockPill);
-    stockPill.userInteractionEnabled = NO;
-
-    LGSharedGlassView *glass = LGSettingsSegmentedGlassPill(control);
-    UIView *tint = LGSettingsSegmentedGlassTint(control);
-    LGSettingsSegmentedInsetShadowView *insetShadow = LGSettingsSegmentedGlassInsetShadow(control);
-    UIView *container = LGSettingsSegmentedOverlayContainer(control);
-    if (!glass) {
-        LGEnsureSharedGlassPipelinesReady();
-        glass = [[LGSharedGlassView alloc] initWithFrame:CGRectZero sourceImage:nil sourceOrigin:CGPointZero];
-        glass.userInteractionEnabled = NO;
-        glass.releasesSourceAfterUpload = YES;
-        glass.blur = 0.0;
-        glass.sourceScale = 1.0;
-        glass.layer.shadowColor = UIColor.blackColor.CGColor;
-        [container addSubview:glass];
-        LGSetSettingsSegmentedGlassPill(control, glass);
-
-        tint = [[UIView alloc] initWithFrame:CGRectZero];
-        tint.userInteractionEnabled = NO;
-        tint.backgroundColor = UIColor.clearColor;
-        tint.layer.borderWidth = 0.75;
-        tint.layer.borderColor = UIColor.clearColor.CGColor;
-        [glass addSubview:tint];
-        LGSetSettingsSegmentedGlassTint(control, tint);
-
-        insetShadow = [[LGSettingsSegmentedInsetShadowView alloc] initWithFrame:glass.bounds];
-        insetShadow.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        insetShadow.alpha = 1.0;
-        [glass addSubview:insetShadow];
-        LGSetSettingsSegmentedGlassInsetShadow(control, insetShadow);
-    }
-    if (glass.superview != container) {
-        [glass removeFromSuperview];
-        [container addSubview:glass];
-    }
-    LGAllowSettingsSegmentedOverflowFromContainer(container);
-
-    LGSettingsSegmentedAppearance appearance = LGSettingsSegmentedAppearanceMake(control.traitCollection);
-    glass.bezelWidth = 20.0;
-    glass.refractionScale = 1.5;
-    glass.refractiveIndex = 3.0;
-    glass.specularOpacity = 0.6;
-    LGApplySettingsSegmentedAppearanceToOverlay(appearance, glass, tint, insetShadow);
-
-    control.clipsToBounds = NO;
-    control.layer.cornerRadius = 17.0;
-
-    CGRect pillFrame = stockPill.frame;
-    CGRect baseGlassFrame = [control convertRect:pillFrame toView:container];
-    if (glass.hidden && glass.alpha < 0.01) {
-        glass.frame = baseGlassFrame;
-        glass.cornerRadius = CGRectGetHeight(baseGlassFrame) * 0.5;
-        tint.frame = glass.bounds;
-        tint.layer.cornerRadius = CGRectGetHeight(tint.bounds) * 0.5;
-        tint.layer.cornerCurve = kCACornerCurveContinuous;
-    }
-
-    BOOL active = LGSettingsSegmentedGlassActive(control);
-    BOOL wasActive = LGSettingsSegmentedLastActiveState(control);
-    BOOL fadingOut = LGSettingsSegmentedFadingOut(control);
-    BOOL hasLiveTouch = !isnan(LGSettingsSegmentedGlassTouchX(control));
-
-    if (active) {
-        CGRect localGlassFrame = LGSettingsSegmentedGlassDragFrame(control, pillFrame);
-        CGRect renderedLocalFrame = LGSettingsSegmentedRenderedFrame(control, localGlassFrame);
-        CGRect glassFrame = [control convertRect:renderedLocalFrame toView:container];
-        glass.hidden = NO;
-        glass.transform = CGAffineTransformIdentity;
-        if (!wasActive) {
-            LGSetSettingsSegmentedFadingOut(control, NO);
-            [glass.layer removeAllAnimations];
-            [UIView performWithoutAnimation:^{
-                glass.frame = baseGlassFrame;
-                glass.cornerRadius = CGRectGetHeight(baseGlassFrame) * 0.5;
-                tint.frame = glass.bounds;
-                tint.layer.cornerRadius = CGRectGetHeight(tint.bounds) * 0.5;
-                tint.layer.cornerCurve = kCACornerCurveContinuous;
-                glass.alpha = 0.0;
-            }];
-            stockPill.hidden = NO;
-            stockPill.alpha = 1.0;
-            [UIView animateWithDuration:0.14
-                                  delay:0.0
-                                options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionAllowUserInteraction
-                             animations:^{
-                                 stockPill.alpha = 0.0;
-                                 glass.alpha = 1.0;
-                             }
-                             completion:^(__unused BOOL finished) {
-                                 if (LGSettingsSegmentedGlassActive(control)) {
-                                     stockPill.hidden = YES;
-                                     stockPill.alpha = 0.0;
-                                 }
-                             }];
-        } else {
-            stockPill.hidden = YES;
-            stockPill.alpha = 0.0;
-            glass.alpha = 1.0;
-        }
-        LGSetSettingsSegmentedGlassFrame(glass, tint, glassFrame, !hasLiveTouch);
-        LGRefreshSettingsSegmentedGlassBackdrop(control, glass, renderedLocalFrame);
-    } else if (wasActive) {
-        LGSetSettingsSegmentedFadingOut(control, YES);
-        [glass.layer removeAllAnimations];
-        glass.hidden = NO;
-        glass.transform = CGAffineTransformIdentity;
-        glass.alpha = 1.0;
-        stockPill.hidden = NO;
-        stockPill.alpha = 0.0;
-        [UIView animateWithDuration:0.12
-                              delay:0.0
-                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionAllowUserInteraction
-                         animations:^{
-                             glass.frame = baseGlassFrame;
-                             glass.cornerRadius = CGRectGetHeight(baseGlassFrame) * 0.5;
-                             tint.frame = glass.bounds;
-                             tint.layer.cornerRadius = CGRectGetHeight(tint.bounds) * 0.5;
-                             tint.layer.cornerCurve = kCACornerCurveContinuous;
-                             stockPill.alpha = 1.0;
-                             glass.alpha = 0.0;
-                         }
-                         completion:^(__unused BOOL finished) {
-                             if (!LGSettingsSegmentedGlassActive(control)) {
-                                 LGSetSettingsSegmentedFadingOut(control, NO);
-                                 stockPill.hidden = NO;
-                                 stockPill.alpha = 1.0;
-                                 glass.hidden = YES;
-                                 glass.alpha = 0.0;
-                                 glass.transform = CGAffineTransformIdentity;
-                             }
-                         }];
-    } else if (fadingOut) {
-        stockPill.hidden = NO;
-    } else {
-        stockPill.hidden = NO;
-        stockPill.alpha = 1.0;
-        glass.hidden = YES;
-        glass.alpha = 0.0;
-        glass.transform = CGAffineTransformIdentity;
-    }
-
-    LGSetSettingsSegmentedLastActiveState(control, active);
-    LGBringSettingsSegmentedLabelsToFront(control, glass, tint);
-    if (!hasLiveTouch) {
-        LGDebugLog(@"settings segmented glass control=%p active=%d stockPill=%@ glassFrame=%@ selected=%ld tracking=%d touchX=%.2f",
-                   control,
-                   active,
-                   NSStringFromCGRect(stockPill.frame),
-                   NSStringFromCGRect(glass.frame),
-                   (long)control.selectedSegmentIndex,
-                   control.tracking,
-                   LGSettingsSegmentedGlassTouchX(control));
-    }
-}
-
-static id LGCellSpecifier(id cell) {
-    if (!cell) return nil;
-    SEL selector = NSSelectorFromString(@"specifier");
-    if ([cell respondsToSelector:selector]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        id specifier = [cell performSelector:selector];
-#pragma clang diagnostic pop
-        if (specifier) return specifier;
-    }
-    @try {
-        return [cell valueForKey:@"specifier"];
-    } @catch (NSException *exception) {
-        LGDebugLog(@"specifier KVC read failed %@ %@", exception.name, exception.reason);
-        return nil;
-    }
-}
-
-static BOOL LGSpecifierBoolProperty(id specifier, NSString *key) {
-    if (!specifier || !key.length) return NO;
-    id value = nil;
-    @try {
-        value = [specifier propertyForKey:key];
-    } @catch (NSException *exception) {
-        LGDebugLog(@"specifier bool property read failed key=%@ %@ %@", key, exception.name, exception.reason);
-        value = nil;
-    }
-    return value ? [value boolValue] : NO;
-}
-
-static NSInteger LGSpecifierIntegerProperty(id specifier, NSString *key) {
-    if (!specifier || !key.length) return 0;
-    id value = nil;
-    @try {
-        value = [specifier propertyForKey:key];
-    } @catch (NSException *exception) {
-        LGDebugLog(@"specifier integer property read failed key=%@ %@ %@", key, exception.name, exception.reason);
-        value = nil;
-    }
-    return value ? [value integerValue] : 0;
-}
-
-static NSInteger LGSettingsSliderResolvedSegmentCount(UISlider *owner, id specifier) {
-    NSInteger segmentCount = LGSpecifierIntegerProperty(specifier, @"segmentCount");
-    if (segmentCount > 0) return segmentCount;
-    float range = owner.maximumValue - owner.minimumValue;
-    float roundedRange = roundf(range);
-    if (fabsf(range - roundedRange) <= 0.001f && roundedRange >= 1.0f && roundedRange <= 24.0f) {
-        return (NSInteger)roundedRange;
-    }
-    return 0;
-}
-
-static UISlider *LGSliderOwnerForVisualElement(UIView *view) {
-    for (UIView *candidate = view; candidate; candidate = candidate.superview) {
-        if ([candidate isKindOfClass:[UISlider class]]) {
-            return (UISlider *)candidate;
-        }
-    }
-    return nil;
-}
-
-static id LGOwnerSpecifierForView(UIView *view) {
-    for (UIView *candidate = view; candidate; candidate = candidate.superview) {
-        id specifier = LGCellSpecifier(candidate);
-        if (specifier) return specifier;
-    }
-    return nil;
-}
-
-static UISwitch *LGSwitchOwnerForVisualElement(UIView *view) {
-    for (UIView *candidate = view; candidate; candidate = candidate.superview) {
-        if ([candidate isKindOfClass:[UISwitch class]]) {
-            return (UISwitch *)candidate;
-        }
-    }
-    return nil;
-}
-
-static BOOL LGViewIsInsideLiquidSwitch(UIView *view) {
-    for (UIView *candidate = view; candidate; candidate = candidate.superview) {
-        if ([candidate isKindOfClass:[LGPrefsLiquidSwitch class]]) {
-            return YES;
-        }
-    }
-    return NO;
-}
-
-static BOOL LGViewIsInsideLiquidSlider(UIView *view) {
-    for (UIView *candidate = view; candidate; candidate = candidate.superview) {
-        if ([candidate isKindOfClass:[LGPrefsLiquidSlider class]]) {
-            return YES;
-        }
-    }
-    return NO;
-}
-
-static LGPrefsLiquidSwitch *LGSettingsSwitchOverlay(UIView *view) {
-    return objc_getAssociatedObject(view, kLGSettingsSwitchOverlayKey);
-}
-
-static void LGSetSettingsSwitchOverlay(UIView *view, LGPrefsLiquidSwitch *overlay) {
-    objc_setAssociatedObject(view, kLGSettingsSwitchOverlayKey, overlay, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static LGPrefsLiquidSwitch *LGSettingsSwitchOwnerOverlay(UISwitch *owner) {
-    return objc_getAssociatedObject(owner, kLGSettingsSwitchOwnerOverlayKey);
-}
-
-static void LGSetSettingsSwitchOwnerOverlay(UISwitch *owner, LGPrefsLiquidSwitch *overlay) {
-    objc_setAssociatedObject(owner, kLGSettingsSwitchOwnerOverlayKey, overlay, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static UIView *LGSettingsSwitchVisualHost(UISwitch *owner) {
-    return objc_getAssociatedObject(owner, kLGSettingsSwitchVisualHostKey);
-}
-
-static void LGSetSettingsSwitchVisualHost(UISwitch *owner, UIView *host) {
-    objc_setAssociatedObject(owner, kLGSettingsSwitchVisualHostKey, host, OBJC_ASSOCIATION_ASSIGN);
-}
-
-static UISwitch *LGSettingsSwitchOverlayOwner(LGPrefsLiquidSwitch *overlay) {
-    return objc_getAssociatedObject(overlay, kLGSettingsSwitchOwnerKey);
-}
-
-static void LGSetSettingsSwitchOverlayOwner(LGPrefsLiquidSwitch *overlay, UISwitch *owner) {
-    objc_setAssociatedObject(overlay, kLGSettingsSwitchOwnerKey, owner, OBJC_ASSOCIATION_ASSIGN);
-}
-
-static LGPrefsLiquidSlider *LGSettingsSliderOverlay(UIView *view) {
-    return objc_getAssociatedObject(view, kLGSettingsSliderOverlayKey);
-}
-
-static void LGSetSettingsSliderOverlay(UIView *view, LGPrefsLiquidSlider *overlay) {
-    objc_setAssociatedObject(view, kLGSettingsSliderOverlayKey, overlay, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static LGPrefsLiquidSlider *LGSettingsSliderOwnerOverlay(UISlider *owner) {
-    return objc_getAssociatedObject(owner, kLGSettingsSliderOwnerOverlayKey);
-}
-
-static void LGSetSettingsSliderOwnerOverlay(UISlider *owner, LGPrefsLiquidSlider *overlay) {
-    objc_setAssociatedObject(owner, kLGSettingsSliderOwnerOverlayKey, overlay, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static UIView *LGSettingsSliderVisualHost(UISlider *owner) {
-    return objc_getAssociatedObject(owner, kLGSettingsSliderVisualHostKey);
-}
-
-static void LGSetSettingsSliderVisualHost(UISlider *owner, UIView *host) {
-    objc_setAssociatedObject(owner, kLGSettingsSliderVisualHostKey, host, OBJC_ASSOCIATION_ASSIGN);
-}
-
-static UISlider *LGSettingsSliderOverlayOwner(LGPrefsLiquidSlider *overlay) {
-    return objc_getAssociatedObject(overlay, kLGSettingsSliderOwnerKey);
-}
-
-static void LGSetSettingsSliderOverlayOwner(LGPrefsLiquidSlider *overlay, UISlider *owner) {
-    objc_setAssociatedObject(overlay, kLGSettingsSliderOwnerKey, owner, OBJC_ASSOCIATION_ASSIGN);
-}
-
-static BOOL LGSettingsSliderIsSegmented(UISlider *owner) {
-    LGPrefsLiquidSlider *overlay = LGSettingsSliderOwnerOverlay(owner);
-    if (overlay) {
-        return [objc_getAssociatedObject(overlay, kLGPrefsSliderSegmentedKey) boolValue];
-    }
-    return NO;
-}
-
-static void LGApplySettingsSegmentedSliderTrackPolicy(UISlider *owner, BOOL segmented) {
-    if (!owner) return;
-    UIColor *storedMinimumTrackTint = objc_getAssociatedObject(owner, kLGSettingsSliderOriginalMinimumTrackTintKey);
-    if (segmented) {
-        if (!storedMinimumTrackTint && owner.minimumTrackTintColor) {
-            objc_setAssociatedObject(owner, kLGSettingsSliderOriginalMinimumTrackTintKey, owner.minimumTrackTintColor, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        if (![owner.minimumTrackTintColor isEqual:UIColor.clearColor]) {
-            owner.minimumTrackTintColor = UIColor.clearColor;
-        }
-    } else if (storedMinimumTrackTint) {
-        owner.minimumTrackTintColor = storedMinimumTrackTint;
-        objc_setAssociatedObject(owner, kLGSettingsSliderOriginalMinimumTrackTintKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-}
-
-static void LGHideNativeSwitchSubviews(UIView *host) {
-    for (UIView *subview in host.subviews) {
-        subview.alpha = 0.01;
-        subview.hidden = NO;
-        subview.userInteractionEnabled = NO;
-    }
-}
-
-static void LGSetSliderNativeSubviewTreeHiddenState(UIView *view, BOOL keepVisible) {
     view.hidden = NO;
     view.userInteractionEnabled = NO;
-    view.alpha = keepVisible ? 1.0 : 0.01;
+    view.alpha = preserve ? 1.0 : 0.0;
     for (UIView *subview in view.subviews) {
-        BOOL childKeepVisible = keepVisible || [subview isKindOfClass:[UILabel class]];
-        LGSetSliderNativeSubviewTreeHiddenState(subview, childKeepVisible);
+        BOOL preserveSubview = preserve || [subview isKindOfClass:UILabel.class];
+        LGSetNativeSliderTreeSuppressed(subview, preserveSubview);
     }
 }
 
-static BOOL LGSettingsSliderHasSpeechRateEndpointIcons(UIView *host) {
-    NSInteger matchedCount = 0;
-    for (UIView *subview in host.subviews) {
-        if (![subview isKindOfClass:[UIImageView class]]) continue;
-        NSString *label = subview.accessibilityLabel.lowercaseString ?: @"";
-        if ([label isEqualToString:@"increase speed"] || [label isEqualToString:@"decrease speed"]) {
-            matchedCount++;
-        }
-    }
-    return matchedCount >= 2;
-}
-
-static void LGHideNativeSliderSubviews(UIView *host) {
-    for (UIView *subview in host.subviews) {
-        BOOL keepVisible = [subview isKindOfClass:[UILabel class]];
-        LGSetSliderNativeSubviewTreeHiddenState(subview, keepVisible);
+static void LGSuppressNativeSliderContents(UISlider *owner,
+                                           LGPrefsLiquidSlider *overlay) {
+    UIView *visualHost = objc_getAssociatedObject(owner,
+                                                   kLGSettingsSliderVisualHostKey);
+    UIView *root = visualHost ?: owner;
+    for (UIView *subview in root.subviews) {
+        if (subview == overlay) continue;
+        LGSetNativeSliderTreeSuppressed(subview,
+            [subview isKindOfClass:UILabel.class]);
     }
 }
 
-static UIView *LGSettingsSliderOverlayContainer(UISlider *owner, UIView *host) {
-    UIView *start = owner.superview ?: host;
-    UIView *best = start;
+static UIView *LGSettingsSliderOverlayContainer(UISlider *owner) {
+    // mount outside the stock slider so value labels stay untouched
+    UIView *start = owner.superview ?: owner;
+    UIView *container = start;
     for (UIView *candidate = start; candidate; candidate = candidate.superview) {
-        if ([candidate isKindOfClass:[UIScrollView class]]) break;
-        best = candidate;
+        if ([candidate isKindOfClass:UIScrollView.class]) break;
+        container = candidate;
     }
-    return best ?: start;
+    return container;
 }
 
-static void LGAllowSettingsSliderOverflowFromContainer(UIView *container) {
-    for (UIView *candidate = container; candidate; candidate = candidate.superview) {
-        if ([candidate isKindOfClass:[UIScrollView class]]) break;
-        candidate.clipsToBounds = NO;
-        candidate.layer.masksToBounds = NO;
-    }
-}
-
-static void LGLayoutSettingsSwitchOverlayForOwner(UISwitch *owner) {
-    if (!owner) return;
-    LGPrefsLiquidSwitch *overlay = LGSettingsSwitchOwnerOverlay(owner);
-    if (!overlay || !overlay.superview) return;
-    UIView *host = LGSettingsSwitchVisualHost(owner);
-    if (!host) return;
-    UIView *container = overlay.superview;
-    CGRect ownerFrame = [owner convertRect:owner.bounds toView:container];
-    CGRect hostFrame = [host convertRect:host.bounds toView:container];
-    CGRect overlayFrame = CGRectMake(CGRectGetMinX(ownerFrame) - kLGSettingsSwitchTrailingInset,
-                                     CGRectGetMinY(hostFrame),
-                                     CGRectGetWidth(owner.bounds) + kLGSettingsSwitchTrailingInset,
-                                     CGRectGetHeight(hostFrame));
-    overlay.frame = overlayFrame;
-    overlay.hidden = owner.hidden;
-    overlay.alpha = owner.alpha;
-    [container bringSubviewToFront:overlay];
-}
-
-static void LGScheduleSettingsSwitchOverlayRelayout(UISwitch *owner) {
-    if (!owner) return;
-    if ([objc_getAssociatedObject(owner, kLGSettingsSwitchRelayoutPendingKey) boolValue]) return;
-    objc_setAssociatedObject(owner, kLGSettingsSwitchRelayoutPendingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        objc_setAssociatedObject(owner, kLGSettingsSwitchRelayoutPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        LGLayoutSettingsSwitchOverlayForOwner(owner);
-    });
-}
-
-static void LGLayoutSettingsSliderOverlayForOwner(UISlider *owner) {
-    if (!owner) return;
-    LGPrefsLiquidSlider *overlay = LGSettingsSliderOwnerOverlay(owner);
-    if (!overlay || !overlay.superview) return;
-    UIView *host = LGSettingsSliderVisualHost(owner);
-    if (!host) return;
-    id specifier = LGOwnerSpecifierForView(owner);
-    UIView *container = overlay.superview;
+static CGRect LGSettingsSliderOverlayFrame(UISlider *owner, UIView *container) {
+    UIView *host = objc_getAssociatedObject(owner, kLGSettingsSliderVisualHostKey);
     CGRect contentFrame = CGRectNull;
     CGRect labelFrame = CGRectNull;
     for (UIView *subview in host.subviews) {
         if (CGRectIsEmpty(subview.bounds)) continue;
         CGRect frame = [subview convertRect:subview.bounds toView:container];
-        if ([subview isKindOfClass:[UILabel class]]) {
+        if ([subview isKindOfClass:UILabel.class]) {
             labelFrame = CGRectIsNull(labelFrame) ? frame : CGRectUnion(labelFrame, frame);
-            continue;
-        }
-        contentFrame = CGRectIsNull(contentFrame) ? frame : CGRectUnion(contentFrame, frame);
-    }
-    if (CGRectIsNull(contentFrame) || CGRectIsEmpty(contentFrame)) {
-        CGRect ownerFrame = [owner convertRect:owner.bounds toView:container];
-        CGRect hostFrame = [host convertRect:host.bounds toView:container];
-        contentFrame = CGRectMake(CGRectGetMinX(ownerFrame),
-                                  CGRectGetMinY(hostFrame),
-                                  CGRectGetWidth(ownerFrame),
-                                  CGRectGetHeight(hostFrame));
-    }
-    if (!CGRectIsNull(labelFrame) && CGRectGetMinX(labelFrame) > CGRectGetMinX(contentFrame)) {
-        CGFloat gap = 6.0;
-        CGFloat maxX = CGRectGetMinX(labelFrame) - gap;
-        if (maxX > CGRectGetMinX(contentFrame)) {
-            contentFrame.size.width = maxX - CGRectGetMinX(contentFrame);
+        } else {
+            contentFrame = CGRectIsNull(contentFrame) ? frame : CGRectUnion(contentFrame, frame);
         }
     }
-
-    CGFloat extraRightCapture = 0.0;
-    if (!CGRectIsNull(labelFrame) && CGRectGetMaxX(labelFrame) > CGRectGetMaxX(contentFrame)) {
-        extraRightCapture = CGRectGetMaxX(labelFrame) - CGRectGetMaxX(contentFrame);
+    if (CGRectIsNull(contentFrame) || CGRectIsEmpty(contentFrame))
+        contentFrame = [owner convertRect:owner.bounds toView:container];
+    if (!CGRectIsNull(labelFrame) &&
+        CGRectGetMinX(labelFrame) > CGRectGetMinX(contentFrame)) {
+        CGFloat maximumX = CGRectGetMinX(labelFrame) - 6.0;
+        if (maximumX > CGRectGetMinX(contentFrame))
+            contentFrame.size.width = maximumX - CGRectGetMinX(contentFrame);
     }
-    overlay.frame = contentFrame;
-    overlay.hidden = owner.hidden;
-    overlay.alpha = owner.alpha;
-    objc_setAssociatedObject(overlay, kLGPrefsSliderUseLiveCaptureKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(overlay,
-                             kLGPrefsSliderExtraCaptureInsetsKey,
-                             [NSValue valueWithUIEdgeInsets:UIEdgeInsetsMake(0.0, 0.0, 0.0, extraRightCapture + 8.0)],
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(overlay,
-                             kLGPrefsSliderLabelCaptureRegionKey,
-                             [NSValue valueWithCGRect:(!CGRectIsNull(labelFrame) && !CGRectIsEmpty(labelFrame)
-                                                       ? CGRectInset([overlay convertRect:labelFrame fromView:container], -2.0, -2.0)
-                                                       : CGRectZero)],
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    CGRect ownerTrackRect = [owner trackRectForBounds:owner.bounds];
-    CGRect ownerMinThumbRect = [owner thumbRectForBounds:owner.bounds trackRect:ownerTrackRect value:owner.minimumValue];
-    CGRect ownerMaxThumbRect = [owner thumbRectForBounds:owner.bounds trackRect:ownerTrackRect value:owner.maximumValue];
-    CGPoint minCenterInContainer = [owner convertPoint:CGPointMake(CGRectGetMidX(ownerMinThumbRect), CGRectGetMidY(ownerMinThumbRect))
-                                                toView:container];
-    CGPoint maxCenterInContainer = [owner convertPoint:CGPointMake(CGRectGetMidX(ownerMaxThumbRect), CGRectGetMidY(ownerMaxThumbRect))
-                                                toView:container];
-    CGPoint minCenterInOverlay = [overlay convertPoint:minCenterInContainer fromView:container];
-    CGPoint maxCenterInOverlay = [overlay convertPoint:maxCenterInContainer fromView:container];
-    objc_setAssociatedObject(overlay,
-                             kLGPrefsSliderEndpointCentersKey,
-                             @[ @(minCenterInOverlay.x), @(maxCenterInOverlay.x) ],
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if ([objc_getAssociatedObject(overlay, kLGPrefsSliderSegmentedKey) boolValue]) {
-        NSInteger segmentCount = LGSettingsSliderResolvedSegmentCount(owner, specifier);
-        objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentCountKey, @(segmentCount), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        NSInteger snapPointCount = MAX(0, segmentCount + 1);
-        NSMutableArray<NSNumber *> *centers = [NSMutableArray array];
-        if (snapPointCount >= 2) {
-            float range = owner.maximumValue - owner.minimumValue;
-            for (NSInteger index = 0; index < snapPointCount; index++) {
-                float value = owner.minimumValue;
-                if (fabsf(range) > FLT_EPSILON) {
-                    value = owner.minimumValue + ((float)index / (float)(snapPointCount - 1)) * range;
-                }
-                CGRect ownerThumbRect = [owner thumbRectForBounds:owner.bounds trackRect:ownerTrackRect value:value];
-                CGPoint centerInContainer = [owner convertPoint:CGPointMake(CGRectGetMidX(ownerThumbRect), CGRectGetMidY(ownerThumbRect))
-                                                         toView:container];
-                CGPoint centerInOverlay = [overlay convertPoint:centerInContainer fromView:container];
-                [centers addObject:@(centerInOverlay.x)];
-            }
-        }
-        objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentCentersKey, centers, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        LGDebugLog(@"settings slider segment map owner=%p host=%@ min=%.3f max=%.3f points=%ld endpoints=%@ centers=%@",
-                   owner,
-                   NSStringFromClass(host.class),
-                   owner.minimumValue,
-                   owner.maximumValue,
-                   (long)snapPointCount,
-                   @[ @(minCenterInOverlay.x), @(maxCenterInOverlay.x) ],
-                   centers);
-    } else {
-        objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentCentersKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    [container bringSubviewToFront:overlay];
+    return contentFrame;
 }
 
-static void LGScheduleSettingsSliderOverlayRelayout(UISlider *owner) {
-    if (!owner) return;
-    if ([objc_getAssociatedObject(owner, kLGSettingsSliderRelayoutPendingKey) boolValue]) return;
-    objc_setAssociatedObject(owner, kLGSettingsSliderRelayoutPendingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        objc_setAssociatedObject(owner, kLGSettingsSliderRelayoutPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        LGLayoutSettingsSliderOverlayForOwner(owner);
-    });
-}
+static void LGInstallSettingsSwitch(UISwitch *owner) {
+    if (!gLGSwitchControlsEnabled || !owner.window ||
+        [owner isKindOfClass:LGPrefsLiquidSwitch.class] ||
+        LGInsideLiquidAssPrefs(owner)) return;
 
-@interface LGPrefsLiquidSwitch (SettingsOverlay)
-- (void)lg_settingsValueChanged;
-@end
-
-@interface UISwitch (SettingsOverlay)
-- (void)lg_syncSettingsOverlayFromOwner;
-@end
-
-@interface LGPrefsLiquidSlider (SettingsOverlay)
-- (void)lg_settingsValueChanged;
-@end
-
-@interface UISlider (SettingsOverlay)
-- (void)lg_syncSettingsSliderOverlayFromOwnerAnimated:(BOOL)animated;
-@end
-
-@implementation LGPrefsLiquidSwitch (SettingsOverlay)
-
-- (void)lg_settingsValueChanged {
-    UISwitch *owner = LGSettingsSwitchOverlayOwner(self);
-    if (!owner) return;
-    objc_setAssociatedObject(owner, kLGSettingsSwitchOwnerDrivenSyncKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [owner setOn:self.isOn animated:NO];
-    [owner sendActionsForControlEvents:UIControlEventValueChanged];
-    objc_setAssociatedObject(owner, kLGSettingsSwitchOwnerDrivenSyncKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-@end
-
-@implementation UISwitch (SettingsOverlay)
-
-- (LGPrefsLiquidSwitch *)lg_settingsOverlay {
-    return LGSettingsSwitchOwnerOverlay(self);
-}
-
-- (void)lg_syncSettingsOverlayFromOwner {
-    if ([objc_getAssociatedObject(self, kLGSettingsSwitchOwnerDrivenSyncKey) boolValue]) return;
-    LGPrefsLiquidSwitch *overlay = [self lg_settingsOverlay];
-    if (!overlay) return;
-    [overlay setOn:self.isOn animated:YES];
-}
-
-@end
-
-@implementation LGPrefsLiquidSlider (SettingsOverlay)
-
-- (void)lg_settingsValueChanged {
-    UISlider *owner = LGSettingsSliderOverlayOwner(self);
-    if (!owner) return;
-    objc_setAssociatedObject(owner, kLGSettingsSliderOwnerDrivenSyncKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [owner setValue:self.value animated:NO];
-    [owner sendActionsForControlEvents:UIControlEventValueChanged];
-    objc_setAssociatedObject(owner, kLGSettingsSliderOwnerDrivenSyncKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-@end
-
-@implementation UISlider (SettingsOverlay)
-
-- (LGPrefsLiquidSlider *)lg_settingsOverlay {
-    return LGSettingsSliderOwnerOverlay(self);
-}
-
-- (void)lg_syncSettingsSliderOverlayFromOwnerAnimated:(BOOL)animated {
-    if ([objc_getAssociatedObject(self, kLGSettingsSliderOwnerDrivenSyncKey) boolValue]) return;
-    LGPrefsLiquidSlider *overlay = [self lg_settingsOverlay];
-    if (!overlay) return;
-    BOOL segmented = LGSettingsSliderIsSegmented(self);
-    LGApplySettingsSegmentedSliderTrackPolicy(self, segmented);
-    overlay.minimumValue = self.minimumValue;
-    overlay.maximumValue = self.maximumValue;
-    overlay.minimumTrackTintColor = segmented ? UIColor.clearColor : self.minimumTrackTintColor;
-    overlay.maximumTrackTintColor = segmented ? UIColor.clearColor : self.maximumTrackTintColor;
-    overlay.enabled = self.enabled;
-    [overlay setValue:self.value animated:animated];
-    LGLayoutSettingsSliderOverlayForOwner(self);
-}
-
-@end
-
-static void LGUpdateSettingsSwitchVisualElement(UIView *host) {
-    if (!host) return;
-    if (LGViewIsInsideLiquidSwitch(host)) return;
-    UISwitch *owner = LGSwitchOwnerForVisualElement(host);
-    if (!owner) return;
-    if ([owner isKindOfClass:[LGPrefsLiquidSwitch class]]) return;
-
-    LGPrefsLiquidSwitch *overlay = LGSettingsSwitchOverlay(host);
-    UIView *container = owner.superview ?: host;
+    LGPrefsLiquidSwitch *overlay =
+        objc_getAssociatedObject(owner, kLGSettingsSwitchOverlayKey);
     if (!overlay) {
-        overlay = [[LGPrefsLiquidSwitch alloc] initWithFrame:host.bounds];
-        overlay.userInteractionEnabled = YES;
-        [overlay addTarget:overlay action:@selector(lg_settingsValueChanged) forControlEvents:UIControlEventValueChanged];
-        LGSetSettingsSwitchOverlay(host, overlay);
-        LGSetSettingsSwitchOwnerOverlay(owner, overlay);
-    }
-    if (overlay.superview != container) {
-        [overlay removeFromSuperview];
-        [container addSubview:overlay];
+        overlay = [[LGPrefsLiquidSwitch alloc] initWithFrame:owner.bounds];
+        overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                   UIViewAutoresizingFlexibleHeight;
+        __weak UISwitch *weakOwner = owner;
+        [overlay addAction:[UIAction actionWithHandler:^(UIAction *action) {
+            UISwitch *strongOwner = weakOwner;
+            LGPrefsLiquidSwitch *sender = (LGPrefsLiquidSwitch *)action.sender;
+            if (!strongOwner) return;
+            [strongOwner setOn:sender.isOn animated:NO];
+            [strongOwner sendActionsForControlEvents:UIControlEventValueChanged];
+        }] forControlEvents:UIControlEventValueChanged];
+        objc_setAssociatedObject(owner, kLGSettingsSwitchOverlayKey, overlay,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [owner addSubview:overlay];
     }
 
-    if (![objc_getAssociatedObject(owner, kLGSettingsSwitchOverlayInstalledKey) boolValue]) {
-        [owner addTarget:owner action:@selector(lg_syncSettingsOverlayFromOwner) forControlEvents:UIControlEventValueChanged];
-        objc_setAssociatedObject(owner, kLGSettingsSwitchOverlayInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    LGSetSettingsSwitchOverlayOwner(overlay, owner);
-    LGSetSettingsSwitchVisualHost(owner, host);
-    LGLayoutSettingsSwitchOverlayForOwner(owner);
-    LGScheduleSettingsSwitchOverlayRelayout(owner);
-    if (overlay.isOn != owner.isOn) {
-        [overlay setOn:owner.isOn animated:NO];
-    }
-    host.userInteractionEnabled = NO;
-    owner.userInteractionEnabled = NO;
-    LGHideNativeSwitchSubviews(host);
-    [container bringSubviewToFront:overlay];
+    owner.clipsToBounds = NO;
+    owner.layer.masksToBounds = NO;
+    overlay.frame = CGRectMake(-8.0, 0.0,
+                               CGRectGetWidth(owner.bounds) + 8.0,
+                               CGRectGetHeight(owner.bounds));
+    if (overlay.isOn != owner.isOn) [overlay setOn:owner.isOn animated:NO];
+    overlay.enabled = owner.enabled;
+    LGHideStockControlContents(owner, overlay);
+    [owner bringSubviewToFront:overlay];
 }
 
-static void LGUpdateSettingsSliderVisualElement(UIView *host) {
-    if (!host) return;
-    if (LGViewIsInsideLiquidSlider(host)) return;
-    UISlider *owner = LGSliderOwnerForVisualElement(host);
-    if (!owner) return;
-    if (LGSettingsSliderHasSpeechRateEndpointIcons(host)) return;
-    LGPrefsLiquidSlider *overlay = LGSettingsSliderOverlay(host);
-    UIView *container = LGSettingsSliderOverlayContainer(owner, host);
+static void LGInstallSettingsSlider(UISlider *owner) {
+    if (!gLGSliderControlsEnabled || !owner.window ||
+        [owner isKindOfClass:LGPrefsLiquidSlider.class] ||
+        LGInsideLiquidAssPrefs(owner)) return;
+    for (UIView *candidate = owner; candidate; candidate = candidate.superview) {
+        if (LGViewTreeHasSpeechRateEndpoints(candidate)) return;
+        if ([candidate isKindOfClass:UITableViewCell.class]) break;
+    }
+
+    LGPrefsLiquidSlider *overlay =
+        objc_getAssociatedObject(owner, kLGSettingsSliderOverlayKey);
     if (!overlay) {
         overlay = [[LGPrefsLiquidSlider alloc] initWithFrame:CGRectZero];
-        overlay.userInteractionEnabled = YES;
-        [overlay addTarget:overlay action:@selector(lg_settingsValueChanged) forControlEvents:UIControlEventValueChanged];
-        LGSetSettingsSliderOverlay(host, overlay);
-        LGSetSettingsSliderOwnerOverlay(owner, overlay);
+        __weak UISlider *weakOwner = owner;
+        [overlay addAction:[UIAction actionWithHandler:^(UIAction *action) {
+            UISlider *strongOwner = weakOwner;
+            LGPrefsLiquidSlider *sender = (LGPrefsLiquidSlider *)action.sender;
+            if (!strongOwner) return;
+            [strongOwner setValue:sender.value animated:NO];
+            [strongOwner sendActionsForControlEvents:UIControlEventValueChanged];
+        }] forControlEvents:UIControlEventValueChanged];
+        objc_setAssociatedObject(owner, kLGSettingsSliderOverlayKey, overlay,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+    UIView *container = LGSettingsSliderOverlayContainer(owner);
     if (overlay.superview != container) {
         [overlay removeFromSuperview];
         [container addSubview:overlay];
     }
+    CGRect overlayFrame = LGSettingsSliderOverlayFrame(owner, container);
+    if (!CGRectEqualToRect(overlay.frame, overlayFrame)) overlay.frame = overlayFrame;
+    if (fabsf(overlay.minimumValue - owner.minimumValue) > FLT_EPSILON)
+        overlay.minimumValue = owner.minimumValue;
+    if (fabsf(overlay.maximumValue - owner.maximumValue) > FLT_EPSILON)
+        overlay.maximumValue = owner.maximumValue;
+    if (overlay.enabled != owner.enabled) overlay.enabled = owner.enabled;
 
-    id specifier = LGOwnerSpecifierForView(owner);
-    BOOL segmented = LGSpecifierBoolProperty(specifier, @"isSegmented")
-                  || LGSpecifierBoolProperty(specifier, @"locksToSegment")
-                  || LGSpecifierBoolProperty(specifier, @"snapsToSegment");
-    NSInteger segmentCount = LGSpecifierIntegerProperty(specifier, @"segmentCount");
-
-    LGSetSettingsSliderOverlayOwner(overlay, owner);
-    LGSetSettingsSliderVisualHost(owner, host);
-    overlay.minimumValue = owner.minimumValue;
-    overlay.maximumValue = owner.maximumValue;
-    overlay.minimumTrackTintColor = segmented ? UIColor.clearColor : owner.minimumTrackTintColor;
-    overlay.maximumTrackTintColor = segmented ? UIColor.clearColor : owner.maximumTrackTintColor;
-    overlay.enabled = owner.enabled;
-    objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentedKey, @(segmented), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentCountKey, @(segmentCount), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    LGApplySettingsSegmentedSliderTrackPolicy(owner, segmented);
-    if (fabsf(overlay.value - owner.value) > FLT_EPSILON) {
-        [overlay setValue:owner.value animated:NO];
+    id specifier = nil;
+    for (UIView *candidate = owner; candidate && !specifier;
+         candidate = candidate.superview) {
+        @try {
+            if ([candidate respondsToSelector:NSSelectorFromString(@"specifier")])
+                specifier = [candidate valueForKey:@"specifier"];
+        } @catch (__unused NSException *exception) {}
     }
-    LGAllowSettingsSliderOverflowFromContainer(container);
-    LGLayoutSettingsSliderOverlayForOwner(owner);
-    LGScheduleSettingsSliderOverlayRelayout(owner);
-    host.userInteractionEnabled = NO;
-    owner.userInteractionEnabled = NO;
-    LGHideNativeSliderSubviews(host);
+    BOOL segmented = NO;
+    NSInteger segmentCount = 0;
+    if (specifier) {
+        @try {
+            segmented = [[specifier propertyForKey:@"isSegmented"] boolValue] ||
+                        [[specifier propertyForKey:@"locksToSegment"] boolValue] ||
+                        [[specifier propertyForKey:@"snapsToSegment"] boolValue];
+            segmentCount = [[specifier propertyForKey:@"segmentCount"] integerValue];
+        } @catch (__unused NSException *exception) {}
+    }
+    float range = owner.maximumValue - owner.minimumValue;
+    float roundedRange = roundf(range);
+    if (segmented && segmentCount <= 0 &&
+        fabsf(range - roundedRange) <= 0.001f &&
+        roundedRange >= 1.0f && roundedRange <= 24.0f)
+        segmentCount = (NSInteger)roundedRange;
+    objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentedKey, @(segmented),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentCountKey,
+                             @(segmentCount), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    UIColor *minimumTint = segmented ? UIColor.clearColor :
+        (owner.minimumTrackTintColor ?: owner.tintColor ?: UIColor.systemBlueColor);
+    UIColor *maximumTint = segmented ? UIColor.clearColor : owner.maximumTrackTintColor;
+    if (![overlay.minimumTrackTintColor isEqual:minimumTint])
+        overlay.minimumTrackTintColor = minimumTint;
+    if ((overlay.maximumTrackTintColor || maximumTint) &&
+        ![overlay.maximumTrackTintColor isEqual:maximumTint])
+        overlay.maximumTrackTintColor = maximumTint;
+
+    CGRect track = [owner trackRectForBounds:owner.bounds];
+    CGRect minThumb = [owner thumbRectForBounds:owner.bounds trackRect:track
+                                          value:owner.minimumValue];
+    CGRect maxThumb = [owner thumbRectForBounds:owner.bounds trackRect:track
+                                          value:owner.maximumValue];
+    CGPoint minimumCenter = [owner convertPoint:
+        CGPointMake(CGRectGetMidX(minThumb), CGRectGetMidY(minThumb)) toView:container];
+    CGPoint maximumCenter = [owner convertPoint:
+        CGPointMake(CGRectGetMidX(maxThumb), CGRectGetMidY(maxThumb)) toView:container];
+    minimumCenter = [overlay convertPoint:minimumCenter fromView:container];
+    maximumCenter = [overlay convertPoint:maximumCenter fromView:container];
+    NSArray *endpoints = @[ @(minimumCenter.x), @(maximumCenter.x) ];
+    objc_setAssociatedObject(overlay, kLGPrefsSliderEndpointCentersKey, endpoints,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (segmented && segmentCount > 0) {
+        NSMutableArray *centers = [NSMutableArray arrayWithCapacity:segmentCount + 1];
+        for (NSInteger index = 0; index <= segmentCount; index++) {
+            float value = owner.minimumValue +
+                ((float)index / (float)segmentCount) * range;
+            CGRect thumb = [owner thumbRectForBounds:owner.bounds trackRect:track
+                                               value:value];
+            CGPoint center = [owner convertPoint:
+                CGPointMake(CGRectGetMidX(thumb), CGRectGetMidY(thumb)) toView:container];
+            center = [overlay convertPoint:center fromView:container];
+            [centers addObject:@(center.x)];
+        }
+        objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentCentersKey, centers,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else {
+        objc_setAssociatedObject(overlay, kLGPrefsSliderSegmentCentersKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (fabsf(overlay.value - owner.value) > FLT_EPSILON)
+        [overlay setValue:owner.value animated:NO];
+    LGSuppressNativeSliderContents(owner, overlay);
     [container bringSubviewToFront:overlay];
 }
 
-%group LiquidAssPreferencesControls
+static UIView *LGDescendantNamed(UIView *root, NSString *name) {
+    for (UIView *subview in root.subviews) {
+        if ([NSStringFromClass(subview.class) isEqualToString:name]) return subview;
+        UIView *found = LGDescendantNamed(subview, name);
+        if (found) return found;
+    }
+    return nil;
+}
+
+static void LGUpdateSettingsBackButton(UINavigationBar *bar) {
+    if (!bar.window) return;
+    BOOL insideLiquidAssPrefs = LGInsideLiquidAssPrefs(bar);
+    UIView *content = nil;
+    for (UIView *subview in bar.subviews)
+        if ([NSStringFromClass(subview.class) isEqualToString:@"_UINavigationBarContentView"]) {
+            content = subview;
+            break;
+        }
+    if (!content) return;
+    LGSettingsBackButton *installed =
+        objc_getAssociatedObject(content, kLGSettingsBackButtonKey);
+    if (!gLGSettingsControlsEnabled) {
+        UIView *stock = installed.stockButton;
+        NSDictionary *original = stock
+            ? objc_getAssociatedObject(stock, kLGSettingsStockBackStateKey)
+            : nil;
+        if (stock && original) {
+            stock.hidden = [original[@"hidden"] boolValue];
+            stock.alpha = [original[@"alpha"] doubleValue];
+            stock.userInteractionEnabled = [original[@"interaction"] boolValue];
+            objc_setAssociatedObject(stock, kLGSettingsStockBackStateKey, nil,
+                                     OBJC_ASSOCIATION_ASSIGN);
+        }
+        [installed removeFromSuperview];
+        objc_setAssociatedObject(content, kLGSettingsBackButtonKey, nil,
+                                 OBJC_ASSOCIATION_ASSIGN);
+        return;
+    }
+    UINavigationController *navigation = nil;
+    for (UIResponder *r = bar; r; r = r.nextResponder)
+        if ([r isKindOfClass:UINavigationController.class]) {
+            navigation = (UINavigationController *)r;
+            break;
+        }
+    if (!navigation || navigation.viewControllers.count <= 1 || !bar.backItem) {
+        [objc_getAssociatedObject(content, kLGSettingsBackButtonKey) removeFromSuperview];
+        objc_setAssociatedObject(content, kLGSettingsBackButtonKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return;
+    }
+    NSString *navigationClass = NSStringFromClass(navigation.class);
+    if (insideLiquidAssPrefs || LGControllerContainsLiquidAssPrefs(navigation) ||
+        [[NSBundle bundleForClass:navigation.class].bundleIdentifier
+            isEqualToString:@"dylv.liquidassprefs"] ||
+        [navigationClass hasPrefix:@"LG"]) {
+        [objc_getAssociatedObject(content, kLGSettingsBackButtonKey) removeFromSuperview];
+        objc_setAssociatedObject(content, kLGSettingsBackButtonKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return;
+    }
+    UIView *stock = nil;
+    for (UIView *candidate in content.subviews)
+        if ([NSStringFromClass(candidate.class) isEqualToString:@"_UIButtonBarButton"] &&
+            LGDescendantNamed(candidate, @"_UIBackButtonMaskView")) {
+            stock = candidate;
+            break;
+        }
+    if (!stock) return;
+    LGSettingsBackButton *button =
+        objc_getAssociatedObject(content, kLGSettingsBackButtonKey);
+    if (!button) {
+        button = [[LGSettingsBackButton alloc] initWithFrame:CGRectMake(16, 0, 44, 44)];
+        [content addSubview:button];
+        objc_setAssociatedObject(content, kLGSettingsBackButtonKey, button,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    button.navigationController = navigation;
+    button.stockButton = stock;
+    if (!objc_getAssociatedObject(stock, kLGSettingsStockBackStateKey)) {
+        objc_setAssociatedObject(
+            stock, kLGSettingsStockBackStateKey,
+            @{@"hidden": @(stock.hidden),
+              @"alpha": @(stock.alpha),
+              @"interaction": @(stock.userInteractionEnabled)},
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    CGFloat leading = MAX(16.0, bar.safeAreaInsets.left + 8.0);
+    CGFloat y = floor(CGRectGetMidY(content.bounds) - 22.0);
+    button.frame = CGRectMake(floor(leading), y, 44.0, 44.0);
+    stock.hidden = YES;
+    stock.alpha = 0.0;
+    stock.userInteractionEnabled = NO;
+    [content bringSubviewToFront:button];
+}
+
+static BOOL LGViewTreeHasSpeechRateEndpoints(UIView *root) {
+    NSInteger matches = 0;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
+    while (stack.count) {
+        UIView *view = stack.lastObject;
+        [stack removeLastObject];
+        NSString *label = view.accessibilityLabel.lowercaseString ?: @"";
+        if ([label isEqualToString:@"increase speed"] ||
+            [label isEqualToString:@"decrease speed"]) {
+            matches++;
+            if (matches >= 2) return YES;
+        }
+        [stack addObjectsFromArray:view.subviews];
+    }
+    return NO;
+}
+
+static void LGInstallSettingsSegmentGlass(UISegmentedControl *control) {
+    if (!gLGSegmentControlsEnabled || !control.window ||
+        LGInsideLiquidAssPrefs(control)) return;
+    NSInteger count = control.numberOfSegments;
+    if (count <= 0 || control.selectedSegmentIndex < 0 ||
+        control.selectedSegmentIndex >= count) return;
+    LGLiveBackdropView *glass =
+        objc_getAssociatedObject(control, kLGSettingsSegmentGlassKey);
+    if (!glass) {
+        glass = LGCreateRegisteredGlass(CGRectZero, nil, @"PrefsSegment");
+        if (!glass) return;
+        glass.userInteractionEnabled = NO;
+        [control addSubview:glass];
+        objc_setAssociatedObject(control, kLGSettingsSegmentGlassKey, glass,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        glass.hidden = YES;
+        glass.alpha = 0.0;
+    }
+    control.clipsToBounds = NO;
+    control.layer.masksToBounds = NO;
+    control.layer.cornerRadius = CGRectGetHeight(control.bounds) * 0.5;
+    CGFloat segmentWidth = CGRectGetWidth(control.bounds) / (CGFloat)count;
+    CGFloat selectedCenter = (control.selectedSegmentIndex + 0.5) * segmentWidth;
+    NSNumber *touchX = objc_getAssociatedObject(control, kLGSettingsSegmentTouchXKey);
+    BOOL active = [objc_getAssociatedObject(control, kLGSettingsSegmentActiveKey) boolValue];
+    BOOL released = [objc_getAssociatedObject(control, kLGSettingsSegmentReleasedKey) boolValue];
+    if ([objc_getAssociatedObject(control, kLGSettingsSegmentFadingKey) boolValue]) return;
+    if (!active && !released) {
+        id original = objc_getAssociatedObject(control, kLGSettingsSegmentOriginalTintKey);
+        control.selectedSegmentTintColor = original == NSNull.null ? nil : original;
+        glass.hidden = YES;
+        glass.alpha = 0.0;
+        objc_setAssociatedObject(control, kLGSettingsSegmentRenderedKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return;
+    }
+    if (!objc_getAssociatedObject(control, kLGSettingsSegmentOriginalTintKey)) {
+        id original = control.selectedSegmentTintColor ?: NSNull.null;
+        objc_setAssociatedObject(control, kLGSettingsSegmentOriginalTintKey, original,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    control.selectedSegmentTintColor = UIColor.clearColor;
+
+    CGFloat targetTouch = touchX ? touchX.doubleValue : selectedCenter;
+
+    if (released) targetTouch = selectedCenter;
+    CGFloat velocity = [objc_getAssociatedObject(control, kLGSettingsSegmentVelocityKey)
+        doubleValue];
+    CGSize baseSize = CGSizeMake(segmentWidth, CGRectGetHeight(control.bounds) - 4.0);
+    LGLiquidDragState drag = LGLiquidDragStateMake(targetTouch,
+        segmentWidth * 0.5 - 3.0,
+        CGRectGetWidth(control.bounds) - segmentWidth * 0.5 + 3.0,
+        baseSize, released ? 0.0 : velocity, 33.0);
+    LGLiquidRenderedState targetState =
+        LGLiquidRenderedStateMake(drag.centerX, CGSizeMake(drag.width, drag.height));
+    NSValue *renderedValue = objc_getAssociatedObject(control, kLGSettingsSegmentRenderedKey);
+    LGLiquidRenderedState rendered = targetState;
+    if (renderedValue) {
+        CGRect old = renderedValue.CGRectValue;
+        rendered = LGLiquidRenderedStateMake(CGRectGetMidX(old), old.size);
+        CGFloat delta = [objc_getAssociatedObject(control, kLGSettingsSegmentFrameDeltaKey)
+            doubleValue];
+        rendered = LGLiquidRenderedStateStep(rendered, targetState, active,
+                                              delta > 0.0 ? delta : 1.0 / 60.0);
+    }
+    CGRect target = CGRectMake(rendered.centerX - rendered.width * 0.5,
+                               CGRectGetMidY(control.bounds) - rendered.height * 0.5,
+                               rendered.width, rendered.height);
+    objc_setAssociatedObject(control, kLGSettingsSegmentRenderedKey,
+                             [NSValue valueWithCGRect:target],
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    glass.frame = target;
+    glass.hidden = NO;
+    if (glass.alpha < 1.0)
+        [UIView animateWithDuration:0.14 animations:^{ glass.alpha = 1.0; }];
+    CGFloat glassRadius = CGRectGetHeight(glass.bounds) * 0.5;
+    control.layer.cornerRadius = glassRadius;
+    glass.layer.cornerRadius = glassRadius;
+    glass.layer.cornerCurve = kCACornerCurveContinuous;
+    glass.layer.masksToBounds = YES;
+    Class segmentClass = NSClassFromString(@"UISegment");
+    for (UIView *subview in control.subviews)
+        if (subview != glass && segmentClass && [subview isKindOfClass:segmentClass]) {
+
+            subview.backgroundColor = UIColor.clearColor;
+            subview.layer.backgroundColor = UIColor.clearColor.CGColor;
+            [control bringSubviewToFront:subview];
+        }
+    [control bringSubviewToFront:glass];
+    glass.layer.zPosition = 100.0;
+}
+
+static void LGProfiledInstallSettingsSwitch(UISwitch *owner) {
+    if (!gLGControlsDiagnosticsEnabled) {
+        LGInstallSettingsSwitch(owner);
+        return;
+    }
+    BOOL existed = objc_getAssociatedObject(owner, kLGSettingsSwitchOverlayKey) != nil;
+    CFTimeInterval started = CACurrentMediaTime();
+    LGInstallSettingsSwitch(owner);
+    BOOL created = !existed && objc_getAssociatedObject(owner, kLGSettingsSwitchOverlayKey) != nil;
+    LGRecordControlsDiagnostic(LGControlsDiagnosticSwitch, started, created);
+    if (created)
+        LGLog(@"[GlobalControlsCreate] switch owner=%s super=%s frame=%s",
+                   NSStringFromClass(owner.class).UTF8String,
+                   NSStringFromClass(owner.superview.class).UTF8String,
+                   NSStringFromCGRect(owner.frame).UTF8String);
+}
+
+static void LGProfiledInstallSettingsSlider(UISlider *owner) {
+    if (!gLGControlsDiagnosticsEnabled) {
+        LGInstallSettingsSlider(owner);
+        return;
+    }
+    BOOL existed = objc_getAssociatedObject(owner, kLGSettingsSliderOverlayKey) != nil;
+    CFTimeInterval started = CACurrentMediaTime();
+    LGInstallSettingsSlider(owner);
+    LGPrefsLiquidSlider *overlay = objc_getAssociatedObject(owner, kLGSettingsSliderOverlayKey);
+    BOOL created = !existed && overlay != nil;
+    LGRecordControlsDiagnostic(LGControlsDiagnosticSlider, started, created);
+    if (created)
+        LGLog(@"[GlobalControlsCreate] slider owner=%s visual=%s super=%s frame=%s segmented=%d count=%ld",
+                   NSStringFromClass(owner.class).UTF8String,
+                   NSStringFromClass(((UIView *)objc_getAssociatedObject(owner, kLGSettingsSliderVisualHostKey)).class).UTF8String,
+                   NSStringFromClass(owner.superview.class).UTF8String,
+                   NSStringFromCGRect(owner.frame).UTF8String,
+                   [objc_getAssociatedObject(overlay, kLGPrefsSliderSegmentedKey) boolValue],
+                   (long)[objc_getAssociatedObject(overlay, kLGPrefsSliderSegmentCountKey) integerValue]);
+}
+
+static void LGProfiledLayoutSettingsSlider(UISlider *owner) {
+    LGPrefsLiquidSlider *overlay =
+        objc_getAssociatedObject(owner, kLGSettingsSliderOverlayKey);
+    if (!overlay) {
+        LGProfiledInstallSettingsSlider(owner);
+        return;
+    }
+    CFTimeInterval started = gLGControlsDiagnosticsEnabled ? CACurrentMediaTime() : 0.0;
+
+    if (gLGControlsDiagnosticsEnabled)
+        LGRecordControlsDiagnostic(LGControlsDiagnosticSlider, started, NO);
+}
+
+static void LGProfiledInstallSettingsSegmentGlass(UISegmentedControl *control) {
+    if (!gLGControlsDiagnosticsEnabled) {
+        LGInstallSettingsSegmentGlass(control);
+        return;
+    }
+    BOOL existed = objc_getAssociatedObject(control, kLGSettingsSegmentGlassKey) != nil;
+    CFTimeInterval started = CACurrentMediaTime();
+    LGInstallSettingsSegmentGlass(control);
+    BOOL created = !existed && objc_getAssociatedObject(control, kLGSettingsSegmentGlassKey) != nil;
+    LGRecordControlsDiagnostic(LGControlsDiagnosticSegment, started, created);
+    if (created)
+        LGLog(@"[GlobalControlsCreate] segment owner=%s super=%s frame=%s count=%ld",
+                   NSStringFromClass(control.class).UTF8String,
+                   NSStringFromClass(control.superview.class).UTF8String,
+                   NSStringFromCGRect(control.frame).UTF8String,
+                   (long)control.numberOfSegments);
+}
+
+@interface UISegmentedControl (LGLiquidSettingsSegment)
+- (void)lg_settingsSegmentTick:(CADisplayLink *)link;
+- (void)lg_segmentBegin:(UITouch *)touch;
+- (void)lg_segmentMove:(UITouch *)touch;
+- (void)lg_segmentEnd;
+- (void)lg_segmentCancel;
+@end
+
+static void LGStartSettingsSegmentDisplayLink(UISegmentedControl *control) {
+    if (objc_getAssociatedObject(control, kLGSettingsSegmentDisplayLinkKey) ||
+        !control.window) return;
+    CADisplayLink *link = [CADisplayLink displayLinkWithTarget:control
+        selector:@selector(lg_settingsSegmentTick:)];
+    link.preferredFramesPerSecond = UIScreen.mainScreen.maximumFramesPerSecond ?: 60;
+    [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    objc_setAssociatedObject(control, kLGSettingsSegmentDisplayLinkKey, link,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void LGStopSettingsSegmentDisplayLink(UISegmentedControl *control) {
+    CADisplayLink *link =
+        objc_getAssociatedObject(control, kLGSettingsSegmentDisplayLinkKey);
+    [link invalidate];
+    objc_setAssociatedObject(control, kLGSettingsSegmentDisplayLinkKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void LGFinishSettingsSegmentRelease(UISegmentedControl *control) {
+    if ([objc_getAssociatedObject(control, kLGSettingsSegmentFadingKey) boolValue]) return;
+    LGLiveBackdropView *glass = objc_getAssociatedObject(control, kLGSettingsSegmentGlassKey);
+    if (!glass) return;
+    id original = objc_getAssociatedObject(control, kLGSettingsSegmentOriginalTintKey);
+    control.selectedSegmentTintColor = original == NSNull.null ? nil : original;
+    objc_setAssociatedObject(control, kLGSettingsSegmentFadingKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [UIView animateWithDuration:0.18 delay:0.0
+        options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
+        animations:^{
+            glass.alpha = 0.0;
+            glass.transform = CGAffineTransformMakeScale(0.94, 0.94);
+        } completion:^(__unused BOOL finished) {
+            glass.hidden = YES;
+            glass.alpha = 0.0;
+            glass.transform = CGAffineTransformIdentity;
+            objc_setAssociatedObject(control, kLGSettingsSegmentFadingKey, nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(control, kLGSettingsSegmentReleasedKey, nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(control, kLGSettingsSegmentTouchXKey, nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(control, kLGSettingsSegmentRenderedKey, nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            LGInstallSettingsSegmentGlass(control);
+            LGStopSettingsSegmentDisplayLink(control);
+        }];
+}
+
+static BOOL LGSettingsShouldModifyCell(UIView *cell) {
+    Class segmentCell = NSClassFromString(@"PSSegmentTableCell");
+    Class sliderCell = NSClassFromString(@"PSSliderTableCell");
+    return !(segmentCell && [cell isKindOfClass:segmentCell]) &&
+           !(sliderCell && [cell isKindOfClass:sliderCell]);
+}
+
+static void LGUpdateSettingsCell(UITableViewCell *cell) {
+    if (!gLGSettingsControlsEnabled) return;
+    UIEdgeInsets inset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
+    cell.separatorInset = inset;
+    cell.layoutMargins = inset;
+    cell.preservesSuperviewLayoutMargins = NO;
+    if (!LGSettingsShouldModifyCell(cell)) return;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:cell];
+    while (stack.count) {
+        UIView *view = stack.lastObject;
+        [stack removeLastObject];
+        if (fabs(view.layer.cornerRadius - 10.0) <= 0.25 &&
+            CGRectGetHeight(view.bounds) > 0.0)
+            view.layer.cornerRadius = 27.0;
+        [stack addObjectsFromArray:view.subviews];
+    }
+}
+
+%group LiquidAssGlobalControls
+
+static UISwitch *LGSettingsOwnerForModernSwitchElement(UIView *element) {
+    for (UIView *candidate = element.superview; candidate;
+         candidate = candidate.superview) {
+        if ([candidate isKindOfClass:UISwitch.class])
+            return (UISwitch *)candidate;
+    }
+    return nil;
+}
+
+static BOOL LGSettingsShouldSuppressModernSwitchElement(UIView *element) {
+    UISwitch *owner = LGSettingsOwnerForModernSwitchElement(element);
+    if (!owner || !gLGSwitchControlsEnabled) return NO;
+    return [owner isKindOfClass:LGPrefsLiquidSwitch.class] ||
+        objc_getAssociatedObject(owner, kLGSettingsSwitchOverlayKey) != nil;
+}
+
+static void LGSettingsSuppressModernSwitchElementIfNeeded(UIView *element) {
+    if (LGSettingsShouldSuppressModernSwitchElement(element) && element.alpha != 0.0)
+        element.alpha = 0.0;
+}
 
 %hook UISwitchModernVisualElement
-
+- (void)didMoveToSuperview {
+    %orig;
+    if (gLGControlsDiagnosticsEnabled) gLGControlsModernSwitchMoves++;
+    LGSettingsSuppressModernSwitchElementIfNeeded((UIView *)self);
+}
 - (void)didMoveToWindow {
     %orig;
-    LGUpdateSettingsSwitchVisualElement((UIView *)self);
+    if (gLGControlsDiagnosticsEnabled) gLGControlsModernSwitchMoves++;
+    LGSettingsSuppressModernSwitchElementIfNeeded((UIView *)self);
 }
-
 - (void)layoutSubviews {
     %orig;
-    LGUpdateSettingsSwitchVisualElement((UIView *)self);
+    if (gLGControlsDiagnosticsEnabled) gLGControlsModernSwitchLayouts++;
+    LGSettingsSuppressModernSwitchElementIfNeeded((UIView *)self);
 }
-
-%end
-
-%hook _UISlideriOSVisualElement
-
-- (void)didMoveToWindow {
-    %orig;
-    LGUpdateSettingsSliderVisualElement((UIView *)self);
+- (void)setAlpha:(CGFloat)alpha {
+    if (gLGControlsDiagnosticsEnabled) gLGControlsModernSwitchAlphaSets++;
+    BOOL suppress = LGSettingsShouldSuppressModernSwitchElement((UIView *)self);
+    %orig(suppress ? 0.0 : alpha);
 }
-
-- (void)layoutSubviews {
-    %orig;
-    LGUpdateSettingsSliderVisualElement((UIView *)self);
-}
-
 %end
 
 %hook UISwitch
-
+- (void)didMoveToWindow {
+    %orig;
+    if (gLGControlsDiagnosticsEnabled) gLGControlsSwitchMoves++;
+    LGProfiledInstallSettingsSwitch((UISwitch *)self);
+}
 - (void)layoutSubviews {
     %orig;
-    LGLayoutSettingsSwitchOverlayForOwner((UISwitch *)self);
-    LGScheduleSettingsSwitchOverlayRelayout((UISwitch *)self);
+    if (gLGControlsDiagnosticsEnabled) gLGControlsSwitchLayouts++;
+    LGProfiledInstallSettingsSwitch((UISwitch *)self);
 }
-
 - (void)setOn:(BOOL)on animated:(BOOL)animated {
     %orig;
-    if ([objc_getAssociatedObject(self, kLGSettingsSwitchOwnerDrivenSyncKey) boolValue]) return;
-    LGPrefsLiquidSwitch *overlay = LGSettingsSwitchOwnerOverlay(self);
-    if (overlay) [overlay setOn:on animated:animated];
+    LGPrefsLiquidSwitch *overlay =
+        objc_getAssociatedObject(self, kLGSettingsSwitchOverlayKey);
+    if (overlay && overlay.isOn != on) [overlay setOn:on animated:animated];
 }
+%end
 
+%hook _UISlideriOSVisualElement
+- (void)didMoveToWindow {
+    %orig;
+    UISlider *owner = LGSettingsSliderOwnerForVisualElement((UIView *)self);
+    if (!owner || [owner isKindOfClass:LGPrefsLiquidSlider.class]) return;
+    if (gLGControlsDiagnosticsEnabled) gLGControlsSliderVisualMoves++;
+    objc_setAssociatedObject(owner, kLGSettingsSliderVisualHostKey, self,
+                             OBJC_ASSOCIATION_ASSIGN);
+    LGProfiledLayoutSettingsSlider(owner);
+}
+- (void)layoutSubviews {
+    %orig;
+    UISlider *owner = LGSettingsSliderOwnerForVisualElement((UIView *)self);
+    if (!owner || [owner isKindOfClass:LGPrefsLiquidSlider.class]) return;
+    if (gLGControlsDiagnosticsEnabled) gLGControlsSliderVisualLayouts++;
+    objc_setAssociatedObject(owner, kLGSettingsSliderVisualHostKey, self,
+                             OBJC_ASSOCIATION_ASSIGN);
+    LGProfiledInstallSettingsSlider(owner);
+}
 %end
 
 %hook UISlider
-
 - (void)didMoveToWindow {
     %orig;
-    [self lg_syncSettingsSliderOverlayFromOwnerAnimated:NO];
+    if (gLGControlsDiagnosticsEnabled) {
+        if ([self isKindOfClass:LGPrefsLiquidSlider.class]) gLGControlsSliderOverlayMoves++;
+        else gLGControlsSliderOwnerMoves++;
+    }
+    if (![self isKindOfClass:LGPrefsLiquidSlider.class])
+        LGProfiledLayoutSettingsSlider((UISlider *)self);
 }
-
 - (void)layoutSubviews {
     %orig;
-    LGLayoutSettingsSliderOverlayForOwner((UISlider *)self);
-    LGScheduleSettingsSliderOverlayRelayout((UISlider *)self);
+    if (gLGControlsDiagnosticsEnabled) {
+        if ([self isKindOfClass:LGPrefsLiquidSlider.class]) gLGControlsSliderOverlayLayouts++;
+        else gLGControlsSliderOwnerLayouts++;
+    }
+    if (![self isKindOfClass:LGPrefsLiquidSlider.class])
+        LGProfiledInstallSettingsSlider((UISlider *)self);
 }
-
 - (void)setValue:(float)value animated:(BOOL)animated {
     %orig;
-    [self lg_syncSettingsSliderOverlayFromOwnerAnimated:animated];
+    LGPrefsLiquidSlider *overlay =
+        objc_getAssociatedObject(self, kLGSettingsSliderOverlayKey);
+    if (overlay && fabsf(overlay.value - value) > FLT_EPSILON)
+        [overlay setValue:value animated:animated];
 }
-
-- (void)setMinimumValue:(float)minimumValue {
+- (void)setMinimumValue:(float)value {
     %orig;
-    [self lg_syncSettingsSliderOverlayFromOwnerAnimated:NO];
+    if (![self isKindOfClass:LGPrefsLiquidSlider.class]) {
+        if (gLGControlsDiagnosticsEnabled) gLGControlsSliderSetters++;
+        LGProfiledInstallSettingsSlider((UISlider *)self);
+    }
 }
-
-- (void)setMaximumValue:(float)maximumValue {
+- (void)setMaximumValue:(float)value {
     %orig;
-    [self lg_syncSettingsSliderOverlayFromOwnerAnimated:NO];
+    if (![self isKindOfClass:LGPrefsLiquidSlider.class]) {
+        if (gLGControlsDiagnosticsEnabled) gLGControlsSliderSetters++;
+        LGProfiledInstallSettingsSlider((UISlider *)self);
+    }
 }
-
 - (void)setEnabled:(BOOL)enabled {
     %orig;
-    [self lg_syncSettingsSliderOverlayFromOwnerAnimated:NO];
+    if (![self isKindOfClass:LGPrefsLiquidSlider.class]) {
+        if (gLGControlsDiagnosticsEnabled) gLGControlsSliderSetters++;
+        LGProfiledInstallSettingsSlider((UISlider *)self);
+    }
 }
-
-- (void)setMinimumTrackTintColor:(UIColor *)minimumTrackTintColor {
+- (void)setMinimumTrackTintColor:(UIColor *)color {
     %orig;
-    [self lg_syncSettingsSliderOverlayFromOwnerAnimated:NO];
+    if (![self isKindOfClass:LGPrefsLiquidSlider.class]) {
+        if (gLGControlsDiagnosticsEnabled) gLGControlsSliderSetters++;
+        LGProfiledInstallSettingsSlider((UISlider *)self);
+    }
 }
-
-- (void)setMaximumTrackTintColor:(UIColor *)maximumTrackTintColor {
+- (void)setMaximumTrackTintColor:(UIColor *)color {
     %orig;
-    [self lg_syncSettingsSliderOverlayFromOwnerAnimated:NO];
+    if (![self isKindOfClass:LGPrefsLiquidSlider.class]) {
+        if (gLGControlsDiagnosticsEnabled) gLGControlsSliderSetters++;
+        LGProfiledInstallSettingsSlider((UISlider *)self);
+    }
 }
-
+- (BOOL)beginTracking:(UITouch *)touch withEvent:(UIEvent *)event {
+    BOOL result = %orig;
+    if (gLGControlsDiagnosticsEnabled)
+        LGLog(@"[GlobalControlsTrack] begin class=%s overlay=%d super=%s frame=%s",
+                   NSStringFromClass(self.class).UTF8String,
+                   [self isKindOfClass:LGPrefsLiquidSlider.class],
+                   NSStringFromClass(((UIView *)self).superview.class).UTF8String,
+                   NSStringFromCGRect(((UIView *)self).frame).UTF8String);
+    return result;
+}
+- (BOOL)continueTracking:(UITouch *)touch withEvent:(UIEvent *)event {
+    BOOL result = %orig;
+    if (gLGControlsDiagnosticsEnabled) gLGControlsSliderTrackingCalls++;
+    return result;
+}
+- (void)endTracking:(UITouch *)touch withEvent:(UIEvent *)event {
+    %orig;
+    if (gLGControlsDiagnosticsEnabled)
+        LGLog(@"[GlobalControlsTrack] end class=%s overlay=%d value=%.4f",
+                   NSStringFromClass(self.class).UTF8String,
+                   [self isKindOfClass:LGPrefsLiquidSlider.class], self.value);
+}
+- (void)cancelTrackingWithEvent:(UIEvent *)event {
+    %orig;
+    if (gLGControlsDiagnosticsEnabled)
+        LGLog(@"[GlobalControlsTrack] cancel class=%s overlay=%d",
+                   NSStringFromClass(self.class).UTF8String,
+                   [self isKindOfClass:LGPrefsLiquidSlider.class]);
+}
 %end
 
 %hook UISegmentedControl
-
 %new
-- (void)lg_startSettingsSegmentedDisplayLinkIfNeeded {
-    if (LGSettingsSegmentedDisplayLink((UISegmentedControl *)self) || !self.window) return;
-    UISegmentedControl *control = (UISegmentedControl *)self;
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedLastDisplayLinkTimestampKey, 0.0);
-    __weak UISegmentedControl *weakControl = control;
-    CADisplayLink *link = nil;
-    id driver = nil;
-    NSInteger preferredFPS = UIScreen.mainScreen.maximumFramesPerSecond > 0
-        ? UIScreen.mainScreen.maximumFramesPerSecond
-        : 60;
-    LGStartDisplayLink(&link, &driver, preferredFPS, ^{
-        UISegmentedControl *strongControl = weakControl;
-        if (!strongControl) return;
-        CADisplayLink *activeLink = LGSettingsSegmentedDisplayLink(strongControl);
-        if (!activeLink) return;
-        [strongControl lg_handleSettingsSegmentedDisplayLink:activeLink];
-    });
-    LGSetSettingsSegmentedDisplayLink(control, link);
-    LGSetSettingsSegmentedDisplayLinkDriver(control, driver);
-}
-
-%new
-- (void)lg_stopSettingsSegmentedDisplayLink {
-    UISegmentedControl *control = (UISegmentedControl *)self;
-    CADisplayLink *link = LGSettingsSegmentedDisplayLink(control);
-    id driver = LGSettingsSegmentedDisplayLinkDriver(control);
-    LGStopDisplayLink(&link, &driver);
-    LGSetSettingsSegmentedDisplayLink(control, nil);
-    LGSetSettingsSegmentedDisplayLinkDriver(control, nil);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedLastDisplayLinkTimestampKey, 0.0);
-    LGSetSettingsSegmentedGlassVelocity(control, 0.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedObjectScaleKey, 1.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedObjectScaleVelocityKey, 0.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedScaleXKey, 1.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedScaleXVelocityKey, 0.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedScaleYKey, 1.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedScaleYVelocityKey, 0.0);
-    LGSetSettingsSegmentedHasRenderedState(control, NO);
-}
-
-%new
-- (void)lg_handleSettingsSegmentedDisplayLink:(CADisplayLink *)link {
-    UISegmentedControl *control = (UISegmentedControl *)self;
-    CGFloat previousTimestamp = LGSettingsSegmentedSpringValue(control, kLGSettingsSegmentedLastDisplayLinkTimestampKey, 0.0);
-    CGFloat dt = previousTimestamp > 0.0 ? (CGFloat)(link.timestamp - previousTimestamp) : (1.0 / 60.0);
-    dt = fmin(fmax(dt, 1.0 / 240.0), 1.0 / 20.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedLastDisplayLinkTimestampKey, (CGFloat)link.timestamp);
-
-    CGFloat currentVelocityX = LGSettingsSegmentedGlassVelocity(control) * 0.82;
-    LGSetSettingsSegmentedGlassVelocity(control, currentVelocityX);
-    CGFloat touchX = LGSettingsSegmentedGlassTouchX(control);
-    if (LGSettingsSegmentedReleased(control) && !isnan(touchX)) {
-        CGFloat targetCenterX = LGSettingsSegmentedTargetCenterX(control);
-        CGFloat frameFactor = fmin(fmax(dt * 60.0, 0.35), 1.4);
-        CGFloat followLerp = 0.24 * frameFactor;
-        touchX += (targetCenterX - touchX) * followLerp;
-        LGSetSettingsSegmentedGlassTouchX(control, touchX);
+- (void)lg_settingsSegmentTick:(CADisplayLink *)link {
+    if ([objc_getAssociatedObject(self, kLGSettingsSegmentFadingKey) boolValue]) return;
+    NSNumber *previousTime = objc_getAssociatedObject(self, kLGSettingsSegmentLastDisplayTimeKey);
+    CFTimeInterval delta = previousTime ? link.timestamp - previousTime.doubleValue : 1.0 / 60.0;
+    objc_setAssociatedObject(self, kLGSettingsSegmentLastDisplayTimeKey, @(link.timestamp),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentFrameDeltaKey,
+                             @(fmin(fmax(delta, 1.0 / 240.0), 1.0 / 20.0)),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSNumber *velocity = objc_getAssociatedObject(self, kLGSettingsSegmentVelocityKey);
+    if (velocity) {
+        objc_setAssociatedObject(self, kLGSettingsSegmentVelocityKey,
+                                 @(velocity.doubleValue * 0.82),
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    UIImageView *stockPill = LGSettingsSegmentedStockPill(control);
-    if (!stockPill || stockPill.superview != control) {
-        stockPill = LGFindSettingsSegmentedStockPill(control);
-        LGSetSettingsSegmentedStockPill(control, stockPill);
-    }
-    if (stockPill) {
-        CGRect targetFrame = LGSettingsSegmentedGlassDragFrame(control, stockPill.frame);
-        if (!LGSettingsSegmentedHasRenderedState(control)) {
-            LGSetSettingsSegmentedRenderedFrameState(control, targetFrame);
-        } else {
-            LGLiquidRenderedState currentState = LGLiquidRenderedStateMake(LGSettingsSegmentedRenderedCenterX(control, CGRectGetMidX(targetFrame)),
-                                                                           CGSizeMake(LGSettingsSegmentedRenderedWidth(control, CGRectGetWidth(targetFrame)),
-                                                                                      LGSettingsSegmentedRenderedHeight(control, CGRectGetHeight(targetFrame))));
-            LGLiquidRenderedState targetState = LGLiquidRenderedStateMake(CGRectGetMidX(targetFrame), targetFrame.size);
-            LGLiquidRenderedState nextState = LGLiquidRenderedStateStep(currentState, targetState, LGSettingsSegmentedGlassActive(control), dt);
-            CGRect renderedFrame = CGRectMake(nextState.centerX - nextState.width * 0.5,
-                                              CGRectGetMidY(targetFrame) - nextState.height * 0.5,
-                                              nextState.width,
-                                              nextState.height);
-            LGSetSettingsSegmentedRenderedFrameState(control, renderedFrame);
-        }
-    }
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedObjectScaleKey, 1.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedObjectScaleVelocityKey, 0.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedScaleYKey, 1.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedScaleYVelocityKey, 0.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedScaleXKey, 1.0);
-    LGSetSettingsSegmentedSpringValue(control, kLGSettingsSegmentedScaleXVelocityKey, 0.0);
-
-    LGUpdateSettingsSegmentedControlVisuals(control);
-
-    if (!LGSettingsSegmentedGlassActive(control)) {
-        [self lg_stopSettingsSegmentedDisplayLink];
+    LGProfiledInstallSettingsSegmentGlass((UISegmentedControl *)self);
+    if (![objc_getAssociatedObject(self, kLGSettingsSegmentReleasedKey) boolValue]) return;
+    NSValue *renderedValue = objc_getAssociatedObject(self, kLGSettingsSegmentRenderedKey);
+    UISegmentedControl *control = (UISegmentedControl *)self;
+    CGFloat width = CGRectGetWidth(control.bounds) / MAX(control.numberOfSegments, 1);
+    CGFloat selectedCenter = (MAX(control.selectedSegmentIndex, 0) + 0.5) * width;
+    CGRect rendered = renderedValue.CGRectValue;
+    if (renderedValue && fabs(CGRectGetMidX(rendered) - selectedCenter) < 0.35 &&
+        fabs(CGRectGetWidth(rendered) - width) < 0.35 &&
+        fabs(CGRectGetHeight(rendered) - (CGRectGetHeight(control.bounds) - 4.0)) < 0.35) {
+        LGFinishSettingsSegmentRelease(control);
     }
 }
-
 - (void)didMoveToWindow {
     %orig;
-    if (!self.window) {
-        [self lg_stopSettingsSegmentedDisplayLink];
+    if (!self.window) LGStopSettingsSegmentDisplayLink((UISegmentedControl *)self);
+    LGProfiledInstallSettingsSegmentGlass((UISegmentedControl *)self);
+}
+- (void)layoutSubviews { %orig; LGProfiledInstallSettingsSegmentGlass((UISegmentedControl *)self); }
+- (void)setSelectedSegmentIndex:(NSInteger)index {
+    %orig;
+    LGProfiledInstallSettingsSegmentGlass((UISegmentedControl *)self);
+}
+%new
+- (void)lg_segmentBegin:(UITouch *)touch {
+    if ([objc_getAssociatedObject(self, kLGSettingsSegmentActiveKey) boolValue]) return;
+    UISegmentedControl *control = (UISegmentedControl *)self;
+    CGFloat width = CGRectGetWidth(control.bounds) / MAX(control.numberOfSegments, 1);
+    CGFloat startX = (MAX(control.selectedSegmentIndex, 0) + 0.5) * width;
+    CGPoint point = [touch locationInView:control];
+    objc_setAssociatedObject(self, kLGSettingsSegmentActiveKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentReleasedKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentFadingKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentTouchXKey, @(startX),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentLastXKey, @(point.x),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentLastTimeKey,
+                             @(CACurrentMediaTime()), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentVelocityKey, @0.0,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    LGStartSettingsSegmentDisplayLink(control);
+    LGLiveBackdropView *glass = objc_getAssociatedObject(self, kLGSettingsSegmentGlassKey);
+    glass.transform = CGAffineTransformIdentity;
+    LGProfiledInstallSettingsSegmentGlass(control);
+}
+%new
+- (void)lg_segmentMove:(UITouch *)touch {
+    if (![objc_getAssociatedObject(self, kLGSettingsSegmentActiveKey) boolValue]) return;
+    CGPoint point = [touch locationInView:(UISegmentedControl *)self];
+    CFTimeInterval now = CACurrentMediaTime();
+    NSNumber *lastX = objc_getAssociatedObject(self, kLGSettingsSegmentLastXKey);
+    NSNumber *lastTime = objc_getAssociatedObject(self, kLGSettingsSegmentLastTimeKey);
+    if (lastX && lastTime) {
+        CGFloat raw = (point.x - lastX.doubleValue) /
+                      MAX(now - lastTime.doubleValue, 0.001);
+        CGFloat previous = [objc_getAssociatedObject(self, kLGSettingsSegmentVelocityKey)
+            doubleValue];
+        objc_setAssociatedObject(self, kLGSettingsSegmentVelocityKey,
+                                 @(LGLiquidFilteredVelocity(previous, raw)),
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"didMoveToWindow");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
+    objc_setAssociatedObject(self, kLGSettingsSegmentLastXKey, @(point.x),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentLastTimeKey, @(now),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentTouchXKey, @(point.x),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
-
-- (void)layoutSubviews {
-    %orig;
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"layout");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-}
-
-- (void)setSelectedSegmentIndex:(NSInteger)selectedSegmentIndex {
-    %orig;
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"setSelectedSegmentIndex");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-}
-
-- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
-    BOOL result = %orig;
-    LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, YES);
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"beginTracking");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-    return result;
-}
-
-- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
-    BOOL result = %orig;
-    LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, YES);
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"continueTracking");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-    return result;
-}
-
-- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
-    %orig;
-    LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, NO);
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"endTracking");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-}
-
-- (void)cancelTrackingWithEvent:(UIEvent *)event {
-    %orig;
-    LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, NO);
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"cancelTracking");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-}
-
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    %orig;
-    LGAdvanceSettingsSegmentedDeactivateToken((UISegmentedControl *)self);
-    LGSetSettingsSegmentedReleased((UISegmentedControl *)self, NO);
-    LGSetSettingsSegmentedReleaseObjectScale((UISegmentedControl *)self, NAN);
-    LGSetSettingsSegmentedReleaseFrame((UISegmentedControl *)self, CGRectNull);
-    UIImageView *stockPill = LGSettingsSegmentedStockPill((UISegmentedControl *)self);
-    if (!stockPill || stockPill.superview != (UISegmentedControl *)self) {
-        stockPill = LGFindSettingsSegmentedStockPill((UISegmentedControl *)self);
-        LGSetSettingsSegmentedStockPill((UISegmentedControl *)self, stockPill);
-    }
-    CGFloat startX = stockPill ? CGRectGetMidX(stockPill.frame) : CGRectGetMidX(((UISegmentedControl *)self).bounds);
-    LGSetSettingsSegmentedGlassTouchX((UISegmentedControl *)self, startX);
-    objc_setAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchXKey, @(startX), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchTimeKey, @(CACurrentMediaTime()), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    LGSetSettingsSegmentedGlassVelocity((UISegmentedControl *)self, 0.0);
-    LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, YES);
-    [self lg_startSettingsSegmentedDisplayLinkIfNeeded];
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"touchesBegan");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-}
-
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    %orig;
-    UITouch *touch = touches.anyObject;
-    if (touch) {
-        CGPoint point = [touch locationInView:(UISegmentedControl *)self];
-        NSNumber *lastX = objc_getAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchXKey);
-        NSNumber *lastTime = objc_getAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchTimeKey);
-        CFTimeInterval now = CACurrentMediaTime();
-        if (lastX && lastTime) {
-            CFTimeInterval dt = MAX(now - lastTime.doubleValue, 0.001);
-            CGFloat rawVelocity = (point.x - lastX.doubleValue) / dt;
-            CGFloat mixedVelocity = LGSettingsSegmentedGlassVelocity((UISegmentedControl *)self) * 0.35 + rawVelocity * 0.65;
-            LGSetSettingsSegmentedGlassVelocity((UISegmentedControl *)self, mixedVelocity);
-        }
-        LGSetSettingsSegmentedGlassTouchX((UISegmentedControl *)self, point.x);
-        objc_setAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchXKey, @(point.x), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        objc_setAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchTimeKey, @(now), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, YES);
-    [self lg_startSettingsSegmentedDisplayLinkIfNeeded];
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"touchesMoved");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-}
-
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    LGSharedGlassView *glass = LGSettingsSegmentedGlassPill((UISegmentedControl *)self);
-    UIView *container = LGSettingsSegmentedOverlayContainer((UISegmentedControl *)self);
-    CGRect releaseFrame = (glass && container) ? [container convertRect:glass.frame toView:(UISegmentedControl *)self] : CGRectNull;
-    CGFloat releaseCenterX = CGRectIsNull(releaseFrame) ? CGRectGetMidX(((UISegmentedControl *)self).bounds) : CGRectGetMidX(releaseFrame);
-    %orig;
-    LGSetSettingsSegmentedGlassVelocity((UISegmentedControl *)self, 0.0);
-    LGSetSettingsSegmentedSpringValue((UISegmentedControl *)self, kLGSettingsSegmentedObjectScaleKey, 1.0);
-    LGSetSettingsSegmentedSpringValue((UISegmentedControl *)self, kLGSettingsSegmentedObjectScaleVelocityKey, 0.0);
-    LGSetSettingsSegmentedSpringValue((UISegmentedControl *)self, kLGSettingsSegmentedScaleXKey, 1.0);
-    LGSetSettingsSegmentedSpringValue((UISegmentedControl *)self, kLGSettingsSegmentedScaleXVelocityKey, 0.0);
-    LGSetSettingsSegmentedSpringValue((UISegmentedControl *)self, kLGSettingsSegmentedScaleYKey, 1.0);
-    LGSetSettingsSegmentedSpringValue((UISegmentedControl *)self, kLGSettingsSegmentedScaleYVelocityKey, 0.0);
-    LGSetSettingsSegmentedReleased((UISegmentedControl *)self, YES);
-    LGSetSettingsSegmentedReleaseObjectScale((UISegmentedControl *)self, LGSettingsSegmentedObjectScale((UISegmentedControl *)self));
-    LGSetSettingsSegmentedReleaseFrame((UISegmentedControl *)self, releaseFrame);
-    objc_setAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchXKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchTimeKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"touchesEnded");
-    LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, YES);
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
-    NSInteger token = LGAdvanceSettingsSegmentedDeactivateToken((UISegmentedControl *)self);
-    CGFloat targetCenterX = LGSettingsSegmentedTargetCenterX((UISegmentedControl *)self);
-    CGFloat glideDistance = fabs(targetCenterX - releaseCenterX);
-    CGFloat holdDuration = fmin(0.36, fmax(0.18, 0.12 + glideDistance / 900.0));
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (LGSettingsSegmentedDeactivateToken((UISegmentedControl *)self) != token) return;
-        LGSetSettingsSegmentedGlassTouchX((UISegmentedControl *)self, NAN);
-        LGSetSettingsSegmentedReleased((UISegmentedControl *)self, NO);
-        LGSetSettingsSegmentedReleaseObjectScale((UISegmentedControl *)self, NAN);
-        LGSetSettingsSegmentedReleaseFrame((UISegmentedControl *)self, CGRectNull);
-        LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, NO);
-        [(UISegmentedControl *)self lg_stopSettingsSegmentedDisplayLink];
-        LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
+%new
+- (void)lg_segmentEnd {
+    if (![objc_getAssociatedObject(self, kLGSettingsSegmentActiveKey) boolValue]) return;
+    objc_setAssociatedObject(self, kLGSettingsSegmentActiveKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentReleasedKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentVelocityKey, @0.0,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentTouchXKey,
+                             @((MAX(self.selectedSegmentIndex, 0) + 0.5) *
+                               (CGRectGetWidth(self.bounds) / MAX(self.numberOfSegments, 1))),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    LGProfiledInstallSettingsSegmentGlass((UISegmentedControl *)self);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 450 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), ^{
+        if ([objc_getAssociatedObject(self, kLGSettingsSegmentReleasedKey) boolValue] &&
+            ![objc_getAssociatedObject(self, kLGSettingsSegmentActiveKey) boolValue])
+            LGFinishSettingsSegmentRelease((UISegmentedControl *)self);
     });
 }
-
+%new
+- (void)lg_segmentCancel {
+    objc_setAssociatedObject(self, kLGSettingsSegmentActiveKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentTouchXKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentReleasedKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kLGSettingsSegmentFadingKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    LGLiveBackdropView *glass = objc_getAssociatedObject(self, kLGSettingsSegmentGlassKey);
+    glass.transform = CGAffineTransformIdentity;
+    LGProfiledInstallSettingsSegmentGlass((UISegmentedControl *)self);
+    LGStopSettingsSegmentDisplayLink((UISegmentedControl *)self);
+}
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    BOOL result = %orig;
+    [self lg_segmentBegin:touch];
+    return result;
+}
+- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    BOOL result = %orig;
+    [self lg_segmentMove:touch];
+    return result;
+}
+- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    %orig;
+    [self lg_segmentEnd];
+}
+- (void)cancelTrackingWithEvent:(UIEvent *)event {
+    %orig;
+    [self lg_segmentCancel];
+}
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    %orig;
+    [self lg_segmentBegin:touches.anyObject];
+}
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    %orig;
+    [self lg_segmentMove:touches.anyObject];
+}
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    %orig;
+    [self lg_segmentEnd];
+}
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     %orig;
-    LGSetSettingsSegmentedGlassTouchX((UISegmentedControl *)self, NAN);
-    LGSetSettingsSegmentedGlassVelocity((UISegmentedControl *)self, 0.0);
-    LGSetSettingsSegmentedReleased((UISegmentedControl *)self, NO);
-    LGSetSettingsSegmentedReleaseObjectScale((UISegmentedControl *)self, NAN);
-    LGSetSettingsSegmentedReleaseFrame((UISegmentedControl *)self, CGRectNull);
-    objc_setAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchXKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject((UISegmentedControl *)self, kLGSettingsSegmentedLastTouchTimeKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    LGSetSettingsSegmentedGlassActive((UISegmentedControl *)self, NO);
-    LGAdvanceSettingsSegmentedDeactivateToken((UISegmentedControl *)self);
-    [self lg_stopSettingsSegmentedDisplayLink];
-    LGProbeSettingsSegmentedControl((UISegmentedControl *)self, @"touchesCancelled");
-    LGUpdateSettingsSegmentedControlVisuals((UISegmentedControl *)self);
+    [self lg_segmentCancel];
 }
+%end
 
 %end
 
-%hook UIViewController
+%group LiquidAssPreferencesChrome
 
-- (void)viewDidLayoutSubviews {
+%hook UIViewControllerWrapperView
+- (void)didMoveToWindow {
     %orig;
-    LGUpdateSettingsTopFadeForController((UIViewController *)self);
+    LGUpdateSettingsTopFade((UIView *)self);
 }
-
-- (void)viewDidAppear:(BOOL)animated {
+- (void)layoutSubviews {
     %orig;
-    LGUpdateSettingsTopFadeForController((UIViewController *)self);
+    LGUpdateSettingsTopFade((UIView *)self);
 }
-
 %end
 
 %hook UINavigationBar
-
-- (void)layoutSubviews {
-    %orig;
-    LGUpdateSettingsNavigationBackButtons((UINavigationBar *)self);
-}
-
 - (void)didMoveToWindow {
     %orig;
-    LGUpdateSettingsNavigationBackButtons((UINavigationBar *)self);
+    LGHideSettingsNavigationBarBackground((UINavigationBar *)self);
+    LGUpdateSettingsBackButton((UINavigationBar *)self);
 }
-
-%end
-
-%hook _UIButtonBarButton
-
-%new
-- (void)lg_activateLiquidAssSettingsBackButton {
-    if (LGSettingsInvokeStockBackButtonAction((UIView *)self)) {
-        return;
-    }
-
-    UINavigationController *navigationController = LGSettingsNavigationControllerForView((UIView *)self);
-    if (navigationController.viewControllers.count > 1) {
-        [navigationController popViewControllerAnimated:YES];
-        return;
-    }
-}
-
-- (void)setHighlighted:(BOOL)highlighted {
-    %orig;
-    if (LGSettingsFirstDescendantWithClassName((UIView *)self, @"_UIBackButtonMaskView")) {
-        LGSettingsHideStockBackContent((UIView *)self);
-    }
-}
-
 - (void)layoutSubviews {
     %orig;
-    if (LGSettingsFirstDescendantWithClassName((UIView *)self, @"_UIBackButtonMaskView")) {
-        LGSettingsHideStockBackContent((UIView *)self);
-    }
+    LGHideSettingsNavigationBarBackground((UINavigationBar *)self);
+    LGUpdateSettingsBackButton((UINavigationBar *)self);
 }
-
 %end
 
 %hook PSTableCell
-
 - (CGSize)sizeThatFits:(CGSize)size {
-    CGSize original = %orig;
-    if (LGSettingsShouldModifyCell((UIView *)self) && original.height >= 44.0 && original.height <= 55.0) {
-        original.height = 54.0;
-    }
-    return original;
+    CGSize result = %orig;
+    if (gLGSettingsControlsEnabled &&
+        LGSettingsShouldModifyCell((UIView *)self) &&
+        result.height >= 44.0 && result.height <= 55.0) result.height = 54.0;
+    return result;
 }
-
-- (CGSize)systemLayoutSizeFittingSize:(CGSize)targetSize
-          withHorizontalFittingPriority:(UILayoutPriority)horizontalPriority
-                verticalFittingPriority:(UILayoutPriority)verticalPriority {
-    CGSize original = %orig;
-    if (LGSettingsShouldModifyCell((UIView *)self) && original.height >= 44.0 && original.height <= 55.0) {
-        original.height = 54.0;
-    }
-    return original;
+- (CGSize)systemLayoutSizeFittingSize:(CGSize)target
+       withHorizontalFittingPriority:(UILayoutPriority)horizontal
+             verticalFittingPriority:(UILayoutPriority)vertical {
+    CGSize result = %orig;
+    if (gLGSettingsControlsEnabled &&
+        LGSettingsShouldModifyCell((UIView *)self) &&
+        result.height >= 44.0 && result.height <= 55.0) result.height = 54.0;
+    return result;
 }
-
 - (void)layoutSubviews {
     %orig;
-    LGUpdateSettingsCellSeparatorInsets((UITableViewCell *)self);
-    if (LGSettingsShouldModifyCell((UIView *)self)) {
-        LGUpdateSettingsRoundedCellShape((UIView *)self);
-        LGUpdateSettingsRoundedCellSubviews((UIView *)self);
-    }
+    LGUpdateSettingsCell((UITableViewCell *)self);
+    LGUpdateLiquidAssEntryFooter((UITableViewCell *)self);
 }
-
-%end
-
-%hook PSSegmentTableCell
-
-- (void)layoutSubviews {
-    %orig;
-}
-
 %end
 
 %hook PSSliderTableCell
-
 - (void)layoutSubviews {
     %orig;
-    ((UIView *)self).layer.cornerRadius = 24.5;
+    if (gLGSettingsControlsEnabled)
+        ((UIView *)self).layer.cornerRadius = 24.5;
 }
-
 %end
 
 %end
 
 %ctor {
-    if (!LGIsPreferencesApp()) return;
-    if (!LGSettingsControlsEnabled()) return;
-    %init(LiquidAssPreferencesControls);
+    NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier ?: @"";
+
+    if ([bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
+
+    LGRefreshGlobalControlEnablement();
+    gLGControlsDiagnosticsEnabled = NO;
+    LGLog(@"global controls ctor bundle=%s enabled=%d",
+               bundleIdentifier.UTF8String, gLGSettingsControlsEnabled);
+    if (gLGControlsDiagnosticsEnabled)
+        LGLog(@"[GlobalControlsPerf] diagnostics enabled bundle=%s",
+                   bundleIdentifier.UTF8String);
+
+    %init(LiquidAssGlobalControls);
+
+    if ([bundleIdentifier isEqualToString:@"com.apple.Preferences"])
+        %init(LiquidAssPreferencesChrome);
+
+    lgObservePreferenceReload(^{
+        LGRefreshGlobalControlEnablement();
+        LGLog(@"global controls reload bundle=%s enabled=%d",
+                   bundleIdentifier.UTF8String, gLGSettingsControlsEnabled);
+    });
 }

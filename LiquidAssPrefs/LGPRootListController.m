@@ -1,5 +1,6 @@
 #import "LGPRootListController.h"
 #import "LGPSurfaceController.h"
+#import "LGPrefsSurfaceCatalog.h"
 #import "LGPrefsDataSupport.h"
 #import "LGPrefsUIHelpers.h"
 #import <QuartzCore/QuartzCore.h>
@@ -38,20 +39,18 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
     [self.lg_stackView addArrangedSubview:LGMakeSectionDivider()];
     UIView *mainSection = [self rootSectionViewWithTitle:LGLocalized(@"prefs.section.main.title")
                                                 subtitle:nil];
-    UIButton *homescreenButton = (UIButton *)[self navCardWithTitle:LGLocalized(@"prefs.surface.homescreen.title") subtitle:LGLocalized(@"prefs.surface.homescreen.subtitle") color:[UIColor systemBlueColor] symbolName:@"apps.iphone" action:@selector(openHomescreen)];
-    UIButton *lockscreenButton = (UIButton *)[self navCardWithTitle:LGLocalized(@"prefs.surface.lockscreen.title") subtitle:LGLocalized(@"prefs.surface.lockscreen.subtitle") color:[UIColor systemRedColor] symbolName:@"lg.lockscreen.stacked" action:@selector(openLockscreen)];
-    UIButton *appLibraryButton = (UIButton *)[self navCardWithTitle:LGLocalized(@"prefs.surface.app_library.title") subtitle:LGLocalized(@"prefs.surface.app_library.subtitle") color:[UIColor systemGreenColor] symbolName:@"square.grid.2x2.fill" action:@selector(openAppLibrary)];
-    UIButton *moreOptionsButton = (UIButton *)[self navCardWithTitle:LGLocalized(@"prefs.misc.about.title") subtitle:LGLocalized(@"prefs.misc.about.subtitle") color:[UIColor systemIndigoColor] symbolName:@"ellipsis.circle.fill" action:@selector(handleAboutPressed)];
+    UIButton *surfacesButton = (UIButton *)[self navCardWithTitle:LGPrefsSurfaceTitle(LGPrefsSurfaceSurfaces) subtitle:LGPrefsSurfaceSubtitle(LGPrefsSurfaceSurfaces) color:LGPrefsSurfaceTintColor(LGPrefsSurfaceSurfaces) symbolName:LGPrefsSurfaceSymbolName(LGPrefsSurfaceSurfaces) action:@selector(openSurfaces)];
+    UIButton *moreOptionsButton = (UIButton *)[self navCardWithTitle:LGPrefsSurfaceTitle(LGPrefsSurfaceMoreOptions) subtitle:LGPrefsSurfaceSubtitle(LGPrefsSurfaceMoreOptions) color:LGPrefsSurfaceTintColor(LGPrefsSurfaceMoreOptions) symbolName:LGPrefsSurfaceSymbolName(LGPrefsSurfaceMoreOptions) action:@selector(handleAboutPressed)];
     UIView *miscSection = [self rootSectionViewWithTitle:LGLocalized(@"prefs.section.misc.title")
                                                 subtitle:nil];
     UIButton *respringButton = (UIButton *)[self navCardWithTitle:LGLocalized(@"prefs.misc.respring.title") subtitle:LGLocalized(@"prefs.misc.respring.subtitle") color:[UIColor systemOrangeColor] symbolName:@"arrow.counterclockwise.circle.fill" action:@selector(handleRespringPressed)];
-    UIButton *aboutButton = (UIButton *)[self navCardWithTitle:LGLocalized(@"prefs.misc.prefs_settings.title") subtitle:LGLocalized(@"prefs.misc.prefs_settings.subtitle") color:[UIColor systemGrayColor] symbolName:@"info.circle.fill" action:@selector(openPrefsSettings)];
-    self.lg_menuButtons = @[homescreenButton, lockscreenButton, appLibraryButton, moreOptionsButton];
+    UIButton *aboutButton = (UIButton *)[self navCardWithTitle:LGPrefsSurfaceTitle(LGPrefsSurfaceSettings) subtitle:LGPrefsSurfaceSubtitle(LGPrefsSurfaceSettings) color:LGPrefsSurfaceTintColor(LGPrefsSurfaceSettings) symbolName:LGPrefsSurfaceSymbolName(LGPrefsSurfaceSettings) action:@selector(openPrefsSettings)];
+    self.lg_menuButtons = @[surfacesButton];
     [self.lg_stackView addArrangedSubview:mainSection];
     [self.lg_stackView addArrangedSubview:[self globalToggleCard]];
-    [self.lg_stackView addArrangedSubview:[self groupedRootNavPanelForButtons:@[homescreenButton, lockscreenButton, appLibraryButton, moreOptionsButton]]];
+    [self.lg_stackView addArrangedSubview:[self groupedRootNavPanelForButtons:@[surfacesButton]]];
     [self.lg_stackView addArrangedSubview:miscSection];
-    [self.lg_stackView addArrangedSubview:[self groupedRootNavPanelForButtons:@[respringButton, aboutButton]]];
+    [self.lg_stackView addArrangedSubview:[self groupedRootNavPanelForButtons:@[moreOptionsButton, respringButton, aboutButton]]];
     [self.lg_stackView addArrangedSubview:[self runtimeCacheFooterView]];
     [self updateMenuAvailability];
 }
@@ -65,8 +64,9 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
     self.title = LGPrefsAppName();
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     if ([self respondsToSelector:@selector(table)] && self.table) self.table.hidden = YES;
-    self.navigationItem.rightBarButtonItem = LGMakeCircularResetItem(self, @selector(handleResetPressed));
-    self.navigationItem.rightBarButtonItem.customView.accessibilityLabel = LGLocalized(@"prefs.button.reset_all");
+    self.navigationItem.rightBarButtonItem = LGMakeCircularMenuItem(self, @selector(handleApplyPressed),
+                                                                      @selector(handleResetPressed),
+                                                                      LGLocalized(@"prefs.button.reset"));
     LGRefreshCircularBackItem(self.navigationItem.rightBarButtonItem);
     [self applyNavigationBarStyle];
     LGInstallScrollableStack(self, 32.0, 14.0, &_lg_scrollView, &_lg_stackView);
@@ -99,13 +99,12 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (self.navigationController.topViewController != self) return;
-        if ([surface isEqualToString:@"Homescreen"]) [self openHomescreen];
+        if ([surface isEqualToString:@"Surfaces"]) [self openSurfaces];
+        else if ([surface isEqualToString:@"Homescreen"]) [self openHomescreen];
         else if ([surface isEqualToString:@"Lockscreen"]) [self openLockscreen];
         else if ([surface isEqualToString:@"AppLibrary"]) [self openAppLibrary];
         else if ([surface isEqualToString:@"MoreOptions"]) [self openMoreOptions];
         else if ([surface isEqualToString:@"PrefsSettings"]) [self openPrefsSettings];
-        else if ([surface isEqualToString:@"Experimental"]) [self openMoreOptions];
-        else if ([surface isEqualToString:@"CustomViews"] || [surface hasPrefix:@"CustomViewRule:"] || [surface isEqualToString:@"LiveCapture"]) [self openMoreOptions];
     });
 }
 
@@ -168,6 +167,7 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
     if (!self.lg_respringBar) return;
     LGRefreshRespringBarGlass(self.lg_respringBar);
     if (shouldShow == !self.lg_respringBar.hidden) {
+        [self.view layoutIfNeeded];
         if (shouldShow) {
             LGScheduleRespringBarGlassRefresh(self.lg_respringBar);
         }
@@ -501,36 +501,29 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
     return button;
 }
 
-- (void)pushSurfaceTitle:(NSString *)title subtitle:(NSString *)subtitle color:(UIColor *)color identifier:(NSString *)identifier items:(NSArray<NSDictionary *> *)items {
-    LGPSurfaceController *controller = [[LGPSurfaceController alloc] initWithTitle:title
-                                                                          subtitle:subtitle
-                                                                         tintColor:color
+- (void)pushSurfaceWithIdentifier:(NSString *)identifier {
+    LGPSurfaceController *controller = [[LGPSurfaceController alloc] initWithTitle:LGPrefsSurfaceTitle(identifier)
+                                                                          subtitle:LGPrefsSurfaceSubtitle(identifier)
+                                                                         tintColor:LGPrefsSurfaceTintColor(identifier)
                                                                         identifier:identifier
-                                                                             items:items];
+                                                                             items:LGPrefsSurfaceItems(identifier)];
     [self.navigationController pushViewController:controller animated:YES];
 }
 
-- (void)openHomescreen { [self pushSurfaceTitle:LGLocalized(@"prefs.surface.homescreen.title") subtitle:LGLocalized(@"prefs.surface.homescreen.subtitle") color:[UIColor systemBlueColor] identifier:@"Homescreen" items:LGHomescreenItems()]; }
-- (void)openLockscreen { [self pushSurfaceTitle:LGLocalized(@"prefs.surface.lockscreen.title") subtitle:LGLocalized(@"prefs.surface.lockscreen.subtitle") color:[UIColor systemRedColor] identifier:@"Lockscreen" items:LGLockscreenItems()]; }
-- (void)openAppLibrary { [self pushSurfaceTitle:LGLocalized(@"prefs.surface.app_library.title") subtitle:LGLocalized(@"prefs.surface.app_library.subtitle") color:[UIColor systemGreenColor] identifier:@"AppLibrary" items:LGAppLibraryItems()]; }
-- (void)openPrefsSettings {
-    [self pushSurfaceTitle:LGLocalized(@"prefs.misc.prefs_settings.title")
-                  subtitle:LGLocalized(@"prefs.misc.prefs_settings.subtitle")
-                     color:[UIColor systemGrayColor]
-                identifier:@"PrefsSettings"
-                     items:LGPrefsSettingsItems()];
-}
-- (void)openMoreOptions {
-    [self pushSurfaceTitle:LGLocalized(@"prefs.misc.about.title")
-                  subtitle:LGLocalized(@"prefs.misc.about.subtitle")
-                     color:[UIColor systemIndigoColor]
-                identifier:@"MoreOptions"
-                     items:LGMoreOptionsItems()];
-}
+- (void)openHomescreen { [self pushSurfaceWithIdentifier:LGPrefsSurfaceHomescreen]; }
+- (void)openLockscreen { [self pushSurfaceWithIdentifier:LGPrefsSurfaceLockscreen]; }
+- (void)openAppLibrary { [self pushSurfaceWithIdentifier:LGPrefsSurfaceAppLibrary]; }
+- (void)openSurfaces { [self pushSurfaceWithIdentifier:LGPrefsSurfaceSurfaces]; }
+- (void)openPrefsSettings { [self pushSurfaceWithIdentifier:LGPrefsSurfaceSettings]; }
+- (void)openMoreOptions { [self pushSurfaceWithIdentifier:LGPrefsSurfaceMoreOptions]; }
 - (void)handleAboutPressed { [self openMoreOptions]; }
 
 - (void)handleResetPressed {
     LGPresentResetConfirmation(self);
+}
+
+- (void)handleApplyPressed {
+    LGForceSynchronizePreferences();
 }
 
 - (void)handleRespringPressed {
