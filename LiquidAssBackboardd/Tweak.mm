@@ -96,6 +96,7 @@ typedef struct {
     float       backdropZoom;
     float       useGlyphMask;
     float       dispersionStrength;
+    float       fresnelGlareStrength;
     simd_float4 tintColor;
 } LGUniforms;
 
@@ -224,6 +225,7 @@ struct Uniforms {
     float  backdropZoom;
     float  useGlyphMask;
     float  dispersionStrength;
+    float  fresnelGlareStrength;
     float4 tintColor;
 };
 
@@ -574,7 +576,8 @@ float4 liquidGlassPixel(texture2d<float, access::sample> src,
     float3 outRGB = mix(bg.rgb, u.tintColor.rgb, u.tintColor.a);
     float fresnel = fresnelAtRatio(bezelRatio, u.refractiveIndex) * edgeOpacity;
     float luminance = dot(outRGB, float3(0.2126, 0.7152, 0.0722));
-    float glare = clamp(fresnel * 0.70 * mix(0.40, 1.0, luminance), 0.0, 0.18);
+    float glare = clamp(fresnel * 0.70 * mix(0.40, 1.0, luminance), 0.0, 0.18)
+                * clamp(u.fresnelGlareStrength, 0.0, 1.0);
     outRGB = 1.0 - (1.0 - outRGB) * (1.0 - glare);
     return float4(outRGB, edgeOpacity);
 }
@@ -765,6 +768,7 @@ static void ensureUniforms(__unsafe_unretained id<MTLDevice> device, uint64_t w,
     u->backdropZoom            = 1.f;
     u->useGlyphMask            = 0.f;
     u->dispersionStrength      = 5.0f;
+    u->fresnelGlareStrength    = 0.5f;
 
     lglog("uniforms buffer allocated (geometry refreshed per-frame)");
 }
@@ -810,6 +814,7 @@ static_assert(kHostCount == LGHostIdentifierCount, "registry and renderer host o
 static LGHostParams g_hostParams[kHostCount];
 static uint32_t g_darkAtoms[kHostCount];
 static bool         g_hostParamsInit = false;
+static float        g_fresnelGlareStrength = 0.5f;
 
 struct LGRadiusRoute { int host; float radiusRatio; bool dark; };
 static std::unordered_map<uint32_t, LGRadiusRoute> g_radiusRoutes;
@@ -886,6 +891,9 @@ static bool lgDecodeTintColor(NSString *hex, simd_float4 *out) {
 
 static void lgReloadHostPrefs(void) {
     NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:lgPrefsPath()];
+    NSNumber *fresnelStrength = prefs[@"Renderer.FresnelGlareStrength"];
+    g_fresnelGlareStrength = [fresnelStrength isKindOfClass:NSNumber.class]
+        ? fminf(1.0f, fmaxf(0.0f, fresnelStrength.floatValue)) : 0.5f;
     int overrides = 0;
     for (int i = 0; i < kHostCount; i++) {
         uint32_t keepAtom = g_hostParamsInit ? g_hostParams[i].atom : 0;
@@ -1022,6 +1030,7 @@ static void ourCustomRender13(void *self, void *filter, void *layer, void *ctx,
     lu.refractionScale    = hp->refractionScale;
     lu.refractiveIndex    = hp->refractiveIndex;
     lu.dispersionStrength = hp->dispersionStrength;
+    lu.fresnelGlareStrength = g_fresnelGlareStrength;
     lu.tintColor          = darkTint ? simd_make_float4(hp->darkTintR, hp->darkTintG, hp->darkTintB, hp->darkTintStrength)
                                   : simd_make_float4(hp->tintR, hp->tintG, hp->tintB, hp->tintStrength);
 
@@ -1629,7 +1638,7 @@ static void tweakInit(void) {
     g_destinationTextureOffset = osv.majorVersion >= 17 ? 0x60 : 0x58;
     if (osv.majorVersion == 16)
         g_contextDestSurfaceOffset = 0x110;
-    else if (osv.majorVersion >= 18)
+    else if (osv.majorVersion == 15 || osv.majorVersion >= 18)
         g_contextDestSurfaceOffset = 0x108;
     else
         g_contextDestSurfaceOffset = 0xf8;

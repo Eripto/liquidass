@@ -370,9 +370,9 @@ static BOOL LGSettingsFeatureEnabled(void) {
            [settings boolValue];
 }
 
-static BOOL LGGlobalControlPreferenceEnabled(NSString *key) {
+static BOOL LGGlobalControlPreferenceEnabled(NSString *key, BOOL fallback) {
     id value = LGGlassPreferenceValue(key);
-    return ![value respondsToSelector:@selector(boolValue)] || [value boolValue];
+    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : fallback;
 }
 
 static BOOL LGProcessIsExcludedFromGlobalControls(void) {
@@ -398,11 +398,11 @@ static void LGRefreshGlobalControlEnablement(void) {
     gLGSettingsControlsEnabled = LGSettingsFeatureEnabled();
     BOOL allowed = gLGSettingsControlsEnabled && !LGProcessIsExcludedFromGlobalControls();
     gLGSwitchControlsEnabled = allowed &&
-        LGGlobalControlPreferenceEnabled(@"GlobalControls.Switches.Enabled");
+        LGGlobalControlPreferenceEnabled(@"GlobalControls.Switches.Enabled", YES);
     gLGSliderControlsEnabled = allowed &&
-        LGGlobalControlPreferenceEnabled(@"GlobalControls.Sliders.Enabled");
+        LGGlobalControlPreferenceEnabled(@"GlobalControls.Sliders.Enabled", NO);
     gLGSegmentControlsEnabled = allowed &&
-        LGGlobalControlPreferenceEnabled(@"GlobalControls.Segmented.Enabled");
+        LGGlobalControlPreferenceEnabled(@"GlobalControls.Segmented.Enabled", NO);
 }
 
 static BOOL LGInsideLiquidAssPrefs(UIView *view) {
@@ -426,6 +426,12 @@ static BOOL LGControllerContainsLiquidAssPrefs(UIViewController *controller) {
            LGControllerContainsLiquidAssPrefs(controller.presentedViewController);
 }
 
+static BOOL LGSettingsChromeEnabledForView(UIView *view) {
+    if (gLGSettingsControlsEnabled) return YES;
+    if (LGInsideLiquidAssPrefs(view)) return YES;
+    return LGControllerContainsLiquidAssPrefs(view.window.rootViewController);
+}
+
 static BOOL LGSettingsWrapperIsScreenSized(UIView *wrapper) {
     UIWindow *window = wrapper.window;
     if (!window || CGRectIsEmpty(wrapper.bounds)) return NO;
@@ -446,7 +452,8 @@ static BOOL LGSettingsWrapperIsClosestToWindow(UIView *wrapper) {
 }
 
 static void LGUpdateSettingsTopFade(UIView *wrapper) {
-    if (!gLGSettingsControlsEnabled || !LGSettingsWrapperIsScreenSized(wrapper) ||
+    if (!LGSettingsChromeEnabledForView(wrapper) ||
+        !LGSettingsWrapperIsScreenSized(wrapper) ||
         !LGSettingsWrapperIsClosestToWindow(wrapper)) {
         [objc_getAssociatedObject(wrapper, kLGSettingsTopFadeKey) removeFromSuperview];
         objc_setAssociatedObject(wrapper, kLGSettingsTopFadeKey, nil,
@@ -471,6 +478,7 @@ static void LGUpdateSettingsTopFade(UIView *wrapper) {
 static void LGHideSettingsNavigationBarBackground(UINavigationBar *bar) {
     Class backgroundClass = NSClassFromString(@"_UIBarBackground");
     if (!backgroundClass) return;
+    BOOL chromeEnabled = LGSettingsChromeEnabledForView(bar);
     NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithArray:bar.subviews];
     while (stack.count) {
         UIView *view = stack.lastObject;
@@ -478,7 +486,7 @@ static void LGHideSettingsNavigationBarBackground(UINavigationBar *bar) {
         if ([view isKindOfClass:backgroundClass]) {
             NSDictionary *original = objc_getAssociatedObject(
                 view, kLGSettingsBarBackgroundStateKey);
-            if (!gLGSettingsControlsEnabled) {
+            if (!chromeEnabled) {
                 if (original) {
                     view.hidden = [original[@"hidden"] boolValue];
                     view.alpha = [original[@"alpha"] doubleValue];

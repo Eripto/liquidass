@@ -66,6 +66,9 @@
 
 "prefs.button.reset" = "Reset";
 "prefs.button.cancel" = "Cancel";
+"prefs.app_icons_warning.title" = "Enable App Icons?";
+"prefs.app_icons_warning.body" = "Be aware that enabling app icons will be VERY laggy. DO NOT complain about lag issues if you have this surface enabled, thank you.";
+"prefs.app_icons_warning.confirm" = "Enable";
 "prefs.button.more" = "More";
 "prefs.button.respring" = "Respring";
 "prefs.button.later" = "Later";
@@ -128,6 +131,8 @@
 "prefs.misc.prefs_settings.subtitle" = "Language, version details, donate, etc.";
 "prefs.misc.options_section.title" = "Extra stuff";
 "prefs.misc.options_section.subtitle" = "Experimental features and other stuff.";
+"prefs.control.fresnel_glare" = "Fresnel Glare";
+"prefs.subtitle.fresnel_glare" = "Controls the edge glare added by the glass shader.";
 "prefs.misc.rwb_third_party.title" = "RWB list";
 "prefs.misc.rwb_third_party.subtitle" = "Enter widget bundle ids for the RWB allowlist.";
 "prefs.misc.rwb_third_party.editor_body" = "Enter one bundle id per line.";

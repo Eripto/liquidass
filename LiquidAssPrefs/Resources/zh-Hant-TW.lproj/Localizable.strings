@@ -183,3 +183,10 @@
 "prefs.global_controls.segmented.title" = "Segmented Controls";
 "prefs.global_controls.segmented.subtitle" = "Add liquid selection behavior to segmented controls.";
 "prefs.button.more" = "More";
+
+/* TODO: Translate synced English fallback strings. */
+"prefs.app_icons_warning.title" = "Enable App Icons?";
+"prefs.app_icons_warning.body" = "Be aware that enabling app icons will be VERY laggy. DO NOT complain about lag issues if you have this surface enabled, thank you.";
+"prefs.app_icons_warning.confirm" = "Enable";
+"prefs.control.fresnel_glare" = "Fresnel Glare";
+"prefs.subtitle.fresnel_glare" = "Controls the edge glare added by the glass shader.";

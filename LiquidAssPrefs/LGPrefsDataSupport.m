@@ -816,10 +816,10 @@ NSArray<NSDictionary *> *LGGlobalControlsItems(void) {
                         LGLocalized(@"prefs.global_controls.switches.subtitle"), YES),
         LGSwitchSetting(@"GlobalControls.Sliders.Enabled",
                         LGLocalized(@"prefs.global_controls.sliders.title"),
-                        LGLocalized(@"prefs.global_controls.sliders.subtitle"), YES),
+                        LGLocalized(@"prefs.global_controls.sliders.subtitle"), NO),
         LGSwitchSetting(@"GlobalControls.Segmented.Enabled",
                         LGLocalized(@"prefs.global_controls.segmented.title"),
-                        LGLocalized(@"prefs.global_controls.segmented.subtitle"), YES),
+                        LGLocalized(@"prefs.global_controls.segmented.subtitle"), NO),
     ];
 }
 
@@ -827,6 +827,10 @@ NSArray<NSDictionary *> *LGMoreOptionsItems(void) {
     NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithArray:@[
         LGSectionSetting(LGLocalized(@"prefs.misc.options_section.title"),
                          LGLocalized(@"prefs.misc.options_section.subtitle"))]];
+    [items addObject:LGSliderSetting(@"Renderer.FresnelGlareStrength",
+                                     LGLocalized(@"prefs.control.fresnel_glare"),
+                                     LGLocalized(@"prefs.subtitle.fresnel_glare"),
+                                     0.5, 0.0, 1.0, 2)];
     [items addObject:LGSettingControlledByKey(
         LGSwitchSetting(@"SettingsControls.Enabled",
                         LGLocalized(@"prefs.misc.settings_controls.title"),

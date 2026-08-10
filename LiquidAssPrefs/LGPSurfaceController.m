@@ -1017,6 +1017,36 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     objc_setAssociatedObject(toggle, kLGPreferenceKeyKey, item[@"key"], OBJC_ASSOCIATION_COPY_NONATOMIC);
     [toggle addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
         UISwitch *sender = (UISwitch *)action.sender;
+        if ([item[@"key"] isEqualToString:@"AppIcons.Enabled"] && sender.isOn) {
+            __weak UISwitch *weakSender = sender;
+            UIAlertController *alert = [UIAlertController
+                alertControllerWithTitle:LGLocalized(@"prefs.app_icons_warning.title")
+                                 message:LGLocalized(@"prefs.app_icons_warning.body")
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction
+                actionWithTitle:LGLocalized(@"prefs.button.cancel")
+                          style:UIAlertActionStyleCancel
+                        handler:^(__unused UIAlertAction *alertAction) {
+                            [weakSender setOn:NO animated:YES];
+                        }]];
+            [alert addAction:[UIAlertAction
+                actionWithTitle:LGLocalized(@"prefs.app_icons_warning.confirm")
+                          style:UIAlertActionStyleDefault
+                        handler:^(__unused UIAlertAction *alertAction) {
+                            UISwitch *confirmedSender = weakSender;
+                            if (!confirmedSender) return;
+                            [confirmedSender setOn:YES animated:YES];
+                            LGWritePreferenceAndMaybeRequireRespring(item[@"key"], @YES);
+                            [self handleRespringStateChanged:nil];
+                            if ([item[@"controls_following_panel"] boolValue]) {
+                                [self updatePanelsControlledByEnabledKey:item[@"key"]
+                                                                 enabled:YES
+                                                                animated:YES];
+                            }
+                        }]];
+            [self presentViewController:alert animated:YES completion:nil];
+            return;
+        }
         if ([item[@"key"] isEqualToString:@"SettingsControls.Enabled"]) {
             LGWritePreference(item[@"key"], @(sender.isOn));
             LGPresentReopenSettingsConfirmation(self);

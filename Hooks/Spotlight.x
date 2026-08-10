@@ -40,6 +40,8 @@ static void LGUpdateSpotlightGlass(UIView *view) {
                                        UIEdgeInsetsZero, radius, nil);
 }
 
+%group LGSpotlightHooks
+
 %hook SPUIHeaderBlurView
 
 - (void)didMoveToWindow {
@@ -72,3 +74,12 @@ static void LGUpdateSpotlightGlass(UIView *view) {
 }
 
 %end
+
+%end
+
+%ctor {
+    if ([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:
+            (NSOperatingSystemVersion){16, 0, 0}]) {
+        %init(LGSpotlightHooks);
+    }
+}
