@@ -1,11 +1,4 @@
-# Inactivity in the current project
-So you may have noticed that there's not much activity in the repo right now, but of course it's still being developed by me locally. The next update ~~could be a big rewrite on how the tweak works and could take a long time~~ will be a big rewrite and completely changes how the tweak works fundementally (I could say... not releasing this month). I'm currently ~~still researching the new methods and stuff~~ improving the implementation for the upcoming beta release (0.1.0b)
 
-Additionally, my next school year is gonna be the toughest of my life, so updates will be less frequent. I also have different projects at the moment, so I hope you will understand.
-
-Pull requests will still be reviewed and merged, and I encourage people contributing in the tweak, it will help a lot.
-
----
 
 # Liquid (Gl)ass
 This tweak is incomplete, issues WILL happen.
@@ -23,7 +16,10 @@ Nightly builds that contains the bleeding edge changes are available [here](http
 - app library
 - settings app
 - clock
-- or any view with the custom views feature introduced in 0.0.9a
+- keyboard
+- tabbars
+- alerts
+- coversheet (lockscreen pull)
 
 ## Localization
 
