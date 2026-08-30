@@ -116,10 +116,24 @@ static NSArray<NSDictionary *> *LGAvailableLanguageChoices(void) {
 }
 
 Class LGPrefsSwitchClass(void) {
+    if (LGIsIOS12()) {
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            LGDiagnosticLog(@"prefs.compat iOS12 switchClass=UISwitch (private live-backdrop thumb disabled)");
+        });
+        return [UISwitch class];
+    }
     return NSClassFromString(@"LGPrefsLiquidSwitch") ?: [UISwitch class];
 }
 
 Class LGPrefsSliderClass(void) {
+    if (LGIsIOS12()) {
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            LGDiagnosticLog(@"prefs.compat iOS12 sliderClass=UISlider (private live-backdrop thumb disabled)");
+        });
+        return [UISlider class];
+    }
     return NSClassFromString(@"LGPrefsLiquidSlider") ?: [UISlider class];
 }
 
@@ -223,8 +237,13 @@ void LGForceSynchronizePreferences(void) {
 
     NSDictionary<NSString *, id> *pendingValues = [sLGPendingPreferences copy];
     NSSet<NSString *> *pendingRemovals = [sLGPendingPreferenceRemovals copy];
+    LGDiagnosticLog(@"prefs.apply.begin domain=%@ values=%lu removals=%lu global=%@",
+                    LGPrefsDomain, (unsigned long)pendingValues.count,
+                    (unsigned long)pendingRemovals.count,
+                    pendingValues[@"Global.Enabled"] ?: @"unchanged");
     LGEnsurePreferencesWriteQueueInitialized();
     dispatch_sync(sLGPrefsWriteQueue, ^{
+        LGDiagnosticLog(@"prefs.apply.cfpreferences.begin");
         [pendingValues enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
             (void)stop;
             CFPreferencesSetAppValue((__bridge CFStringRef)key,
@@ -237,11 +256,13 @@ void LGForceSynchronizePreferences(void) {
                                      (__bridge CFStringRef)LGPrefsDomain);
         }
         BOOL wrote = CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+        int notifyResult = notify_post(LGPrefsChangedNotificationCString);
         LGLog(@"[prefs-apply] committed=%lu removed=%lu wrote=%d; posting Reload",
               (unsigned long)pendingValues.count,
               (unsigned long)pendingRemovals.count,
               wrote);
-        notify_post(LGPrefsChangedNotificationCString);
+        LGDiagnosticLog(@"prefs.apply.cfpreferences.end wrote=%d notifyResult=%d",
+                        wrote, notifyResult);
     });
 
     [sLGPendingPreferences removeAllObjects];
@@ -249,6 +270,7 @@ void LGForceSynchronizePreferences(void) {
 
     LGSetRespringBarDismissed(NO);
     LGSetNeedsRespring(YES);
+    LGDiagnosticLog(@"prefs.apply.end");
 }
 
 NSNumber *LGReadPreference(NSString *key, NSNumber *fallback) {
@@ -276,10 +298,13 @@ void LGWritePreference(NSString *key, NSNumber *value) {
 
 void LGWritePreferenceObject(NSString *key, id value) {
     if (!key.length || !value) return;
+    LGDiagnosticLog(@"prefs.setter.stage.begin key=%@ value=%@", key, value);
     LGEnsurePendingPreferencesInitialized();
     sLGPendingPreferences[key] = value;
     [sLGPendingPreferenceRemovals removeObject:key];
     LGLog(@"[prefs-pending] staged %@=%@", key, value);
+    LGDiagnosticLog(@"prefs.setter.stage.end key=%@ pending=%lu", key,
+                    (unsigned long)sLGPendingPreferences.count);
 }
 
 void LGWritePreferenceAndMaybeRequireRespring(NSString *key, NSNumber *value) {

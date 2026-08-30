@@ -1,6 +1,7 @@
 
 
 #import <UIKit/UIKit.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
 
@@ -30,13 +31,23 @@ static void LG_requestRespring(void) {
     Class serviceClass = objc_getClass("FBSSystemService");
     if (!actionClass || !serviceClass) return;
 
-    SBSRelaunchAction *restart =
-        [actionClass actionWithReason:@"LiquidAss"
-                              options:(SBSRelaunchActionOptionsRestartRenderServer |
-                                       SBSRelaunchActionOptionsFadeToBlackTransition)
-                            targetURL:nil];
+    SEL actionSelector =
+        NSSelectorFromString(@"actionWithReason:options:targetURL:");
+    SEL serviceSelector = NSSelectorFromString(@"sharedService");
+    SEL sendSelector = NSSelectorFromString(@"sendActions:withResult:");
+    if (![actionClass respondsToSelector:actionSelector] ||
+        ![serviceClass respondsToSelector:serviceSelector]) return;
+
+    id restart = ((id (*)(Class, SEL, NSString *, NSUInteger, NSURL *))objc_msgSend)(
+        actionClass, actionSelector, @"LiquidAss",
+        (SBSRelaunchActionOptionsRestartRenderServer |
+         SBSRelaunchActionOptionsFadeToBlackTransition), nil);
     if (!restart) return;
-    [[serviceClass sharedService] sendActions:[NSSet setWithObject:restart] withResult:nil];
+    id service = ((id (*)(Class, SEL))objc_msgSend)(serviceClass,
+                                                    serviceSelector);
+    if (!service || ![service respondsToSelector:sendSelector]) return;
+    ((void (*)(id, SEL, NSSet *, id))objc_msgSend)(
+        service, sendSelector, [NSSet setWithObject:restart], nil);
 }
 
 static void LG_respringRequested(CFNotificationCenterRef center, void *observer,

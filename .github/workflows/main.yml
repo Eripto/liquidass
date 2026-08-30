@@ -103,8 +103,78 @@ jobs:
           name: ${{ matrix.scheme }}-package
           path: packages/*.deb
 
+  ios12:
+    runs-on: macos-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: setup theos
+        uses: actions/checkout@v4
+        with:
+          repository: roothide/theos
+          path: theos
+          submodules: recursive
+
+      - name: cache sdks
+        id: cache-sdks
+        uses: actions/cache@v4
+        with:
+          path: theos/sdks
+          key: theos-sdks-16.5
+
+      - name: download sdks
+        if: steps.cache-sdks.outputs.cache-hit != 'true'
+        run: |
+          curl -LO https://github.com/theos/sdks/archive/master.zip
+          unzip -q master.zip
+          mkdir -p theos/sdks
+          mv sdks-master/*.sdk theos/sdks/
+          rm -rf master.zip sdks-master
+
+      - name: set THEOS env var
+        run: echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+
+      - name: install deps
+        run: |
+          brew install ldid make
+          echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: build iOS 12 arm64 package
+        run: |
+          make clean
+          make package \
+            ARCHS="arm64" \
+            TARGET="iphone:clang:16.5:12.0" \
+            FINALPACKAGE=1
+
+      - name: verify packaged ad-hoc signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$(find packages -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          test -n "$package"
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$verify_dir"' EXIT
+          cd "$verify_dir"
+          ar -x "$GITHUB_WORKSPACE/$package"
+          tar -xf data.tar.*
+          test -f Library/PreferenceBundles/LiquidAssPrefs.bundle/LiquidAssPrefs
+          test -f Library/MobileSubstrate/DynamicLibraries/liquidass.dylib
+          codesign --verify --verbose=4 Library/PreferenceBundles/LiquidAssPrefs.bundle/LiquidAssPrefs
+          codesign --verify --verbose=4 Library/MobileSubstrate/DynamicLibraries/liquidass.dylib
+
+      - name: upload iOS 12 validation package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios12-validation
+          path: packages/*.deb
+
   release:
-    needs: build
+    needs: [build, ios12]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

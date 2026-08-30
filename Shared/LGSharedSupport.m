@@ -1,13 +1,28 @@
 #import "LGSharedSupport.h"
 #import <objc/runtime.h>
 #import <os/lock.h>
+#import <fcntl.h>
+#import <sys/stat.h>
 #import <stdlib.h>
+#import <unistd.h>
 
 __attribute__((weak)) int __isOSVersionAtLeast(int major, int minor, int patch) {
     NSOperatingSystemVersion version = NSProcessInfo.processInfo.operatingSystemVersion;
     if (version.majorVersion != major) return version.majorVersion > major;
     if (version.minorVersion != minor) return version.minorVersion > minor;
     return version.patchVersion >= patch;
+}
+
+// Newer Clang versions lower @available checks to this compiler-rt helper.
+// It is not exported by every iOS 12 libSystem build, so keep an in-tweak weak
+// implementation.  Platform 2 is iOS; these targets never execute on the
+// other Apple platforms, so the platform value does not change the result.
+__attribute__((weak)) int32_t __isPlatformVersionAtLeast(uint32_t platform,
+                                                          uint32_t major,
+                                                          uint32_t minor,
+                                                          uint32_t patch) {
+    (void)platform;
+    return __isOSVersionAtLeast((int)major, (int)minor, (int)patch);
 }
 
 NSString * const LGPrefsDomain = @"dylv.liquidassprefs";
@@ -199,9 +214,13 @@ static void LGPreferencesChanged(CFNotificationCenterRef center,
     (void)name;
     (void)object;
     (void)userInfo;
+    LGDiagnosticLog(@"reload.darwin.received process=%@ notification=%@",
+                    LGMainBundleIdentifier(), (__bridge NSString *)name);
     dispatch_async(dispatch_get_main_queue(), ^{
+        LGDiagnosticLog(@"reload.inprocess.begin process=%@", LGMainBundleIdentifier());
         LGReloadPreferences();
         [[NSNotificationCenter defaultCenter] postNotificationName:LGPrefsDidReloadInProcessNotification object:nil];
+        LGDiagnosticLog(@"reload.inprocess.end process=%@", LGMainBundleIdentifier());
     });
 }
 
@@ -224,6 +243,36 @@ NSString *LGMainBundleIdentifier(void) {
         bundleID = [NSBundle.mainBundle.bundleIdentifier copy] ?: @"";
     });
     return bundleID;
+}
+
+void LGDiagnosticLog(NSString *format, ...) {
+    if (!format.length) return;
+    @autoreleasepool {
+        va_list args;
+        va_start(args, format);
+        NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+        va_end(args);
+
+        NSString *bundleIdentifier = LGMainBundleIdentifier();
+        NSString *line = [NSString stringWithFormat:
+            @"[%@ pid=%d %@] %@\n", [NSDate date], getpid(),
+            bundleIdentifier.length ? bundleIdentifier : @"unknown", message];
+        NSLog(@"[LiquidAssDiagnostic] %@", message);
+
+        NSString *path = jbroot(@"/var/mobile/Library/Preferences/dylv.liquidass-diagnostics.log");
+        NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+        int descriptor = open(path.fileSystemRepresentation,
+                              O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (descriptor >= 0) {
+            struct stat fileInfo;
+            if (fstat(descriptor, &fileInfo) == 0 && fileInfo.st_size > (1024 * 1024)) {
+                (void)ftruncate(descriptor, 0);
+                (void)lseek(descriptor, 0, SEEK_SET);
+            }
+            if (data.length) (void)write(descriptor, data.bytes, data.length);
+            close(descriptor);
+        }
+    }
 }
 
 BOOL LGIsSpringBoardProcess(void) {
@@ -273,10 +322,15 @@ CGFloat LGEffectiveBannerBlur(CGFloat configuredBlur) {
 }
 
 void LGReloadPreferences(void) {
+    LGDiagnosticLog(@"reload.cache.read.begin process=%@ domain=%@",
+                    LGMainBundleIdentifier(), LGPrefsDomain);
     NSDictionary<NSString *, id> *dictionary = LGCopyPreferencesDictionary();
     os_unfair_lock_lock(&sLGPrefsLock);
     sLGCachedPreferences = dictionary;
     os_unfair_lock_unlock(&sLGPrefsLock);
+    LGDiagnosticLog(@"reload.cache.read.end process=%@ keys=%lu global=%@",
+                    LGMainBundleIdentifier(), (unsigned long)dictionary.count,
+                    dictionary[@"Global.Enabled"] ?: @"unset");
 }
 
 void LGObservePreferenceChanges(dispatch_block_t block) {

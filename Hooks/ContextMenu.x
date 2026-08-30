@@ -273,6 +273,8 @@ static void styleContextMenuListSubviews(UIView *listView) {
 
 #pragma mark - hooks
 
+%group LGContextMenuHooks
+
 %hook UIVisualEffectView
 - (void)didMoveToWindow {
     %orig;
@@ -362,6 +364,11 @@ static void styleContextMenuListSubviews(UIView *listView) {
 }
 %end
 
+%end
+
 %ctor {
-    lgObservePreferenceReload(^{ restoreContextMenusForDisable(); });
+    if (!LGSystemVersionAtLeast(13, 0, 0) ||
+        !NSClassFromString(@"_UIContextMenuContainerView")) return;
+    %init(LGContextMenuHooks);
+    lgObservePreferenceReloadNamed(@"ContextMenu", ^{ restoreContextMenusForDisable(); });
 }

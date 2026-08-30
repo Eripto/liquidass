@@ -1,6 +1,7 @@
 #import "LGGlassKit.h"
 #import "LGLiveBackdropView.h"
 #import "LGHostRegistry.h"
+#import "LGSharedSupport.h"
 #import <objc/runtime.h>
 
 #pragma mark - class / ancestry helpers
@@ -67,6 +68,7 @@ void *kGlassKey = &kGlassKey;
 static NSMapTable<UIView *, LGGlassRec *> *sGlassRecs;
 static NSMapTable<UIView *, NSString *> *sSuppressed;
 static NSMutableArray<void (^)(void)> *sReloadHandlers;
+static NSMutableArray<NSString *> *sReloadHandlerNames;
 
 @interface LGMaterialHostRoute : NSObject
 @property (nonatomic, copy) NSString *prefix;
@@ -81,9 +83,17 @@ static NSMutableArray<void (^)(void)> *sReloadHandlers;
 static NSMutableArray<LGMaterialHostRoute *> *sMaterialHostRoutes;
 
 void lgObservePreferenceReload(void (^handler)(void)) {
+    lgObservePreferenceReloadNamed(@"anonymous", handler);
+}
+
+void lgObservePreferenceReloadNamed(NSString *name, void (^handler)(void)) {
     if (!handler) return;
-    if (!sReloadHandlers) sReloadHandlers = [NSMutableArray array];
+    if (!sReloadHandlers) {
+        sReloadHandlers = [NSMutableArray array];
+        sReloadHandlerNames = [NSMutableArray array];
+    }
     [sReloadHandlers addObject:[handler copy]];
+    [sReloadHandlerNames addObject:name.length ? [name copy] : @"anonymous"];
 }
 
 void lgTrackGlass(UIView *glass, NSString *prefix, UIView *material) {
@@ -221,13 +231,34 @@ static void lgReconcileInjectionsForDisable(void) {
 static void lgEnablePrefsReloadCallback(CFNotificationCenterRef c, void *o, CFStringRef n,
                                         const void *obj, CFDictionaryRef info) {
     LGLog(@"prefs Reload received; invalidating SpringBoard host-enable cache");
+    LGDiagnosticLog(@"springboard.reload.begin notification=%@",
+                    (__bridge NSString *)n);
     LGInvalidateGlassPreferenceCache();
 
     dispatch_async(dispatch_get_main_queue(), ^{
+        LGDiagnosticLog(@"springboard.reload.reconcile.begin handlers=%lu",
+                        (unsigned long)sReloadHandlers.count);
         lgReconcileInjectionsForDisable();
         LGLog(@"prefs Reload reconciled material hosts; extraHandlers=%lu",
               (unsigned long)sReloadHandlers.count);
-        for (void (^handler)(void) in [sReloadHandlers copy]) handler();
+        NSUInteger index = 0;
+        for (void (^handler)(void) in [sReloadHandlers copy]) {
+            NSString *handlerName = index < sReloadHandlerNames.count
+                ? sReloadHandlerNames[index] : @"anonymous";
+            LGDiagnosticLog(@"springboard.reload.handler.begin index=%lu name=%@",
+                            (unsigned long)index, handlerName);
+            @try {
+                handler();
+                LGDiagnosticLog(@"springboard.reload.handler.end index=%lu name=%@",
+                                (unsigned long)index, handlerName);
+            } @catch (NSException *exception) {
+                LGDiagnosticLog(@"springboard.reload.handler.exception index=%lu handler=%@ exception=%@ reason=%@",
+                                (unsigned long)index, handlerName,
+                                exception.name, exception.reason);
+            }
+            index++;
+        }
+        LGDiagnosticLog(@"springboard.reload.end");
     });
 }
 

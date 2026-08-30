@@ -6,6 +6,7 @@
 
 static const CGFloat kWidgetCornerRadius = 20.2;
 static void *kWidgetGlassKey = &kWidgetGlassKey;
+static NSHashTable<UIView *> *sLegacyWidgetHosts;
 
 @interface CHSWidget : NSObject
 @property (nonatomic, copy, readonly) NSString *extensionBundleIdentifier;
@@ -114,7 +115,64 @@ static void injectWidgetGlass(UIView *container) {
     lgTrackGlass(glass, @"Widgets", nil);
 }
 
+static UIView *legacyWidgetOverlay(UIView *platter, const char *ivarName) {
+    Ivar ivar = class_getInstanceVariable(platter.class, ivarName);
+    if (!ivar) return nil;
+    id value = object_getIvar(platter, ivar);
+    return [value isKindOfClass:UIView.class] ? value : nil;
+}
+
+static void removeLegacyWidgetGlass(UIView *platter) {
+    LGLiveBackdropView *glass = objc_getAssociatedObject(platter,
+                                                         kWidgetGlassKey);
+    [glass removeFromSuperview];
+    objc_setAssociatedObject(platter, kWidgetGlassKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    legacyWidgetOverlay(platter, "_mainOverlayView").hidden = NO;
+    legacyWidgetOverlay(platter, "_headerOverlayView").hidden = NO;
+    [sLegacyWidgetHosts removeObject:platter];
+}
+
+static void injectLegacyWidgetGlass(UIView *platter) {
+    if (!platter.window || !lgHostEnabled(@"Widgets")) {
+        removeLegacyWidgetGlass(platter);
+        return;
+    }
+    if (!sLegacyWidgetHosts)
+        sLegacyWidgetHosts = [NSHashTable weakObjectsHashTable];
+    [sLegacyWidgetHosts addObject:platter];
+
+    LGLiveBackdropView *glass = objc_getAssociatedObject(platter,
+                                                         kWidgetGlassKey);
+    if (!glass) {
+        glass = LGCreateRegisteredGlass(platter.bounds, nil, @"Widgets");
+        if (!glass) return;
+        glass.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                UIViewAutoresizingFlexibleHeight;
+        [platter insertSubview:glass atIndex:0];
+        objc_setAssociatedObject(platter, kWidgetGlassKey, glass,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        lgTrackGlass(glass, @"Widgets", nil);
+    }
+    if (glass.superview != platter) [platter insertSubview:glass atIndex:0];
+    else [platter sendSubviewToBack:glass];
+    glass.frame = platter.bounds;
+    CGFloat radius = platter.layer.cornerRadius > 0.0
+        ? platter.layer.cornerRadius : kWidgetCornerRadius;
+    glass.layer.cornerRadius = radius;
+    glass.layer.cornerCurve = kCACornerCurveContinuous;
+    glass.layer.masksToBounds = YES;
+    [glass applyFilters];
+
+    UIView *mainOverlay = legacyWidgetOverlay(platter, "_mainOverlayView");
+    UIView *headerOverlay = legacyWidgetOverlay(platter, "_headerOverlayView");
+    if (mainOverlay) lgSuppressStock(mainOverlay, @"Widgets", YES);
+    if (headerOverlay) lgSuppressStock(headerOverlay, @"Widgets", YES);
+}
+
 #pragma mark - hooks
+
+%group LGModernWidgets
 
 %hook MTMaterialView
 - (void)didMoveToWindow {
@@ -184,3 +242,41 @@ static void injectWidgetGlass(UIView *container) {
     if (host) injectWidgetGlass(host);
 }
 %end
+
+%end
+
+%group LGLegacyWidgets
+
+// iOS 12/13 Today-view widgets use WGWidgetPlatterView rather than Chrono's
+// CHUIS host and SBH widget-stack classes.
+%hook WGWidgetPlatterView
+- (void)didMoveToWindow {
+    %orig;
+    if (((UIView *)self).window) injectLegacyWidgetGlass((UIView *)self);
+    else removeLegacyWidgetGlass((UIView *)self);
+}
+- (void)layoutSubviews {
+    %orig;
+    injectLegacyWidgetGlass((UIView *)self);
+}
+%end
+
+%end
+
+
+%ctor {
+    if (LGSystemVersionAtLeast(14, 0, 0) &&
+        (NSClassFromString(@"CHUISWidgetHostViewController") ||
+         NSClassFromString(@"CHUISAvocadoHostViewController"))) {
+        %init(LGModernWidgets);
+    } else if (NSClassFromString(@"WGWidgetPlatterView")) {
+        %init(LGLegacyWidgets);
+    }
+
+    lgObservePreferenceReloadNamed(@"Widgets", ^{
+        for (UIView *host in sLegacyWidgetHosts.allObjects) {
+            if (lgHostEnabled(@"Widgets")) injectLegacyWidgetGlass(host);
+            else removeLegacyWidgetGlass(host);
+        }
+    });
+}

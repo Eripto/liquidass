@@ -28,6 +28,8 @@ static void injectAppLibraryPod(UIView *pod) {
                                        UIEdgeInsetsZero, radius, nil);
 }
 
+%group LGAppLibraryHooks
+
 %hook SBHLibraryCategoryPodBackgroundView
 - (void)didMoveToWindow {
     %orig;
@@ -48,7 +50,12 @@ static void injectAppLibraryPod(UIView *pod) {
 }
 %end
 
+%end
+
 %ctor {
+    if (!LGSystemVersionAtLeast(14, 0, 0) ||
+        !NSClassFromString(@"SBHLibraryCategoryPodBackgroundView")) return;
+    %init(LGAppLibraryHooks);
     LGRegisterMaterialHost(@"AppLibSearch", 90, ^BOOL(UIView *material) {
         return isAppLibrarySearchMaterial(material);
     }, UIEdgeInsetsZero, ^CGFloat(UIView *material) {

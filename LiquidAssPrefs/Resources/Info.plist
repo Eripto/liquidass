@@ -21,7 +21,7 @@
 	<key>DTPlatformName</key>
 	<string>iphoneos</string>
 	<key>MinimumOSVersion</key>
-	<string>3.0</string>
+	<string>12.0</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>LiquidAss needs photo library access so you can choose custom homescreen and lockscreen backdrop images.</string>
 	<key>NSPrincipalClass</key>

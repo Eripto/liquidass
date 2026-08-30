@@ -1,5 +1,6 @@
 #pragma once
 #import <UIKit/UIKit.h>
+#import "LGCompatibility.h"
 
 void LGLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 

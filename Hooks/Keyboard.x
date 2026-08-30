@@ -1095,7 +1095,7 @@ static void LGUpdateKeyboardVisualEffect(UIView *effectView) {
           NSClassFromString(@"UIKBKeyView") != Nil,
           NSClassFromString(@"UIKBBackdropView") != Nil,
           NSClassFromString(@"UIKBVisualEffectView") != Nil);
-    lgObservePreferenceReload(^{
+    lgObservePreferenceReloadNamed(@"Keyboard", ^{
 
         [gLGKeyboardRegeneratedKeyplanes removeAllObjects];
         [gLGKeyboardScheduledKeyplanes removeAllObjects];

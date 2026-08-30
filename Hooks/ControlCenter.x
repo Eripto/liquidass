@@ -766,7 +766,7 @@ static void roundModuleContainer(UIView *module) {
 %end
 
 %ctor {
-    lgObservePreferenceReload(^{
+    lgObservePreferenceReloadNamed(@"ControlCenter", ^{
         if (!lgHostEnabled(@"ControlCenter")) ccRestoreAllRoundedViews();
         for (UIView *root in ccOverlayRoots().allObjects) {
             ccApplyFullscreenBackdropStyle(root);

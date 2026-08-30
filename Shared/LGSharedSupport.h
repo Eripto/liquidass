@@ -1,6 +1,7 @@
 #pragma once
 
 #import <UIKit/UIKit.h>
+#import "LGCompatibility.h"
 
 #ifndef LIQUIDASS_DEBUG
 #define LIQUIDASS_DEBUG 0
@@ -67,6 +68,7 @@ void LGReloadPreferences(void);
 void LGObservePreferenceChanges(dispatch_block_t block);
 
 void LGLog(NSString *format, ...);
+void LGDiagnosticLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 
 CGColorSpaceRef LGSharedRGBColorSpace(void);
 UIImage *LGNormalizedImageForUpload(UIImage *image);

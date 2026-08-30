@@ -70,6 +70,10 @@ static void LGDismissOverlayPanel(UIView *overlay, UIView *panel);
 @interface LGLiveGlassBarButton : UIView
 - (instancetype)initWithTarget:(id)target action:(SEL)action symbolName:(NSString *)symbolName;
 - (void)setPrimaryMenu:(UIMenu *)menu;
+- (void)configureLegacyMenuTarget:(id)target
+                       applyAction:(SEL)applyAction
+                       resetAction:(SEL)resetAction
+                         resetTitle:(NSString *)resetTitle;
 - (void)refreshGlass;
 @end
 
@@ -79,6 +83,10 @@ static void LGDismissOverlayPanel(UIView *overlay, UIView *panel);
     UIButton *_button;
     UIImageView *_glyph;
     UIViewPropertyAnimator *_pressAnimator;
+    __weak id _legacyMenuTarget;
+    SEL _legacyApplyAction;
+    SEL _legacyResetAction;
+    NSString *_legacyResetTitle;
 }
 
 - (instancetype)initWithTarget:(id)target action:(SEL)action symbolName:(NSString *)symbolName {
@@ -125,8 +133,65 @@ static void LGDismissOverlayPanel(UIView *overlay, UIView *panel);
 
 - (CGSize)intrinsicContentSize { return CGSizeMake(44.0, 44.0); }
 - (void)setPrimaryMenu:(UIMenu *)menu {
-    _button.menu = menu;
-    _button.showsMenuAsPrimaryAction = YES;
+    SEL menuSelector = NSSelectorFromString(@"setMenu:");
+    SEL primarySelector = NSSelectorFromString(@"setShowsMenuAsPrimaryAction:");
+    if (![_button respondsToSelector:menuSelector] ||
+        ![_button respondsToSelector:primarySelector]) return;
+    ((void (*)(id, SEL, id))objc_msgSend)(_button, menuSelector, menu);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(_button, primarySelector, YES);
+}
+- (void)configureLegacyMenuTarget:(id)target
+                       applyAction:(SEL)applyAction
+                       resetAction:(SEL)resetAction
+                         resetTitle:(NSString *)resetTitle {
+    _legacyMenuTarget = target;
+    _legacyApplyAction = applyAction;
+    _legacyResetAction = resetAction;
+    _legacyResetTitle = [resetTitle copy];
+    [_button addTarget:self action:@selector(presentLegacyMenu:)
+      forControlEvents:UIControlEventTouchUpInside];
+}
+- (void)presentLegacyMenu:(id)sender {
+    (void)sender;
+    UIViewController *controller = nil;
+    for (UIResponder *responder = self; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:UIViewController.class]) {
+            controller = (UIViewController *)responder;
+            break;
+        }
+    }
+    if (!controller) return;
+    UIAlertController *sheet = [UIAlertController
+        alertControllerWithTitle:nil message:nil
+                 preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak id weakTarget = _legacyMenuTarget;
+    SEL applyAction = _legacyApplyAction;
+    SEL resetAction = _legacyResetAction;
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.apply")
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        id target = weakTarget;
+        if (target && applyAction && [target respondsToSelector:applyAction])
+            ((void (*)(id, SEL))objc_msgSend)(target, applyAction);
+    }]];
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:(_legacyResetTitle.length ? _legacyResetTitle
+                                                  : LGLocalized(@"prefs.button.reset"))
+                  style:UIAlertActionStyleDestructive
+                handler:^(__unused UIAlertAction *action) {
+        id target = weakTarget;
+        if (target && resetAction && [target respondsToSelector:resetAction])
+            ((void (*)(id, SEL))objc_msgSend)(target, resetAction);
+    }]];
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.cancel")
+                  style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.sourceView = self;
+        sheet.popoverPresentationController.sourceRect = self.bounds;
+    }
+    [controller presentViewController:sheet animated:YES completion:nil];
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
@@ -176,6 +241,8 @@ static void LGDismissOverlayPanel(UIView *overlay, UIView *panel);
 @end
 
 static UINavigationBarAppearance *LGMakePrefsTransparentNavigationAppearance(void) {
+    if (!LGSystemVersionAtLeast(13, 0, 0) ||
+        !NSClassFromString(@"UINavigationBarAppearance")) return nil;
     UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
     [appearance configureWithTransparentBackground];
     appearance.backgroundColor = UIColor.clearColor;
@@ -184,7 +251,12 @@ static UINavigationBarAppearance *LGMakePrefsTransparentNavigationAppearance(voi
 }
 
 void LGApplyNavigationBarAppearance(UINavigationItem *navigationItem) {
+    if (!LGSystemVersionAtLeast(13, 0, 0) ||
+        ![navigationItem respondsToSelector:NSSelectorFromString(@"setStandardAppearance:")]) {
+        return;
+    }
     UINavigationBarAppearance *appearance = LGMakePrefsTransparentNavigationAppearance();
+    if (!appearance) return;
     navigationItem.standardAppearance = appearance;
     navigationItem.scrollEdgeAppearance = appearance;
     navigationItem.compactAppearance = appearance;
@@ -412,8 +484,11 @@ UIBarButtonItem *LGMakeCircularBackItem(id target, SEL action) {
 }
 
 UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL applyAction, SEL resetAction, NSString *resetTitle) {
-    __weak id weakTarget = target;
-    UIAction *apply = [UIAction actionWithTitle:LGLocalized(@"prefs.button.apply")
+    LGLiveGlassBarButton *button = [[LGLiveGlassBarButton alloc]
+        initWithTarget:nil action:nil symbolName:@"line.3.horizontal"];
+    if (LGCanUseModernMenus()) {
+        __weak id weakTarget = target;
+        UIAction *apply = [UIAction actionWithTitle:LGLocalized(@"prefs.button.apply")
                                            image:[UIImage systemImageNamed:@"checkmark"]
                                       identifier:nil
                                          handler:^(__kindof UIAction *action) {
@@ -423,7 +498,7 @@ UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL applyAction, SEL resetAct
             ((void (*)(id, SEL))objc_msgSend)(strongTarget, applyAction);
         }
     }];
-    UIAction *reset = [UIAction actionWithTitle:(resetTitle.length ? resetTitle : LGLocalized(@"prefs.button.reset"))
+        UIAction *reset = [UIAction actionWithTitle:(resetTitle.length ? resetTitle : LGLocalized(@"prefs.button.reset"))
                                            image:[UIImage systemImageNamed:@"arrow.counterclockwise"]
                                       identifier:nil
                                          handler:^(__kindof UIAction *action) {
@@ -433,10 +508,14 @@ UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL applyAction, SEL resetAct
             ((void (*)(id, SEL))objc_msgSend)(strongTarget, resetAction);
         }
     }];
-    UIMenu *menu = [UIMenu menuWithTitle:@"" children:@[ apply, reset ]];
-    LGLiveGlassBarButton *button = [[LGLiveGlassBarButton alloc]
-        initWithTarget:nil action:nil symbolName:@"line.3.horizontal"];
-    [button setPrimaryMenu:menu];
+        UIMenu *menu = [UIMenu menuWithTitle:@"" children:@[ apply, reset ]];
+        [button setPrimaryMenu:menu];
+    } else {
+        [button configureLegacyMenuTarget:target
+                              applyAction:applyAction
+                              resetAction:resetAction
+                                resetTitle:resetTitle];
+    }
     button.accessibilityLabel = LGLocalized(@"prefs.button.more");
     UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithCustomView:button];
     item.accessibilityLabel = button.accessibilityLabel;
@@ -605,8 +684,8 @@ void LGPresentTextInputSheet(UIViewController *controller,
     dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [overlay addSubview:dismissControl];
 
-    UIVisualEffectView *panel =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
+    UIVisualEffectView *panel = [[UIVisualEffectView alloc]
+        initWithEffect:LGMaterialBlurEffectForTraitCollection(controller.traitCollection)];
     panel.translatesAutoresizingMaskIntoConstraints = NO;
     panel.layer.cornerRadius = 32.0;
     panel.layer.cornerCurve = kCACornerCurveContinuous;
@@ -636,7 +715,8 @@ void LGPresentTextInputSheet(UIViewController *controller,
     UITextField *textField = [[UITextField alloc] initWithFrame:CGRectZero];
     textField.translatesAutoresizingMaskIntoConstraints = NO;
     textField.backgroundColor = UIColor.clearColor;
-    textField.font = monospaced ? [UIFont monospacedSystemFontOfSize:15.0 weight:UIFontWeightMedium] : [UIFont systemFontOfSize:17.0 weight:UIFontWeightMedium];
+    textField.font = monospaced ? LGMonospacedSystemFont(15.0, UIFontWeightMedium)
+                                : [UIFont systemFontOfSize:17.0 weight:UIFontWeightMedium];
     textField.textColor = [UIColor labelColor];
     textField.text = initialText ?: @"";
     textField.placeholder = placeholder ?: @"";
@@ -777,22 +857,22 @@ void LGPresentTextInputSheet(UIViewController *controller,
         } completion:nil];
     }];
 
-    [dismissControl addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
+    LGAddControlAction(dismissControl, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
         [weakTextField resignFirstResponder];
         cleanupObservers();
         LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-    [cancelButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
+    });
+    LGAddControlAction(cancelButton, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
         [weakTextField resignFirstResponder];
         cleanupObservers();
         LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
-    [applyButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
+    });
+    LGAddControlAction(applyButton, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
         [weakTextField resignFirstResponder];
         cleanupObservers();
         if (applyBlock) applyBlock(textField.text ?: @"");
         LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
+    });
 
     [controller.view addSubview:overlay];
     [UIView animateWithDuration:0.22 animations:^{
@@ -823,8 +903,8 @@ void LGPresentMultilineTextInputSheet(UIViewController *controller,
     dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [overlay addSubview:dismissControl];
 
-    UIVisualEffectView *panel =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
+    UIVisualEffectView *panel = [[UIVisualEffectView alloc]
+        initWithEffect:LGMaterialBlurEffectForTraitCollection(controller.traitCollection)];
     panel.translatesAutoresizingMaskIntoConstraints = NO;
     panel.layer.cornerRadius = 32.0;
     panel.layer.cornerCurve = kCACornerCurveContinuous;
@@ -854,7 +934,7 @@ void LGPresentMultilineTextInputSheet(UIViewController *controller,
     UITextView *textView = [[UITextView alloc] initWithFrame:CGRectZero];
     textView.translatesAutoresizingMaskIntoConstraints = NO;
     textView.backgroundColor = UIColor.clearColor;
-    textView.font = [UIFont monospacedSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+    textView.font = LGMonospacedSystemFont(13.0, UIFontWeightMedium);
     textView.textColor = [UIColor labelColor];
     textView.textContainerInset = UIEdgeInsetsMake(12.0, 10.0, 12.0, 10.0);
     textView.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -869,7 +949,7 @@ void LGPresentMultilineTextInputSheet(UIViewController *controller,
     UILabel *placeholderLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     placeholderLabel.translatesAutoresizingMaskIntoConstraints = NO;
     placeholderLabel.text = placeholder.length ? placeholder : @"";
-    placeholderLabel.font = [UIFont monospacedSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+    placeholderLabel.font = LGMonospacedSystemFont(13.0, UIFontWeightMedium);
     placeholderLabel.textColor = [UIColor tertiaryLabelColor];
     placeholderLabel.numberOfLines = 0;
     placeholderLabel.userInteractionEnabled = NO;
@@ -1025,24 +1105,24 @@ void LGPresentMultilineTextInputSheet(UIViewController *controller,
             [strongOverlay layoutIfNeeded];
         } completion:nil];
     }];
-    [dismissControl addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
+    LGAddControlAction(dismissControl, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
         [weakTextView resignFirstResponder];
         cleanupObservers();
         LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
+    });
 
-    [cancelButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
+    LGAddControlAction(cancelButton, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
         [weakTextView resignFirstResponder];
         cleanupObservers();
         LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
+    });
 
-    [applyButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull _) {
+    LGAddControlAction(applyButton, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
         [weakTextView resignFirstResponder];
         cleanupObservers();
         if (applyBlock) applyBlock(textView.text ?: @"");
         LGDismissOverlayPanel(overlay, panel);
-    }] forControlEvents:UIControlEventTouchUpInside];
+    });
 
     [controller.view addSubview:overlay];
     [UIView animateWithDuration:0.22 animations:^{
@@ -1283,12 +1363,11 @@ UIView *LGMakeDonationRow(UIViewController *controller,
     button.contentVerticalAlignment = UIControlContentVerticalAlignmentFill;
     button.contentEdgeInsets = UIEdgeInsetsZero;
     __weak UIViewController *weakController = controller;
-    [button addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        (void)action;
+    LGAddControlAction(button, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
         if (!address.length) return;
         UIPasteboard.generalPasteboard.string = address;
         LGPresentInfoSheet(weakController, @"Copied", @"Wallet address copied to clipboard.");
-    }] forControlEvents:UIControlEventTouchUpInside];
+    });
 
     UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
     body.userInteractionEnabled = NO;
@@ -1308,7 +1387,7 @@ UIView *LGMakeDonationRow(UIViewController *controller,
 
     UILabel *nameLabel = LGMakeAboutMarkdownLabel(name, [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold], UIColor.labelColor);
     UILabel *networkLabel = LGMakeAboutMarkdownLabel(network, [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium], UIColor.secondaryLabelColor);
-    UILabel *addressLabel = LGMakeAboutMarkdownLabel(address, [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightRegular], UIColor.tertiaryLabelColor);
+    UILabel *addressLabel = LGMakeAboutMarkdownLabel(address, LGMonospacedSystemFont(12.0, UIFontWeightRegular), UIColor.tertiaryLabelColor);
     addressLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
     addressLabel.numberOfLines = 1;
 

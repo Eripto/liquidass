@@ -1628,6 +1628,12 @@ static void tweakInit(void) {
 #endif
 
     NSOperatingSystemVersion osv = NSProcessInfo.processInfo.operatingSystemVersion;
+    if (osv.majorVersion < 13) {
+        lglog("LiquidGlass custom QuartzCore renderer is disabled on iOS %ld; "
+              "client views use the native CABackdropLayer fallback",
+              (long)osv.majorVersion);
+        return;
+    }
     g_legacyRenderABI = osv.majorVersion <= 14;
     lglog("===== LiquidGlass (backboardd) on iOS %ld.%ld.%ld =====",
           (long)osv.majorVersion, (long)osv.minorVersion, (long)osv.patchVersion);

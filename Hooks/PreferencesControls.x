@@ -7,6 +7,7 @@
 #import "../LiquidAssPrefs/LGPrefsLiquidSwitch.h"
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
+#import "../Shared/LGSharedSupport.h"
 #import "../Shared/LGLiquidMotion.h"
 
 static void *kLGSettingsSwitchOverlayKey = &kLGSettingsSwitchOverlayKey;
@@ -172,20 +173,40 @@ static void LGRecordControlsDiagnostic(LGControlsDiagnosticKind kind,
 @interface LGSettingsLowBlurView : UIView
 @end
 
-@implementation LGSettingsLowBlurView
-+ (Class)layerClass { return NSClassFromString(@"CABackdropLayer") ?: CALayer.class; }
+@implementation LGSettingsLowBlurView {
+    UIVisualEffectView *_legacyPreferencesBlurView;
+}
++ (Class)layerClass {
+    if (LGIsIOS12() && LGIsPreferencesProcess()) return CALayer.class;
+    return NSClassFromString(@"CABackdropLayer") ?: CALayer.class;
+}
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (!self) return nil;
     self.userInteractionEnabled = NO;
     self.backgroundColor = UIColor.clearColor;
     self.opaque = NO;
+    if (LGIsIOS12() && LGIsPreferencesProcess()) {
+        _legacyPreferencesBlurView = [[UIVisualEffectView alloc]
+            initWithEffect:LGMaterialBlurEffectForTraitCollection(self.traitCollection)];
+        _legacyPreferencesBlurView.userInteractionEnabled = NO;
+        _legacyPreferencesBlurView.frame = self.bounds;
+        _legacyPreferencesBlurView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                                       UIViewAutoresizingFlexibleHeight;
+        [self addSubview:_legacyPreferencesBlurView];
+        LGDiagnosticLog(@"settings-chrome.backdrop public-iOS12-fallback");
+    }
     [self lg_configure];
     return self;
 }
 - (void)didMoveToWindow { [super didMoveToWindow]; [self lg_configure]; }
-- (void)layoutSubviews { [super layoutSubviews]; [self lg_configure]; }
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    _legacyPreferencesBlurView.frame = self.bounds;
+    [self lg_configure];
+}
 - (void)lg_configure {
+    if (_legacyPreferencesBlurView) return;
     Class backdrop = NSClassFromString(@"CABackdropLayer");
     if (!backdrop || ![self.layer isKindOfClass:backdrop]) return;
     @try {
@@ -403,6 +424,20 @@ static void LGRefreshGlobalControlEnablement(void) {
         LGGlobalControlPreferenceEnabled(@"GlobalControls.Sliders.Enabled", NO);
     gLGSegmentControlsEnabled = allowed &&
         LGGlobalControlPreferenceEnabled(@"GlobalControls.Segmented.Enabled", NO);
+
+    // The liquid control overlays expose private CABackdropLayer contents as
+    // soon as their thumb begins animating. That render-server path is not
+    // stable in iOS 12 Preferences, so retain functional native controls there.
+    // The Settings chrome itself still receives the public blur fallback.
+    if (LGIsIOS12() && LGIsPreferencesProcess()) {
+        gLGSwitchControlsEnabled = NO;
+        gLGSliderControlsEnabled = NO;
+        gLGSegmentControlsEnabled = NO;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            LGDiagnosticLog(@"settings-controls.compat iOS12 native controls + public blur chrome");
+        });
+    }
 }
 
 static BOOL LGInsideLiquidAssPrefs(UIView *view) {
@@ -598,13 +633,13 @@ static void LGInstallSettingsSwitch(UISwitch *owner) {
         overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth |
                                    UIViewAutoresizingFlexibleHeight;
         __weak UISwitch *weakOwner = owner;
-        [overlay addAction:[UIAction actionWithHandler:^(UIAction *action) {
+        LGAddControlAction(overlay, UIControlEventValueChanged, ^(__kindof UIControl *control) {
             UISwitch *strongOwner = weakOwner;
-            LGPrefsLiquidSwitch *sender = (LGPrefsLiquidSwitch *)action.sender;
+            LGPrefsLiquidSwitch *sender = (LGPrefsLiquidSwitch *)control;
             if (!strongOwner) return;
             [strongOwner setOn:sender.isOn animated:NO];
             [strongOwner sendActionsForControlEvents:UIControlEventValueChanged];
-        }] forControlEvents:UIControlEventValueChanged];
+        });
         objc_setAssociatedObject(owner, kLGSettingsSwitchOverlayKey, overlay,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [owner addSubview:overlay];
@@ -635,13 +670,13 @@ static void LGInstallSettingsSlider(UISlider *owner) {
     if (!overlay) {
         overlay = [[LGPrefsLiquidSlider alloc] initWithFrame:CGRectZero];
         __weak UISlider *weakOwner = owner;
-        [overlay addAction:[UIAction actionWithHandler:^(UIAction *action) {
+        LGAddControlAction(overlay, UIControlEventValueChanged, ^(__kindof UIControl *control) {
             UISlider *strongOwner = weakOwner;
-            LGPrefsLiquidSlider *sender = (LGPrefsLiquidSlider *)action.sender;
+            LGPrefsLiquidSlider *sender = (LGPrefsLiquidSlider *)control;
             if (!strongOwner) return;
             [strongOwner setValue:sender.value animated:NO];
             [strongOwner sendActionsForControlEvents:UIControlEventValueChanged];
-        }] forControlEvents:UIControlEventValueChanged];
+        });
         objc_setAssociatedObject(owner, kLGSettingsSliderOverlayKey, overlay,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
@@ -1508,7 +1543,7 @@ static void LGSettingsSuppressModernSwitchElementIfNeeded(UIView *element) {
     if ([bundleIdentifier isEqualToString:@"com.apple.Preferences"])
         %init(LiquidAssPreferencesChrome);
 
-    lgObservePreferenceReload(^{
+    lgObservePreferenceReloadNamed(@"PreferencesControls", ^{
         LGRefreshGlobalControlEnablement();
         LGLog(@"global controls reload bundle=%s enabled=%d",
                    bundleIdentifier.UTF8String, gLGSettingsControlsEnabled);

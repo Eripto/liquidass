@@ -3,6 +3,8 @@
 #import "LGPrefsSurfaceCatalog.h"
 #import "LGPrefsDataSupport.h"
 #import "LGPrefsUIHelpers.h"
+#import "../Shared/LGCompatibility.h"
+#import "../Shared/LGSharedSupport.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
@@ -256,12 +258,17 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
     toggle.onTintColor = [UIColor systemBlueColor];
     toggle.on = [self isGlobalEnabled];
     self.lg_globalToggle = toggle;
-    [toggle addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        UISwitch *sender = (UISwitch *)action.sender;
+    LGAddControlAction(toggle, UIControlEventValueChanged, ^(__kindof UIControl *control) {
+        UISwitch *sender = (UISwitch *)control;
+        LGDiagnosticLog(@"prefs.toggle.begin scope=root key=Global.Enabled value=%d class=%@",
+                        sender.isOn, NSStringFromClass(sender.class));
         LGWritePreferenceAndMaybeRequireRespring(@"Global.Enabled", @(sender.isOn));
+        LGDiagnosticLog(@"prefs.toggle.after-stage key=Global.Enabled");
         [self updateMenuAvailability];
+        LGDiagnosticLog(@"prefs.toggle.after-menu key=Global.Enabled");
         [self updateRespringBarAnimated:YES];
-    }] forControlEvents:UIControlEventValueChanged];
+        LGDiagnosticLog(@"prefs.toggle.end scope=root key=Global.Enabled value=%d", sender.isOn);
+    });
 
     UIView *headerRow = [[UIView alloc] initWithFrame:CGRectZero];
     headerRow.translatesAutoresizingMaskIntoConstraints = NO;

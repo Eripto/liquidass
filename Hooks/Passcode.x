@@ -25,18 +25,37 @@ static void *kPCBgAlphaKey        = &kPCBgAlphaKey;
 static void *kPCBgOpaqueKey       = &kPCBgOpaqueKey;
 
 static BOOL sPasscodeVisible = NO;
+static void updatePasscodeVisible(BOOL visible);
 
 #pragma mark - fullscreen backdrop: remove the blur, add a subtle dark tint
 
 static BOOL isPasscodeBackgroundMaterial(UIView *mat) {
-    return isExactClass(mat, @"MTMaterialView") &&
-           isExactClass(mat.superview, @"CSPasscodeBackgroundView");
+    if (!isExactClass(mat, @"MTMaterialView")) return NO;
+    if (isExactClass(mat.superview, @"CSPasscodeBackgroundView")) return YES;
+    for (UIView *view = mat.superview; view; view = view.superview) {
+        NSString *name = NSStringFromClass(view.class);
+        if ([name containsString:@"SBDashBoardPasscode"] ||
+            [name containsString:@"SBUIPasscodeLock"] ||
+            [name containsString:@"SBPasscodeView"]) return YES;
+    }
+    return NO;
+}
+
+static UIView *passcodeBackgroundHost(UIView *material) {
+    for (UIView *view = material.superview; view; view = view.superview) {
+        NSString *name = NSStringFromClass(view.class);
+        if ([name isEqualToString:@"CSPasscodeBackgroundView"] ||
+            [name containsString:@"SBDashBoardPasscode"] ||
+            [name containsString:@"SBUIPasscodeLock"] ||
+            [name containsString:@"SBPasscodeView"]) return view;
+    }
+    return material.superview;
 }
 
 static void handlePasscodeBackgroundMaterial(UIView *mat) {
     if (!isPasscodeBackgroundMaterial(mat)) return;
     if (!lgHostEnabled(@"Passcode")) return;
-    UIView *host = mat.superview;
+    UIView *host = passcodeBackgroundHost(mat);
     UIView *tint = objc_getAssociatedObject(host, kPCBgTintKey);
     if (!tint) {
         tint = [[UIView alloc] initWithFrame:host.bounds];
@@ -51,6 +70,8 @@ static void handlePasscodeBackgroundMaterial(UIView *mat) {
 
     lgSuppressStock(mat, @"Passcode", YES);
     lgTrackGlass(tint, @"Passcode", nil);
+    updatePasscodeVisible(host.window && !host.hidden && host.alpha > 0.01 &&
+                          host.layer.opacity > 0.01f);
 }
 
 #pragma mark - button host discovery + glass
@@ -262,6 +283,7 @@ static void setPasscodeButtonHighlighted(UIView *button, BOOL highlighted) {
 static BOOL isPasscodeSuppressibleRoot(UIView *v) {
     NSString *c = NSStringFromClass(v.class);
     return [c isEqualToString:@"CSQuickActionsButton"]
+        || [c isEqualToString:@"SBDashBoardQuickActionsButton"]
         || [c isEqualToString:@"CSProminentTimeView"]
         || [c isEqualToString:@"SBFLockScreenDateView"]
         || [c isEqualToString:@"PLPlatterView"]
@@ -325,9 +347,13 @@ static BOOL passcodeBackgroundVisible(UIView *v) {
 }
 
 static void restorePasscodeSubtree(UIView *view) {
-    if ([NSStringFromClass(view.class) isEqualToString:@"SBPasscodeNumberPadButton"])
+    NSString *className = NSStringFromClass(view.class);
+    if ([className containsString:@"PasscodeNumberPadButton"] ||
+        [className containsString:@"PasscodeLockNumberPadButton"])
         resetPasscodeButton(view);
-    if ([NSStringFromClass(view.class) isEqualToString:@"CSPasscodeBackgroundView"]) {
+    if ([className isEqualToString:@"CSPasscodeBackgroundView"] ||
+        [className containsString:@"SBDashBoardPasscode"] ||
+        [className containsString:@"SBUIPasscodeLock"]) {
         UIView *tint = objc_getAssociatedObject(view, kPCBgTintKey);
         [tint removeFromSuperview];
         objc_setAssociatedObject(view, kPCBgTintKey, nil, OBJC_ASSOCIATION_ASSIGN);
@@ -343,6 +369,8 @@ static void restorePasscodeForDisable(void) {
 }
 
 #pragma mark - hooks
+
+%group LGPasscodeHooks
 
 %hook MTMaterialView
 - (void)didMoveToWindow {
@@ -379,6 +407,35 @@ static void restorePasscodeForDisable(void) {
 - (void)setHidden:(BOOL)hidden { %orig; updatePasscodeVisible(passcodeBackgroundVisible((UIView *)self)); }
 %end
 
+%end
+
+
+%group LGLegacyPasscode
+
+%hook SBUIPasscodeLockNumberPad
+- (void)layoutSubviews {
+    %orig;
+    NSMutableArray<UIView *> *pending =
+        [NSMutableArray arrayWithArray:((UIView *)self).subviews];
+    while (pending.count) {
+        UIView *candidate = pending.lastObject;
+        [pending removeLastObject];
+        NSString *name = NSStringFromClass(candidate.class);
+        if (([name containsString:@"NumberPadButton"] ||
+             [name containsString:@"PasscodeButton"]) &&
+            pcButtonHost(candidate)) {
+            injectPasscodeButton(candidate);
+        }
+        [pending addObjectsFromArray:candidate.subviews];
+    }
+}
+%end
+
+%end
+
 %ctor {
-    lgObservePreferenceReload(^{ restorePasscodeForDisable(); });
+    %init(LGPasscodeHooks);
+    if (NSClassFromString(@"SBUIPasscodeLockNumberPad"))
+        %init(LGLegacyPasscode);
+    lgObservePreferenceReloadNamed(@"Passcode", ^{ restorePasscodeForDisable(); });
 }

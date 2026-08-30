@@ -8,8 +8,8 @@
 #import "../Shared/LGSharedSupport.h"
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
-#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #ifndef LG_PACKAGE_VERSION
 #define LG_PACKAGE_VERSION @""
@@ -316,7 +316,9 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 
 - (void)importPreferences {
     UIDocumentPickerViewController *picker =
-        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON]];
+        [[UIDocumentPickerViewController alloc]
+            initWithDocumentTypes:@[@"public.json"]
+                         inMode:UIDocumentPickerModeImport];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
     [self presentViewController:picker animated:YES completion:nil];
@@ -1015,8 +1017,12 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     toggle.on = [LGReadPreference(item[@"key"], item[@"default"]) boolValue];
     objc_setAssociatedObject(toggle, kLGDefaultValueKey, item[@"default"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(toggle, kLGPreferenceKeyKey, item[@"key"], OBJC_ASSOCIATION_COPY_NONATOMIC);
-    [toggle addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        UISwitch *sender = (UISwitch *)action.sender;
+    LGAddControlAction(toggle, UIControlEventValueChanged, ^(__kindof UIControl *control) {
+        UISwitch *sender = (UISwitch *)control;
+        NSString *preferenceKey = item[@"key"] ?: @"(missing)";
+        LGDiagnosticLog(@"prefs.toggle.begin scope=surface screen=%@ key=%@ value=%d class=%@",
+                        self->_screenIdentifier ?: @"unknown", preferenceKey,
+                        sender.isOn, NSStringFromClass(sender.class));
         if ([item[@"key"] isEqualToString:@"AppIcons.Enabled"] && sender.isOn) {
             __weak UISwitch *weakSender = sender;
             UIAlertController *alert = [UIAlertController
@@ -1063,7 +1069,9 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
         if ([item[@"controls_following_panel"] boolValue]) {
             [self updatePanelsControlledByEnabledKey:item[@"key"] enabled:sender.isOn animated:YES];
         }
-    }] forControlEvents:UIControlEventValueChanged];
+        LGDiagnosticLog(@"prefs.toggle.end scope=surface screen=%@ key=%@ value=%d",
+                        self->_screenIdentifier ?: @"unknown", preferenceKey, sender.isOn);
+    });
     objc_setAssociatedObject(toggle, kLGControlledByEnabledKey, item[@"controls_following_panel"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return toggle;
 }
@@ -1189,6 +1197,45 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     return [UIMenu menuWithTitle:@"" children:actions];
 }
 
+- (void)presentLegacyChoiceMenu:(UIButton *)menuButton {
+    NSDictionary *item = objc_getAssociatedObject(menuButton, kLGPanelItemKey);
+    if (!item) return;
+    UIAlertController *sheet = [UIAlertController
+        alertControllerWithTitle:item[@"title"] message:item[@"subtitle"]
+                 preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    __weak UIButton *weakButton = menuButton;
+    for (NSDictionary *choice in item[@"choices"]) {
+        NSString *value = choice[@"value"];
+        NSString *title = choice[@"title"];
+        if (!value.length || !title.length) continue;
+        [sheet addAction:[UIAlertAction
+            actionWithTitle:title style:UIAlertActionStyleDefault
+            handler:^(__unused UIAlertAction *action) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            UIButton *button = weakButton;
+            if (!strongSelf || !button) return;
+            if ([item[@"key"] isEqualToString:kLGPrefsLanguageKey]) {
+                LGSetCurrentPrefsLanguageCode(value);
+            } else {
+                LGWritePreferenceObject(item[@"key"], value);
+            }
+            [button setTitle:title forState:UIControlStateNormal];
+            if ([item[@"reload_on_change"] boolValue])
+                [strongSelf updateVisibleValueControlledItemsAnimated:YES];
+            [strongSelf updateRespringBarAnimated:YES];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.cancel")
+                  style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.sourceView = menuButton;
+        sheet.popoverPresentationController.sourceRect = menuButton.bounds;
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
 - (UIView *)menuControlBodyForItem:(NSDictionary *)item titleLabel:(UILabel *)titleLabel {
     UIView *body = [[UIView alloc] initWithFrame:CGRectZero];
     UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectZero];
@@ -1199,7 +1246,11 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 
     UIButton *menuButton = [UIButton buttonWithType:UIButtonTypeSystem];
     menuButton.translatesAutoresizingMaskIntoConstraints = NO;
-    menuButton.showsMenuAsPrimaryAction = YES;
+    BOOL modernMenu = LGCanUseModernMenus();
+    if (modernMenu) {
+        SEL selector = NSSelectorFromString(@"setShowsMenuAsPrimaryAction:");
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(menuButton, selector, YES);
+    }
     menuButton.tintColor = _accentColor;
     menuButton.titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
     #pragma clang diagnostic push
@@ -1252,10 +1303,17 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
         }
     };
 
-    menuButton.menu = [self menuForItem:item
-                           currentValue:currentValue
-                             menuButton:menuButton
-                            titleUpdate:applyMenuSelectionTitle];
+    if (modernMenu) {
+        menuButton.menu = [self menuForItem:item
+                               currentValue:currentValue
+                                 menuButton:menuButton
+                                titleUpdate:applyMenuSelectionTitle];
+    } else {
+        objc_setAssociatedObject(menuButton, kLGPanelItemKey, item,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [menuButton addTarget:self action:@selector(presentLegacyChoiceMenu:)
+              forControlEvents:UIControlEventTouchUpInside];
+    }
 
     UIView *headerRow = [self controlHeaderRowWithTitleLabel:titleLabel
                                               accessoryViews:@[menuButton]
@@ -1333,17 +1391,17 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
                                                      spacing:8.0];
 
     NSString *preferenceKey = item[@"key"];
-    [slider addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        UISlider *sender = (UISlider *)action.sender;
+    LGAddControlAction(slider, UIControlEventValueChanged, ^(__kindof UIControl *control) {
+        UISlider *sender = (UISlider *)control;
         valueLabel.text = LGFormatSliderValue(sender.value, decimals);
-    }] forControlEvents:UIControlEventValueChanged];
+    });
     UIControlEvents commitEvents = UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel;
-    [slider addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-        UISlider *sender = (UISlider *)action.sender;
+    LGAddControlAction(slider, commitEvents, ^(__kindof UIControl *control) {
+        UISlider *sender = (UISlider *)control;
         CGFloat value = sender.value;
         valueLabel.text = LGFormatSliderValue(value, decimals);
         LGWritePreference(preferenceKey, @(value));
-    }] forControlEvents:commitEvents];
+    });
 
     [stack addArrangedSubview:headerRow];
     [stack addArrangedSubview:slider];
@@ -1367,17 +1425,53 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
     NSString *key = item[@"key"];
     NSString *fallback = item[@"default"] ?: @"#FFFFFF00";
     id stored = LGReadPreferenceObject(key, fallback);
-    UIColorWell *well = [[UIColorWell alloc] initWithFrame:CGRectZero];
-    well.selectedColor = LGColorFromRGBAHex([stored isKindOfClass:NSString.class] ? stored : fallback);
-    well.supportsAlpha = YES;
-    [well.widthAnchor constraintEqualToConstant:32.0].active = YES;
-    [well.heightAnchor constraintEqualToConstant:32.0].active = YES;
-    [well addAction:[UIAction actionWithHandler:^(__kindof UIAction *action) {
-        UIColorWell *sender = (UIColorWell *)action.sender;
-        LGWritePreferenceObject(key, LGRGBAHexFromColor(sender.selectedColor));
-    }] forControlEvents:UIControlEventValueChanged];
+    NSString *storedHex = [stored isKindOfClass:NSString.class] ? stored : fallback;
+    UIControl *colorControl = nil;
+    Class wellClass = NSClassFromString(@"UIColorWell");
+    if (LGSystemVersionAtLeast(14, 0, 0) && wellClass) {
+        colorControl = [[wellClass alloc] initWithFrame:CGRectZero];
+        SEL setColor = NSSelectorFromString(@"setSelectedColor:");
+        SEL setAlpha = NSSelectorFromString(@"setSupportsAlpha:");
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            colorControl, setColor, LGColorFromRGBAHex(storedHex));
+        if ([colorControl respondsToSelector:setAlpha])
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(colorControl, setAlpha, YES);
+        LGAddControlAction(colorControl, UIControlEventValueChanged,
+                           ^(__kindof UIControl *sender) {
+            SEL getColor = NSSelectorFromString(@"selectedColor");
+            UIColor *color = [sender respondsToSelector:getColor]
+                ? ((id (*)(id, SEL))objc_msgSend)(sender, getColor) : nil;
+            if (color) LGWritePreferenceObject(key, LGRGBAHexFromColor(color));
+        });
+    } else {
+        UIButton *legacyButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        legacyButton.backgroundColor = LGColorFromRGBAHex(storedHex);
+        legacyButton.layer.cornerRadius = 8.0;
+        legacyButton.layer.borderWidth = 1.0;
+        legacyButton.layer.borderColor =
+            [[UIColor separatorColor] colorWithAlphaComponent:0.65].CGColor;
+        __weak UIButton *weakLegacyButton = legacyButton;
+        LGAddControlAction(legacyButton, UIControlEventTouchUpInside,
+                           ^(__kindof UIControl *sender) {
+            (void)sender;
+            NSString *current = LGRGBAHexFromColor(weakLegacyButton.backgroundColor)
+                ?: storedHex;
+            LGPresentTextInputSheet(self, item[@"title"], item[@"subtitle"],
+                                    current, @"#RRGGBBAA",
+                                    UIKeyboardTypeASCIICapable, YES,
+                                    ^(NSString *text) {
+                UIColor *color = LGColorFromRGBAHex(text);
+                if (!color) return;
+                weakLegacyButton.backgroundColor = color;
+                LGWritePreferenceObject(key, LGRGBAHexFromColor(color));
+            });
+        });
+        colorControl = legacyButton;
+    }
+    [colorControl.widthAnchor constraintEqualToConstant:32.0].active = YES;
+    [colorControl.heightAnchor constraintEqualToConstant:32.0].active = YES;
 
-    [stack addArrangedSubview:[self controlHeaderRowWithTitleLabel:titleLabel accessoryViews:@[well] spacing:12.0]];
+    [stack addArrangedSubview:[self controlHeaderRowWithTitleLabel:titleLabel accessoryViews:@[colorControl] spacing:12.0]];
     [stack addArrangedSubview:[self controlSubtitleLabelWithText:item[@"subtitle"]]];
     [NSLayoutConstraint activateConstraints:@[
         [stack.topAnchor constraintEqualToAnchor:body.topAnchor constant:13.0],
@@ -1413,7 +1507,7 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 
     UILabel *valueLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     valueLabel.text = stored.length ? stored : fallback;
-    valueLabel.font = [UIFont monospacedSystemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    valueLabel.font = LGMonospacedSystemFont(15.0, UIFontWeightSemibold);
     valueLabel.textColor = _accentColor;
     valueLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
     [valueLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow
@@ -1454,7 +1548,8 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
 
     __weak typeof(self) weakSelf = self;
     __weak UILabel *weakValueLabel = valueLabel;
-    [button addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+    LGAddControlAction(button, UIControlEventTouchUpInside, ^(__kindof UIControl *control) {
+        (void)control;
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         NSString *current = weakValueLabel.text.length ? weakValueLabel.text : fallback;
@@ -1472,7 +1567,7 @@ static CGFloat LGGoToTopCornerRadiusForView(UIView *view) {
             weakValueLabel.text = text;
             LGWritePreferenceObject(preferenceKey, text);
         });
-    }] forControlEvents:UIControlEventTouchUpInside];
+    });
     return button;
 }
 

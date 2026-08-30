@@ -49,7 +49,10 @@ static void RWBReloadPrefsCallback(CFNotificationCenterRef __unused center,
                                    CFStringRef __unused name,
                                    const void * __unused object,
                                    CFDictionaryRef __unused userInfo) {
+    LGDiagnosticLog(@"rwb.reload.begin process=%@", LGMainBundleIdentifier());
     ReloadPrefs();
+    LGDiagnosticLog(@"rwb.reload.end enabled=%d systemWidgets=%d material=%d",
+                    kIsEnabled, kIsEnabledForSystemWidgets, kIsEnabledForMaterialView);
 }
 
 @interface CHSWidget : NSObject
@@ -349,6 +352,10 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
 %end
 
 %ctor {
+    if (!LGSystemVersionAtLeast(14, 0, 0)) {
+        LGLog(@"RWB: legacy Today widgets use the in-process iOS 12/13 fallback");
+        return;
+    }
     ReloadPrefs();
     if (!kIsEnabled) return;
 

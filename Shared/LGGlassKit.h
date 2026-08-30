@@ -1,5 +1,6 @@
 #pragma once
 #import <UIKit/UIKit.h>
+#import "LGCompatibility.h"
 
 @class LGLiveBackdropView;
 
@@ -15,6 +16,7 @@ BOOL isExactClass(UIView *v, NSString *name);
 BOOL lgHostEnabled(NSString *prefix);
 
 void lgObservePreferenceReload(void (^handler)(void));
+void lgObservePreferenceReloadNamed(NSString *name, void (^handler)(void));
 
 #pragma mark - injection registry (live disable -> restore)
 

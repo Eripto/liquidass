@@ -1064,6 +1064,11 @@ static void LGDumpTabBar(UITabBar *bar, NSString *reason) {
                              OBJC_ASSOCIATION_COPY_NONATOMIC);
 
     UIWindow *window = bar.window;
+    id standardAppearance = nil;
+    if ([bar respondsToSelector:NSSelectorFromString(@"standardAppearance")]) {
+        @try { standardAppearance = [bar valueForKey:@"standardAppearance"]; }
+        @catch (__unused NSException *exception) {}
+    }
     id scrollEdgeAppearance = nil;
     if ([bar respondsToSelector:NSSelectorFromString(@"scrollEdgeAppearance")]) {
         @try { scrollEdgeAppearance = [bar valueForKey:@"scrollEdgeAppearance"]; }
@@ -1080,7 +1085,7 @@ static void LGDumpTabBar(UITabBar *bar, NSString *reason) {
         window.screen.scale, NSStringFromCGRect(bar.frame), NSStringFromCGRect(bar.bounds),
         NSStringFromUIEdgeInsets(bar.safeAreaInsets),
         NSStringFromUIEdgeInsets(bar.layoutMargins),
-        NSStringFromCGSize(bar.intrinsicContentSize), bar.standardAppearance,
+        NSStringFromCGSize(bar.intrinsicContentSize), standardAppearance,
         scrollEdgeAppearance, (unsigned long)bar.items.count, bar.selectedItem];
 
     [bar.items enumerateObjectsUsingBlock:^(UITabBarItem *item, NSUInteger index,
@@ -1165,7 +1170,7 @@ static void LGRefreshTabBarsInView(UIView *view) {
 }
 
 %ctor {
-    lgObservePreferenceReload(^{
+    lgObservePreferenceReloadNamed(@"TabBar", ^{
         dispatch_async(dispatch_get_main_queue(), ^{
             for (UIWindow *window in UIApplication.sharedApplication.windows) {
                 LGRefreshTabBarsInView(window);

@@ -2782,7 +2782,7 @@ static void LGRefreshAllClockHosts(void) {
 
 %ctor {
     if (!LGIsSpringBoardProcess()) return;
-    lgObservePreferenceReload(^{ LGRefreshAllClockHosts(); });
+    lgObservePreferenceReloadNamed(@"Clock", ^{ LGRefreshAllClockHosts(); });
     LGClockLog(@"ctor: init LGClockSpringBoard, fontPath=%@", LGClockVariableFontPath() ?: @"(none)");
     %init(LGClockSpringBoard);
 }

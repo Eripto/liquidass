@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import <dlfcn.h>
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
 #import "../Shared/LGSharedSupport.h"
@@ -14,7 +15,7 @@ typedef NS_ENUM(NSInteger, LGCoverSheetMode) {
 
 static LGCoverSheetMode sLGCoverSheetMode = LGCoverSheetModeIdle;
 static NSHashTable<UIView *> *sLGCoverSheetPanels;
-static NSHashTable<UIViewController *> *sLGCoverSheetWallpaperControllers;
+static NSHashTable<UIView *> *sLGCoverSheetWallpaperViews;
 static CADisplayLink *sLGCoverSheetDisplayLink;
 static const void *kLGCoverSheetGlassKey = &kLGCoverSheetGlassKey;
 static const void *kLGCoverSheetWallpaperSnapshotKey =
@@ -53,7 +54,7 @@ static void LGCoverSheetLogOrientation(UIView *view,
     static NSString *lastSource;
     UIDeviceOrientation device = UIDevice.currentDevice.orientation;
     UIInterfaceOrientation interfaceOrientation =
-        view.window.windowScene.interfaceOrientation;
+        LGInterfaceOrientationForView(view);
     if (resolved == lastResolved && device == lastDevice &&
         interfaceOrientation == lastInterface &&
         [source isEqualToString:lastSource]) {
@@ -116,7 +117,7 @@ static UIDeviceOrientation LGCoverSheetDeviceOrientation(UIView *view) {
     }
 
     UIInterfaceOrientation interfaceOrientation =
-        view.window.windowScene.interfaceOrientation;
+        LGInterfaceOrientationForView(view);
     if (interfaceOrientation == UIInterfaceOrientationPortraitUpsideDown) {
         sLGCoverSheetLastPortraitOrientation =
             UIDeviceOrientationPortraitUpsideDown;
@@ -215,6 +216,70 @@ static void LGCoverSheetMatchViewGeometry(UIView *destination,
     destination.transform = transform;
 }
 
+typedef CFArrayRef (*LGCPBitmapCreateImagesFromDataFn)(CFDataRef data,
+                                                       void *unused,
+                                                       int flags,
+                                                       void *unused2);
+
+static UIImage *LGCoverSheetCPBitmapImage(void) {
+    static LGCPBitmapCreateImagesFromDataFn decoder;
+    static dispatch_once_t decoderOnce;
+    dispatch_once(&decoderOnce, ^{
+        void *handle = dlopen(
+            "/System/Library/PrivateFrameworks/AppSupport.framework/AppSupport",
+            RTLD_LAZY | RTLD_LOCAL);
+        if (handle) {
+            decoder = (LGCPBitmapCreateImagesFromDataFn)dlsym(
+                handle, "CPBitmapCreateImagesFromData");
+        }
+    });
+
+    NSArray<NSString *> *paths = @[
+        @"/var/mobile/Library/SpringBoard/LockBackground.cpbitmap",
+        @"/var/mobile/Library/SpringBoard/OriginalLockBackground.cpbitmap",
+    ];
+    for (NSString *path in paths) {
+        NSData *data = [NSData dataWithContentsOfFile:path];
+        if (!data.length || !decoder) continue;
+        CFArrayRef decoded = decoder((__bridge CFDataRef)data, NULL, 1, NULL);
+        if (!decoded) continue;
+        UIImage *image = nil;
+        if (CFArrayGetCount(decoded) > 0) {
+            CFTypeRef first = CFArrayGetValueAtIndex(decoded, 0);
+            if (first && CFGetTypeID(first) == CGImageGetTypeID()) {
+                image = [UIImage imageWithCGImage:(CGImageRef)first
+                                            scale:UIScreen.mainScreen.scale
+                                      orientation:UIImageOrientationUp];
+            }
+        }
+        CFRelease(decoded);
+        if (image) return image;
+    }
+
+    // A few iOS 12 wallpaper tools leave a conventional preview beside the
+    // cpbitmap.  This is a final non-private fallback if decoding is absent.
+    for (NSString *path in @[
+             @"/var/mobile/Library/SpringBoard/LockBackgroundThumbnail.jpg",
+             @"/var/mobile/Library/SpringBoard/LockBackground.png",
+         ]) {
+        UIImage *image = [UIImage imageWithContentsOfFile:path];
+        if (image) return image;
+    }
+    return nil;
+}
+
+static UIView *LGCoverSheetStaticWallpaperView(UIView *panel) {
+    UIImage *image = LGCoverSheetCPBitmapImage();
+    if (!image) return nil;
+    UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
+    imageView.contentMode = UIViewContentModeScaleAspectFill;
+    imageView.clipsToBounds = YES;
+    imageView.bounds = panel.bounds;
+    imageView.center = panel.center;
+    imageView.userInteractionEnabled = NO;
+    return imageView;
+}
+
 static void LGCoverSheetCaptureWallpaperSnapshots(void) {
     for (UIView *panel in sLGCoverSheetPanels.allObjects) {
         UIView *parent = panel.superview;
@@ -224,9 +289,7 @@ static void LGCoverSheetCaptureWallpaperSnapshots(void) {
 
         UIView *source = nil;
         CGFloat sourceWindowLevel = -CGFLOAT_MAX;
-        for (UIViewController *controller in
-                 sLGCoverSheetWallpaperControllers.allObjects) {
-            UIView *candidate = controller.viewIfLoaded;
+        for (UIView *candidate in sLGCoverSheetWallpaperViews.allObjects) {
             if (!candidate.window || candidate.hidden ||
                 candidate.alpha <= 0.001) {
                 continue;
@@ -237,11 +300,15 @@ static void LGCoverSheetCaptureWallpaperSnapshots(void) {
                 sourceWindowLevel = level;
             }
         }
-        if (!source) source = panel;
-
-        UIView *snapshot = [source snapshotViewAfterScreenUpdates:NO];
+        UIView *snapshot = source
+            ? [source snapshotViewAfterScreenUpdates:NO]
+            : LGCoverSheetStaticWallpaperView(panel);
+        if (!snapshot && !source) {
+            source = panel;
+            snapshot = [source snapshotViewAfterScreenUpdates:NO];
+        }
         if (!snapshot) continue;
-        LGCoverSheetMatchViewGeometry(snapshot, source, parent);
+        LGCoverSheetMatchViewGeometry(snapshot, source ?: panel, parent);
         snapshot.autoresizingMask = UIViewAutoresizingNone;
         snapshot.userInteractionEnabled = NO;
         [parent insertSubview:snapshot belowSubview:panel];
@@ -267,12 +334,12 @@ static void LGCoverSheetAddOpacityFade(UIView *view, CGFloat targetAlpha) {
     [view.layer addAnimation:fade forKey:@"dylv.coversheet.fadeIn"];
 }
 
-static void LGCoverSheetRegisterWallpaperController(UIViewController *controller) {
-    if (!controller) return;
-    if (!sLGCoverSheetWallpaperControllers) {
-        sLGCoverSheetWallpaperControllers = [NSHashTable weakObjectsHashTable];
+static void LGCoverSheetRegisterWallpaperView(UIView *view) {
+    if (!view) return;
+    if (!sLGCoverSheetWallpaperViews) {
+        sLGCoverSheetWallpaperViews = [NSHashTable weakObjectsHashTable];
     }
-    [sLGCoverSheetWallpaperControllers addObject:controller];
+    [sLGCoverSheetWallpaperViews addObject:view];
 }
 
 static void LGCoverSheetUpdateBottomCornerMask(LGLiveBackdropView *glass) {
@@ -530,10 +597,8 @@ static void LGCoverSheetCrossfadeToLockscreen(UIView *panel,
     glass.hidden = NO;
     glass.alpha = 1.0;
     LGCoverSheetAddOpacityFade(panel, targetAlpha);
-    NSArray<UIViewController *> *wallpaperControllers =
-        sLGCoverSheetWallpaperControllers.allObjects;
-    for (UIViewController *controller in wallpaperControllers) {
-        UIView *wallpaperView = controller.view;
+    NSArray<UIView *> *wallpaperViews = sLGCoverSheetWallpaperViews.allObjects;
+    for (UIView *wallpaperView in wallpaperViews) {
         if (!wallpaperView.window || wallpaperView.hidden) continue;
         LGCoverSheetAddOpacityFade(wallpaperView, wallpaperView.alpha);
     }
@@ -698,26 +763,38 @@ static void LGCoverSheetSetMode(LGCoverSheetMode mode) {
     sLGCoverSheetFadeToHome = NO;
 }
 
+static void LGCoverSheetUnregisterPanel(UIView *panel) {
+    if (!panel) return;
+    LGLiveBackdropView *glass =
+        objc_getAssociatedObject(panel, kLGCoverSheetGlassKey);
+    [glass removeFromSuperview];
+    LGCoverSheetRemoveWallpaperSnapshot(panel);
+    objc_setAssociatedObject(panel, kLGCoverSheetGlassKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    [sLGCoverSheetPanels removeObject:panel];
+}
+
+static void LGCoverSheetRegisterPanel(UIView *panel) {
+    if (!panel) return;
+    if (!sLGCoverSheetPanels)
+        sLGCoverSheetPanels = [NSHashTable weakObjectsHashTable];
+    if (!panel.window) {
+        LGCoverSheetUnregisterPanel(panel);
+        return;
+    }
+    [sLGCoverSheetPanels addObject:panel];
+    LGCoverSheetSyncPanel(panel);
+}
+
+%group LGModernCoverSheet
+
 %hook SBCoverSheetPanelBackgroundContainerView
 
 - (void)didMoveToWindow {
     %orig;
     UIView *panel = (UIView *)self;
-    if (!sLGCoverSheetPanels) {
-        sLGCoverSheetPanels = [NSHashTable weakObjectsHashTable];
-    }
-    if (panel.window) {
-        [sLGCoverSheetPanels addObject:panel];
-        LGCoverSheetSyncPanel(panel);
-    } else {
-        LGLiveBackdropView *glass =
-            objc_getAssociatedObject(panel, kLGCoverSheetGlassKey);
-        [glass removeFromSuperview];
-        LGCoverSheetRemoveWallpaperSnapshot(panel);
-        objc_setAssociatedObject(panel, kLGCoverSheetGlassKey, nil,
-                                 OBJC_ASSOCIATION_ASSIGN);
-        [sLGCoverSheetPanels removeObject:panel];
-    }
+    if (panel.window) LGCoverSheetRegisterPanel(panel);
+    else LGCoverSheetUnregisterPanel(panel);
 }
 
 - (void)layoutSubviews {
@@ -732,13 +809,13 @@ static void LGCoverSheetSetMode(LGCoverSheetMode mode) {
 - (void)viewDidLoad {
     %orig;
     if (LGCoverSheetEnabled())
-        LGCoverSheetRegisterWallpaperController((UIViewController *)self);
+        LGCoverSheetRegisterWallpaperView(((UIViewController *)self).view);
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
     if (LGCoverSheetEnabled())
-        LGCoverSheetRegisterWallpaperController((UIViewController *)self);
+        LGCoverSheetRegisterWallpaperView(((UIViewController *)self).view);
 }
 
 %end
@@ -817,10 +894,71 @@ prepareForDismissalTransitionForReversingTransition:(BOOL)reversing
 
 %end
 
+
+%end
+
+
+%group LGLegacyCoverSheet
+
+// iOS 12 calls the lock-screen surface Dashboard rather than Cover Sheet.
+// Its view-controller lifecycle provides a conservative transition fallback
+// without invoking any iOS 13 presentation-manager selectors.
+%hook SBDashBoardViewController
+- (void)viewDidLoad {
+    %orig;
+    LGCoverSheetRegisterPanel(((UIViewController *)self).view);
+}
+- (void)viewWillLayoutSubviews {
+    %orig;
+    LGCoverSheetRegisterPanel(((UIViewController *)self).view);
+}
+- (void)viewWillAppear:(BOOL)animated {
+    %orig(animated);
+    LGCoverSheetRegisterPanel(((UIViewController *)self).view);
+    if (LGCoverSheetEnabled())
+        LGCoverSheetSetMode(LGCoverSheetModePresentingGlass);
+}
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+    sLGCoverSheetCommitEndPresented = YES;
+    LGCoverSheetSetMode(LGCoverSheetModeIdle);
+}
+- (void)viewWillDisappear:(BOOL)animated {
+    if (LGCoverSheetEnabled()) {
+        LGCoverSheetCaptureWallpaperSnapshots();
+        LGCoverSheetSetMode(LGCoverSheetModeDismissing);
+    }
+    %orig(animated);
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    %orig(animated);
+    sLGCoverSheetCommitEndPresented = NO;
+    LGCoverSheetSetMode(LGCoverSheetModeIdle);
+    LGCoverSheetUnregisterPanel(((UIViewController *)self).view);
+}
+%end
+
+%hook SBWallpaperEffectView
+- (void)didMoveToWindow {
+    %orig;
+    UIView *view = (UIView *)self;
+    if (view.window) LGCoverSheetRegisterWallpaperView(view);
+    else [sLGCoverSheetWallpaperViews removeObject:view];
+}
+%end
+
+%end
+
 %ctor {
     sLGCoverSheetPanels = [NSHashTable weakObjectsHashTable];
-    sLGCoverSheetWallpaperControllers = [NSHashTable weakObjectsHashTable];
-    lgObservePreferenceReload(^{
+    sLGCoverSheetWallpaperViews = [NSHashTable weakObjectsHashTable];
+    if (LGSystemVersionAtLeast(13, 0, 0) &&
+        NSClassFromString(@"SBCoverSheetPanelBackgroundContainerView")) {
+        %init(LGModernCoverSheet);
+    } else if (NSClassFromString(@"SBDashBoardViewController")) {
+        %init(LGLegacyCoverSheet);
+    }
+    lgObservePreferenceReloadNamed(@"CoverSheet", ^{
         if (!LGCoverSheetEnabled()) {
             sLGCoverSheetMode = LGCoverSheetModeIdle;
             sLGCoverSheetCommitEndPresented = NO;
