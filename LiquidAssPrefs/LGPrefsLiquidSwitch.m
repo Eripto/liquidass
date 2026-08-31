@@ -239,12 +239,11 @@ static void LGSettingsSwitchScheduleAutoContract(LGPrefsLiquidSwitch *self_) {
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
-    if (@available(iOS 13.0, *)) {
-        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
-            [self updateMaterialColors];
-            [self refreshGlassBackdrop];
-            [self updateVisualsAnimated:NO];
-        }
+    if (LGHasDifferentColorAppearance(self.traitCollection,
+                                      previousTraitCollection)) {
+        [self updateMaterialColors];
+        [self refreshGlassBackdrop];
+        [self updateVisualsAnimated:NO];
     }
 }
 

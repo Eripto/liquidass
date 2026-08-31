@@ -25,6 +25,16 @@ FOUNDATION_EXPORT UIInterfaceOrientation LGInterfaceOrientationForView(UIView *v
 FOUNDATION_EXPORT UIFont *LGMonospacedSystemFont(CGFloat size, UIFontWeight weight);
 FOUNDATION_EXPORT UIBlurEffect *LGMaterialBlurEffectForTraitCollection(UITraitCollection *traits);
 
+// Dynamic UIColor APIs arrived in iOS 13.  Keep all calls behind runtime
+// dispatch so an iOS 12 UIColor subclass is never sent a newer selector.
+FOUNDATION_EXPORT UIColor *LGResolvedColorForTraitCollection(UIColor *color,
+                                                              UITraitCollection *traits);
+FOUNDATION_EXPORT UIColor *LGColorWithDynamicProvider(
+    UIColor *(^provider)(UITraitCollection *traits));
+FOUNDATION_EXPORT BOOL LGHasDifferentColorAppearance(
+    UITraitCollection *traits,
+    UITraitCollection *previousTraits);
+
 FOUNDATION_EXPORT UIImage *LGSystemImageNamed(NSString *name);
 FOUNDATION_EXPORT UIImage *LGSystemImageNamedWithConfiguration(NSString *name,
                                                                 id configuration);
@@ -37,4 +47,3 @@ FOUNDATION_EXPORT void LGAddControlAction(UIControl *control,
 // Installs narrowly-scoped methods that UIKit did not expose until iOS 13.
 // Existing implementations are never replaced, so iOS 13+ stays untouched.
 FOUNDATION_EXPORT void LGInstallCompatibilityShims(void);
-

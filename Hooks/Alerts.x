@@ -157,7 +157,7 @@ static void LGAlertInstallNativeGlass(UIAlertController *controller) {
 
 static BOOL LGAlertColorLooksRed(UIColor *color, UITraitCollection *traits) {
     if (!color) return NO;
-    UIColor *resolved = [color resolvedColorWithTraitCollection:traits];
+    UIColor *resolved = LGResolvedColorForTraitCollection(color, traits);
     CGFloat hue = 0.0, saturation = 0.0, brightness = 0.0, alpha = 0.0;
     if ([resolved getHue:&hue saturation:&saturation brightness:&brightness alpha:&alpha])
         return saturation > 0.35 && brightness > 0.35 && (hue < 0.08 || hue > 0.92);

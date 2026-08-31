@@ -285,11 +285,10 @@ static UIColor *LGSliderInactiveTrackColor(UITraitCollection *traitCollection) {
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
-    if (@available(iOS 13.0, *)) {
-        if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
-            [self updateThumbMaterialColors];
-            [self updateGlassThumbFrameAnimated:NO];
-        }
+    if (LGHasDifferentColorAppearance(self.traitCollection,
+                                      previousTraitCollection)) {
+        [self updateThumbMaterialColors];
+        [self updateGlassThumbFrameAnimated:NO];
     }
 }
 

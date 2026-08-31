@@ -61,6 +61,50 @@ UIBlurEffect *LGMaterialBlurEffectForTraitCollection(UITraitCollection *traits) 
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleExtraLight];
 }
 
+UIColor *LGResolvedColorForTraitCollection(UIColor *color,
+                                            UITraitCollection *traits) {
+    if (!color) return nil;
+    SEL selector = NSSelectorFromString(@"resolvedColorWithTraitCollection:");
+    if ([color respondsToSelector:selector]) {
+        UITraitCollection *effectiveTraits = traits ?: UIScreen.mainScreen.traitCollection;
+        UIColor *resolved = ((UIColor *(*)(id, SEL, UITraitCollection *))objc_msgSend)(
+            color, selector, effectiveTraits);
+        return resolved ?: color;
+    }
+    // UIColor subclasses on iOS 12 (including UICachedDeviceWhiteColor) do not
+    // implement trait-based resolution.  They are already concrete colors.
+    return color;
+}
+
+UIColor *LGColorWithDynamicProvider(
+    UIColor *(^provider)(UITraitCollection *traits)) {
+    if (!provider) return UIColor.clearColor;
+    SEL selector = NSSelectorFromString(@"colorWithDynamicProvider:");
+    if ([UIColor respondsToSelector:selector]) {
+        UIColor *dynamic = ((UIColor *(*)(Class, SEL, id))objc_msgSend)(
+            UIColor.class, selector, provider);
+        if (dynamic) return dynamic;
+    }
+    // iOS 12 has no dynamic UIColor objects.  Evaluate once using the current
+    // traits and keep the returned concrete color.
+    return provider(UIScreen.mainScreen.traitCollection) ?: UIColor.clearColor;
+}
+
+BOOL LGHasDifferentColorAppearance(UITraitCollection *traits,
+                                   UITraitCollection *previousTraits) {
+    if (!traits) return previousTraits != nil;
+    SEL selector = NSSelectorFromString(
+        @"hasDifferentColorAppearanceComparedToTraitCollection:");
+    if ([traits respondsToSelector:selector]) {
+        return ((BOOL (*)(id, SEL, UITraitCollection *))objc_msgSend)(
+            traits, selector, previousTraits);
+    }
+    // userInterfaceStyle itself exists on iOS 12; this preserves a useful
+    // fallback without sending the iOS 13 comparison selector.
+    return !previousTraits ||
+           traits.userInterfaceStyle != previousTraits.userInterfaceStyle;
+}
+
 static NSString *LGFallbackGlyphForSymbol(NSString *name) {
     if ([name containsString:@"chevron.left"]) return @"‹";
     if ([name containsString:@"chevron.right"]) return @"›";
@@ -191,11 +235,6 @@ static UIColor *LGColorTeal(id self, SEL _cmd) {
     (void)self; (void)_cmd;
     return [UIColor colorWithRed:0.20 green:0.68 blue:0.90 alpha:1.0];
 }
-static UIColor *LGDynamicColor(id self, SEL _cmd, UIColor *(^provider)(UITraitCollection *)) {
-    (void)self; (void)_cmd;
-    return provider ? provider(UIScreen.mainScreen.traitCollection) : UIColor.clearColor;
-}
-
 static UIImage *LGImageSystemName(id self, SEL _cmd, NSString *name) {
     (void)self; (void)_cmd;
     return LGDrawFallbackSymbol(name);
@@ -243,9 +282,6 @@ void LGInstallCompatibilityShims(void) {
                                   (IMP)LGColorIndigo, "@@:");
         LGAddClassMethodIfMissing(UIColor.class, @selector(systemTealColor),
                                   (IMP)LGColorTeal, "@@:");
-        LGAddClassMethodIfMissing(UIColor.class, @selector(colorWithDynamicProvider:),
-                                  (IMP)LGDynamicColor, "@@:@?");
-
         LGAddClassMethodIfMissing(UIImage.class, @selector(systemImageNamed:),
                                   (IMP)LGImageSystemName, "@@:@");
         LGAddClassMethodIfMissing(UIImage.class,
@@ -260,4 +296,3 @@ static void LGCompatibilityInitialize(void) {
         LGInstallCompatibilityShims();
     }
 }
-

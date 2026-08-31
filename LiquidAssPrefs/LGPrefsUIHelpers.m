@@ -1,9 +1,1234 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíßN½õ:-jZ.¶›­–)Ş³R6–×÷'B$Äu&Vg5T”†VÇW'2æ‚ ¢6–×÷'B$Äu&Vg4FF7W÷'Bæ‚ ¢6–×÷'B"ââõ6†&VBôÄtÆ—fT&6¶G&÷f–Wræ‚ ¢6–×÷'B"ââõ6†&VBôÄu6†&VE7W÷'Bæ‚ ¢6–×÷'BÆæ÷F–g’æƒà¢6–×÷'BÆö&¦2öÖW76vRæƒà¢6–×÷'BÆö&¦2÷'VçF–ÖRæƒà¢6–×÷'BÅV'G¤6÷&RõV'G¤6÷&Ræƒà¢6–×÷'BÆÖF‚æƒà §fö–B¢6öç7B´ÄtFVfVÇEfÇVT¶W’Ò‡fö–B¢’f´ÄtFVfVÇEfÇVT¶W“°§fö–B¢6öç7B´ÄufÇVTÆ&VÄ¶W’Ò‡fö–B¢’f´ÄufÇVTÆ&VÄ¶W“°§fö–B¢6öç7B´ÄtFV6–ÖÇ4¶W’Ò‡fö–B¢’f´ÄtFV6–ÖÇ4¶W“°§fö–B¢6öç7B´Äu6Æ–FW$æ–ÖF÷$¶W’Ò‡fö–B¢’f´Äu6Æ–FW$æ–ÖF÷$¶W“°§fö–B¢6öç7B´Äu6Æ–FW$¶W’Ò‡fö–B¢’f´Äu6Æ–FW$¶W“°§fö–B¢6öç7B´Äu&VfW&Væ6T¶W”¶W’Ò‡fö–B¢’f´Äu&VfW&Væ6T¶W”¶W“°§fö–B¢6öç7B´ÄtÖ–åfÇVT¶W’Ò‡fö–B¢’f´ÄtÖ–åfÇVT¶W“°§fö–B¢6öç7B´ÄtÖ…fÇVT¶W’Ò‡fö–B¢’f´ÄtÖ…fÇVT¶W“°§fö–B¢6öç7B´Ät6öçG&öÅF—FÆT¶W’Ò‡fö–B¢’f´Ät6öçG&öÅF—FÆT¶W“°§fö–B¢6öç7B´Ät6öçG&öÅ7V'F—FÆT¶W’Ò‡fö–B¢’f´Ät6öçG&öÅ7V'F—FÆT¶W“°§fö–B¢6öç7B´Ät6öçG&öÆÆVD'”Væ&ÆVD¶W’Ò‡fö–B¢’f´Ät6öçG&öÆÆVD'”Væ&ÆVD¶W“° §7FF–2å5U$Â¤ÄuFV×÷&'•&VfW&Væ6W4W‡÷'EU$Â‡fö–B’°¢å57G&–ær¦f–ÆVæÖRÒ´å57G&–ær7G&–æuv—F„f÷&ÖC¤&Æ—V–F72×&VfW&Væ6W2ÒTæ§6öâ"À¢å5UT”BåUT”BåUT”E7G&–æræÆ÷vW&66U7G&–æuÓ°¢&WGW&â´å5U$Âf–ÆUU$Åv—F…Fƒ¥´å5FV×÷&'”F—&V7F÷'’‚’7G&–æt'”VæF–æuF„6ö×öæVçC¦f–ÆVæÖUÕÓ°§Ğ ¤–çFW&f6RÄu6Æ–FW%&W6WDæ–ÖF÷"¢å4ö&¦V7@¤&÷W'G’†æöæFöÖ–2ÂvV²’T•6Æ–FW"§6Æ–FW#°¤&÷W'G’†æöæFöÖ–2ÂvV²’T”Æ&VÂ§fÇVTÆ&VÃ°¤&÷W'G’†æöæFöÖ–2Â7G&öær’4F—7Æ”Æ–æ²¦F—7Æ”Æ–æ³°¤&÷W'G’†æöæFöÖ–2Â76–vâ’4eF–ÖT–çFW'fÂ7F'EF–ÖS°¤&÷W'G’†æöæFöÖ–2Â76–vâ’4tfÆöB7F'EfÇVS°¤&÷W'G’†æöæFöÖ–2Â76–vâ’4tfÆöBF&vWEfÇVS°¤&÷W'G’†æöæFöÖ–2Â76–vâ’å4–çFVvW"FV6–ÖÇ3°¤Væ@ ¤–×ÆVÖVçFF–öâÄu6Æ–FW%&W6WDæ–ÖF÷  ¢Ò‡fö–B—F–6³¢„4F—7Æ”Æ–æ²¢–Æ–æ²°¢–b‚6VÆbç6Æ–FW"’°¢·6VÆbæF—7Æ”Æ–æ²–çfÆ–FFUÓ°¢6VÆbæF—7Æ”Æ–æ²Òæ–Ã°¢&WGW&ã°¢Ğ¢4eF–ÖT–çFW'fÂVÆ6VBÒ47W'&VçDÖVF–F–ÖR‚’Ò6VÆbç7F'EF–ÖS°¢4tfÆöBBÒÔ”â„Ô‚†VÆ6VBòãC"Âã’Âã“°¢4tfÆöBV6VBÒãÒ÷rƒãÒBÂ2ã“°¢4tfÆöBfÇVRÒ6VÆbç7F'EfÇVR²‚‡6VÆbçF&vWEfÇVRÒ6VÆbç7F'EfÇVR’¢V6VB“°¢6VÆbç6Æ–FW"çfÇVRÒfÇVS°¢–b‡6VÆbçfÇVTÆ&VÂ’°¢6VÆbçfÇVTÆ&VÂçFW‡BÒÄtf÷&ÖE6Æ–FW%fÇVR‡fÇVRÂ6VÆbæFV6–ÖÇ2“°¢Ğ¢–b‡BãÒã’°¢·6VÆbæF—7Æ”Æ–æ²–çfÆ–FFUÓ°¢6VÆbæF—7Æ”Æ–æ²Òæ–Ã°¢ö&¦5÷6WD76ö6–FVDö&¦V7B‡6VÆbç6Æ–FW"Â´Äu6Æ–FW$æ–ÖF÷$¶W’Âæ–ÂÂô$¤5ô54ô4”D”ôåô54”tâ“°¢Ğ§Ğ ¤Væ@ §7FF–2T•f–Wr¤ÄtÖ¶U&W7&–æt&"†–BF&vWBÂ4TÂ&W7&–æt7F–öâÂ4TÂÆFW$7F–öâ“°§7FF–2fö–B¦´Äu&W7&–æt&$vÆ75f–Wt¶W’Òf´Äu&W7&–æt&$vÆ75f–Wt¶W“°§7FF–2fö–B¦´Äu&W7&–æt&%F–çEf–Wt¶W’Òf´Äu&W7&–æt&%F–çEf–Wt¶W“°§7FF–2å4çVÖ&W"¤Äu'6TÆö6Æ—¦VDFV6–ÖÅ7G&–ær„å57G&–ær§&uFW‡B“°§7FF–2fö–BÄtF—6Ö—74÷fW&Æ•æVÂ…T•f–Wr¦÷fW&Æ’ÂT•f–Wr§æVÂ“° ¤–çFW&f6RÄtÆ—fTvÆ74&$'WGFöâ¢T•f–Wp¢Ò†–ç7Fæ6WG—R––æ—Ev—F…F&vWC¢†–B—F&vWB7F–öã¢…4TÂ–7F–öâ7–Ö&öÄæÖS¢„å57G&–ær¢—7–Ö&öÄæÖS°¢Ò‡fö–B—6WE&–Ö'”ÖVçS¢…T”ÖVçR¢–ÖVçS°¢Ò‡fö–B–6öæf–wW&TÆVv7”ÖVçUF&vWC¢†–B—F&vW@¢Ç”7F–öã¢…4TÂ–Ç”7F–öà¢&W6WD7F–öã¢…4TÂ—&W6WD7F–öà¢&W6WEF—FÆS¢„å57G&–ær¢—&W6WEF—FÆS°¢Ò‡fö–B—&Vg&W6„vÆ73°¤Væ@ ¤–×ÆVÖVçFF–öâÄtÆ—fTvÆ74&$'WGFöâ°¢ÄtÆ—fT&6¶G&÷f–Wr¥övÆ73°¢T•f–Wr¥÷F–çC°¢T”'WGFöâ¥ö'WGFöã°¢T”–ÖvUf–Wr¥övÇ—ƒ°¢T•f–Wu&÷W'G”æ–ÖF÷"¥÷&W74æ–ÖF÷#°¢õ÷vV²–BöÆVv7”ÖVçUF&vWC°¢4TÂöÆVv7”Ç”7F–öã°¢4TÂöÆVv7•&W6WD7F–öã°¢å57G&–ær¥öÆVv7•&W6WEF—FÆS°§Ğ ¢Ò†–ç7Fæ6WG—R––æ—Ev—F…F&vWC¢†–B—F&vWB7F–öã¢…4TÂ–7F–öâ7–Ö&öÄæÖS¢„å57G&–ær¢—7–Ö&öÄæÖR°¢6VÆbÒ·7WW"–æ—Ev—F„g&ÖS¤4u&V7DÖ¶RƒãÂãÂCBãÂCBã•Ó°¢–b‚6VÆb’&WGW&âæ–Ã°¢6VÆbæ&6¶w&÷VæD6öÆ÷"ÒT”6öÆ÷"æ6ÆV$6öÆ÷#°¢·6VÆbçv–GF„æ6†÷"6öç7G&–çDWVÅFô6öç7FçC£CBãÒæ7F—fRÒ”U3°¢·6VÆbæ†V–v‡Dæ6†÷"6öç7G&–çDWVÅFô6öç7FçC£CBãÒæ7F—fRÒ”U3° ¢övÆ72Òµ´ÄtÆ—fT&6¶G&÷f–WrÆÆö5Ò–æ—Ev—F„g&ÖS§6VÆbæ&÷VæG2w&÷WæÖS¦æ–À¢f–ÇFW%G—S¤Ätf–ÇFW%G—Tf÷$†÷7E&Vf—‚„%&Vg4'WGFöâ"•Ó°¢övÆ72æÆ–W"æ6÷&æW%&F—W2Ò#"ã°¢övÆ72æÆ–W"æ6÷&æW$7W'fRÒ´46÷&æW$7W'fT6öçF–çV÷W3°¢övÆ72æÆ–W"æÖ6·5Fô&÷VæG2Ò”U3°¢·6VÆbFE7V'f–Ws¥övÆ75Ó° ¢÷F–çBÒµµT•f–WrÆÆö5Ò–æ—Ev—F„g&ÖS§6VÆbæ&÷VæG5Ó°¢÷F–çBçW6W$–çFW&7F–öäVæ&ÆVBÒäó°¢÷F–çBæÆ–W"æ6÷&æW%&F—W2Ò#"ã°¢÷F–çBæÆ–W"æ6÷&æW$7W'fRÒ´46÷&æW$7W'fT6öçF–çV÷W3°¢÷F–çBæÆ–W"æ&÷&FW%v–GF‚ÒãsS°¢÷F–çBæÆ–W"æ&÷&FW$6öÆ÷"ÒµµT”6öÆ÷"6W&F÷$6öÆ÷%Ò6öÆ÷%v—F„Ç†6ö×öæVçC£ãeÒä4t6öÆ÷#°¢÷F–çBæ&6¶w&÷VæD6öÆ÷"ÒµT”6öÆ÷"6öÆ÷%v—F„G–æÖ–5&÷f–FW#¥åT”6öÆ÷"¢…T•G&—D6öÆÆV7F–öâ§G&—B’°¢&WGW&âG&—BçW6W$–çFW&f6U7G–ÆRÓÒT•W6W$–çFW&f6U7G–ÆTF&°¢òµT”6öÆ÷"6öÆ÷%v—F…v†—FS£ãÇ†£ãeÒ¢µT”6öÆ÷"6öÆ÷%v—F…v†—FS£ãÇ†£ã%Ó°¢ÕÓ°¢·6VÆbFE7V'f–Ws¥÷F–çEÓ° ¢ö'WGFöâÒµT”'WGFöâ'WGFöåv—F…G—S¥T”'WGFöåG—T7W7FöÕÓ°¢ö'WGFöâæg&ÖRÒ6VÆbæ&÷VæG3°¢òòæ–ÂF&vWBÇW2åTÄÂ6VÆV7F÷"—2æ÷BfÆ–BF&vWBö7F–öâ—"à¢òòöÆFW"T”6öçG&öÂ–×ÆVÖVçFF–öç26â&WF–â—BæBf–ÂöæÇ’v†VâF†P¢òòF÷V6‚WfVçB—2F—7F6†VB‡F†RÆVv7’F‡&VRÖÆ–æRÖVçRF‚’à¢–b‡F&vWBbb7F–öâ’°¢µö'WGFöâFEF&vWC§F&vWB7F–öã¦7F–öà¢f÷$6öçG&öÄWfVçG3¥T”6öçG&öÄWfVçEF÷V6…W–ç6–FUÓ°¢Ğ¢µö'WGFöâFEF&vWC§6VÆb7F–öã¤6VÆV7F÷"‡6WE&W76VC¢’f÷$6öçG&öÄWfVçG3¥T”6öçG&öÄWfVçEF÷V6„F÷våÓ°¢µö'WGFöâFEF&vWC§6VÆb7F–öã¤6VÆV7F÷"†6ÆV%&W76VC¢’f÷$6öçG&öÄWfVçG3¥T”6öçG&öÄWfVçEF÷V6…W–ç6–FRÂT”6öçG&öÄWfVçEF÷V6…W÷WG6–FRÂT”6öçG&öÄWfVçEF÷V6„6æ6VÅÓ°¢·6VÆbFE7V'f–Ws¥ö'WGFöåÓ° ¢–B6öæf–wW&F–öâÒæ–Ã°¢6Æ726öæf–wW&F–öä6Æ72Òå46Æ74g&öÕ7G&–ær„%T”–ÖvU7–Ö&öÄ6öæf–wW&F–öâ"“°¢4TÂ6öæf–wW&F–öå6VÆV7F÷"Òå56VÆV7F÷$g&öÕ7G&–ær„&6öæf–wW&F–öåv—F…ö–çE6—¦S§vV–v‡C¢"“°¢–b†6öæf–wW&F–öä6Æ72bb¶6öæf–wW&F–öä6Æ72&W7öæG5Fõ6VÆV7F÷#¦6öæf–wW&F–öå6VÆV7F÷%Ò’°¢6öæf–wW&F–öâÒ‚†–B‚¢’„6Æ72Â4TÂÂ4tfÆöBÂå4–çFVvW"’–ö&¦5ö×6u6VæB’€¢6öæf–wW&F–öä6Æ72Â6öæf–wW&F–öå6VÆV7F÷"Â#"ãÀ¢„å4–çFVvW"•T”–ÖvU7–Ö&öÅvV–v‡E6VÖ–&öÆB“°¢Ğ¢övÇ—‚ÒµµT”–ÖvUf–WrÆÆö5Ò–æ—Ev—F„–ÖvS ¢Äu7—7FVÔ–ÖvTæÖVEv—F„6öæf–wW&F–öâ‡7–Ö&öÄæÖRÂ6öæf–wW&F–öâ•Ó°¢övÇ—‚çF–çD6öÆ÷"ÒT”6öÆ÷"æÆ&VÄ6öÆ÷#°¢övÇ—‚æ6öçFVçDÖöFRÒT•f–Wt6öçFVçDÖöFT6VçFW#°¢övÇ—‚çW6W$–çFW&7F–öäVæ&ÆVBÒäó°¢·6VÆbFE7V'f–Ws¥övÇ—…Ó°¢&WGW&â6VÆc°§Ğ ¢Ò„4u6—¦R––çG&–ç6–46öçFVçE6—¦R²&WGW&â4u6—¦TÖ¶RƒCBãÂCBã“²Ğ¢Ò‡fö–B—6WE&–Ö'”ÖVçS¢…T”ÖVçR¢–ÖVçR°¢4TÂÖVçU6VÆV7F÷"Òå56VÆV7F÷$g&öÕ7G&–ær„'6WDÖVçS¢"“°¢4TÂ&–Ö'•6VÆV7F÷"Òå56VÆV7F÷$g&öÕ7G&–ær„'6WE6†÷w4ÖVçT5&–Ö'”7F–öã¢"“°¢–b‚µö'WGFöâ&W7öæG5Fõ6VÆV7F÷#¦ÖVçU6VÆV7F÷%ÒÇÀ¢µö'WGFöâ&W7öæG5Fõ6VÆV7F÷#§&–Ö'•6VÆV7F÷%Ò’&WGW&ã°¢‚‡fö–B‚¢’†–BÂ4TÂÂ–B’–ö&¦5ö×6u6VæB’…ö'WGFöâÂÖVçU6VÆV7F÷"ÂÖVçR“°¢‚‡fö–B‚¢’†–BÂ4TÂÂ$ôôÂ’–ö&¦5ö×6u6VæB’…ö'WGFöâÂ&–Ö'•6VÆV7F÷"Â”U2“°§Ğ¢Ò‡fö–B–6öæf–wW&TÆVv7”ÖVçUF&vWC¢†–B—F&vW@¢Ç”7F–öã¢…4TÂ–Ç”7F–öà¢&W6WD7F–öã¢…4TÂ—&W6WD7F–öà¢&W6WEF—FÆS¢„å57G&–ær¢—&W6WEF—FÆR°¢öÆVv7”ÖVçUF&vWBÒF&vWC°¢öÆVv7”Ç”7F–öâÒÇ”7F–öã°¢öÆVv7•&W6WD7F–öâÒ&W6WD7F–öã°¢öÆVv7•&W6WEF—FÆRÒ·&W6WEF—FÆR6÷•Ó°¢µö'WGFöâFEF&vWC§6VÆb7F–öã¤6VÆV7F÷"‡&W6VçDÆVv7”ÖVçS¢¢f÷$6öçG&öÄWfVçG3¥T”6öçG&öÄWfVçEF÷V6…W–ç6–FUÓ°§Ğ¢Ò‡fö–B—&W6VçDÆVv7”ÖVçS¢†–B—6VæFW"°¢‡fö–B—6VæFW#°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’æ&Vv–âF&vWCÒTÇ“ÒT&W6WCÒT"À¢å57G&–ætg&öÔ6Æ72…µöÆVv7”ÖVçUF&vWB6Æ75Ò’À¢å57G&–ætg&öÕ6VÆV7F÷"…öÆVv7”Ç”7F–öâ’À¢å57G&–ætg&öÕ6VÆV7F÷"…öÆVv7•&W6WD7F–öâ’“°¢T•f–Wt6öçG&öÆÆW"¦6öçG&öÆÆW"Òæ–Ã°¢f÷"…T•&W7öæFW"§&W7öæFW"Ò6VÆc²&W7öæFW#²&W7öæFW"Ò&W7öæFW"ææW‡E&W7öæFW"’°¢–b…·&W7öæFW"—4¶–æDöd6Æ73¥T•f–Wt6öçG&öÆÆW"æ6Æ75Ò’°¢6öçG&öÆÆW"Ò…T•f–Wt6öçG&öÆÆW"¢—&W7öæFW#°¢'&V³°¢Ğ¢Ğ¢–b‚6öçG&öÆÆW"bbµöÆVv7”ÖVçUF&vWB—4¶–æDöd6Æ73¥µT•f–Wt6öçG&öÆÆW"6Æ75ÕÒ’°¢6öçG&öÆÆW"Ò…T•f–Wt6öçG&öÆÆW"¢•öÆVv7”ÖVçUF&vWC°¢Ğ¢–b‚6öçG&öÆÆW"’°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’æ&÷'B&V6öãÖæò×&W6VçF–ærÖ6öçG&öÆÆW""“°¢&WGW&ã°¢Ğ¢6Æ72ÆW'D6öçG&öÆÆW$6Æ72Òå46Æ74g&öÕ7G&–ær„%T”ÆW'D6öçG&öÆÆW""“°¢4TÂf7F÷'•6VÆV7F÷"Òå56VÆV7F÷$g&öÕ7G&–ær€¢&ÆW'D6öçG&öÆÆW%v—F…F—FÆS¦ÖW76vS§&VfW'&VE7G–ÆS¢"“°¢–b‚ÆW'D6öçG&öÆÆW$6Æ72ÇÀ¢¶ÆW'D6öçG&öÆÆW$6Æ72&W7öæG5Fõ6VÆV7F÷#¦f7F÷'•6VÆV7F÷%Ò’°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’æ&÷'B&V6öãÕT”ÆW'D6öçG&öÆÆW"Öf7F÷'’ÖÖ—76–ær"“°¢&WGW&ã°¢Ğ¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’ç&W6VçFW"6Æ73ÒT"À¢å57G&–ætg&öÔ6Æ72†6öçG&öÆÆW"æ6Æ72’“°¢T”ÆW'D6öçG&öÆÆW"§6†VWBÒ‚†–B‚¢’„6Æ72Â4TÂÂå57G&–ær¢Âå57G&–ær¢Âå4–çFVvW"’–ö&¦5ö×6u6VæB’€¢ÆW'D6öçG&öÆÆW$6Æ72Âf7F÷'•6VÆV7F÷"Âæ–ÂÂæ–ÂÀ¢„å4–çFVvW"•T”ÆW'D6öçG&öÆÆW%7G–ÆT7F–öå6†VWB“°¢–b‚6†VWB’°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’æ&÷'B&V6öãÕT”ÆW'D6öçG&öÆÆW"Öf7F÷'’×&WGW&æVBÖæ–Â"“°¢&WGW&ã°¢Ğ¢õ÷vV²–BvVµF&vWBÒöÆVv7”ÖVçUF&vWC°¢4TÂÇ”7F–öâÒöÆVv7”Ç”7F–öã°¢4TÂ&W6WD7F–öâÒöÆVv7•&W6WD7F–öã°¢·6†VWBFD7F–öã¥µT”ÆW'D7F–öà¢7F–öåv—F…F—FÆS¤ÄtÆö6Æ—¦VB„'&Vg2æ'WGFöâæÇ’"¢7G–ÆS¥T”ÆW'D7F–öå7G–ÆTFVfVÇ@¢†æFÆW#¥â…õ÷VçW6VBT”ÆW'D7F–öâ¦7F–öâ’°¢–BF&vWBÒvVµF&vWC°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’æÇ’æ&Vv–âF&vWCÒT6VÆV7F÷#ÒT"À¢å57G&–ætg&öÔ6Æ72…·F&vWB6Æ75Ò’À¢å57G&–ætg&öÕ6VÆV7F÷"†Ç”7F–öâ’“°¢–b‡F&vWBbbÇ”7F–öâbb·F&vWB&W7öæG5Fõ6VÆV7F÷#¦Ç”7F–öåÒ’°¢G'’°¢‚‡fö–B‚¢’†–BÂ4TÂ’–ö&¦5ö×6u6VæB’‡F&vWBÂÇ”7F–öâ“°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’æÇ’æVæB"“°¢Ò6F6‚„å4W†6WF–öâ¦W†6WF–öâ’°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’æÇ’æW†6WF–öâæÖSÒT&V6öãÒT"À¢W†6WF–öâææÖRÂW†6WF–öâç&V6öâ“°¢Ğ¢ÒVÇ6R°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’æÇ’æ&÷'B&V6öã×F&vWBÖ÷"×6VÆV7F÷"ÖÖ—76–ær"“°¢Ğ¢ÕÕÓ°¢·6†VWBFD7F–öã¥µT”ÆW'D7F–öà¢7F–öåv—F…F—FÆS¢…öÆVv7•&W6WEF—FÆRæÆVæwF‚òöÆVv7•&W6WEF—FÆP¢¢ÄtÆö6Æ—¦VB„'&Vg2æ'WGFöâç&W6WB"’¢7G–ÆS¥T”ÆW'D7F–öå7G–ÆTFW7G'V7F—fP¢†æFÆW#¥â…õ÷VçW6VBT”ÆW'D7F–öâ¦7F–öâ’°¢–BF&vWBÒvVµF&vWC°¢–b‡F&vWBbb&W6WD7F–öâbb·F&vWB&W7öæG5Fõ6VÆV7F÷#§&W6WD7F–öåÒ¢‚‡fö–B‚¢’†–BÂ4TÂ’–ö&¦5ö×6u6VæB’‡F&vWBÂ&W6WD7F–öâ“°¢ÕÕÓ°¢·6†VWBFD7F–öã¥µT”ÆW'D7F–öà¢7F–öåv—F…F—FÆS¤ÄtÆö6Æ—¦VB„'&Vg2æ'WGFöâæ6æ6VÂ"¢7G–ÆS¥T”ÆW'D7F–öå7G–ÆT6æ6VÂ†æFÆW#¦æ–ÅÕÓ°¢–b‡6†VWBç÷÷fW%&W6VçFF–öä6öçG&öÆÆW"’°¢6†VWBç÷÷fW%&W6VçFF–öä6öçG&öÆÆW"ç6÷W&6Uf–WrÒ6VÆc°¢6†VWBç÷÷fW%&W6VçFF–öä6öçG&öÆÆW"ç6÷W&6U&V7BÒ6VÆbæ&÷VæG3°¢Ğ¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’ç&W6VçBæ&Vv–â"“°¢G'’°¢¶6öçG&öÆÆW"&W6VçEf–Wt6öçG&öÆÆW#§6†VWBæ–ÖFVC¥”U26ö×ÆWF–öã¥ç°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’ç&W6VçBæVæB"“°¢ÕÓ°¢Ò6F6‚„å4W†6WF–öâ¦W†6WF–öâ’°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRæÆVv7’ç&W6VçBæW†6WF–öâæÖSÒT&V6öãÒT"À¢W†6WF–öâææÖRÂW†6WF–öâç&V6öâ“°¢Ğ§Ğ¢Ò‡fö–B–Æ–÷WE7V'f–Ww2°¢·7WW"Æ–÷WE7V'f–Ww5Ó°¢övÆ72æg&ÖRÒ6VÆbæ&÷VæG3°¢÷F–çBæg&ÖRÒ6VÆbæ&÷VæG3°¢ö'WGFöâæg&ÖRÒ6VÆbæ&÷VæG3°¢övÇ—‚æg&ÖRÒ6VÆbæ&÷VæG3°¢4tfÆöB&F—W2Ò4u&V7DvWD†V–v‡B‡6VÆbæ&÷VæG2’¢ãS°¢övÆ72æÆ–W"æ6÷&æW%&F—W2Ò&F—W3°¢÷F–çBæÆ–W"æ6÷&æW%&F—W2Ò&F—W3°§Ğ¢Ò‡fö–B–Ætæ–ÖFU&W76VC¢„$ôôÂ—&W76VB°¢4Æ–W"§&W6VçFF–öâÒ6VÆbæÆ–W"ç&W6VçFF–öäÆ–W#°¢–b‡&W6VçFF–öâ’°¢´4G&ç67F–öâ&Vv–åÓ°¢´4G&ç67F–öâ6WDF—6&ÆT7F–öç3¥”U5Ó°¢6VÆbçG&ç6f÷&ÒÒ4G&ç6f÷&Ó4DvWDff–æUG&ç6f÷&Ò‡&W6VçFF–öâçG&ç6f÷&Ò“°¢´4G&ç67F–öâ6öÖÖ—EÓ°¢Ğ¢µ÷&W74æ–ÖF÷"7F÷æ–ÖF–öã¥”U5Ó° ¢4tfÆöBÖ72Òãƒ°¢4tfÆöB7F–ffæW72Ò3ã°¢4tfÆöBF×–ærÒ&W76VBò‚ã¢"ã°¢4tfÆöBfVÆö6—G’Ò&W76VBòãR¢ã°¢4tfÆöBGW&F–öâÒ&W76VBòã2¢ãS°¢T•7&–æuF–Ö–æu&ÖWFW'2§F–Ö–ærÒµµT•7&–æuF–Ö–æu&ÖWFW'2ÆÆö5Ğ¢–æ—Ev—F„Ö73¦Ö727F–ffæW73§7F–ffæW72F×–æs¦F×–æp¢–æ—F–ÅfVÆö6—G“¤4ufV7F÷$Ö¶R‡fVÆö6—G’ÂfVÆö6—G’•Ó°¢÷&W74æ–ÖF÷"ÒµµT•f–Wu&÷W'G”æ–ÖF÷"ÆÆö5Ò–æ—Ev—F„GW&F–öã¦GW&F–öâF–Ö–æu&ÖWFW'3§F–Ö–æuÓ°¢÷&W74æ–ÖF÷"æ–çFW''WF–&ÆRÒ”U3°¢õ÷vV²ÄtÆ—fTvÆ74&$'WGFöâ§vVµ6VÆbÒ6VÆc°¢µ÷&W74æ–ÖF÷"FDæ–ÖF–öç3¥ç°¢ÄtÆ—fTvÆ74&$'WGFöâ§7G&öæu6VÆbÒvVµ6VÆc°¢–b‚7G&öæu6VÆb’&WGW&ã°¢7G&öæu6VÆbçG&ç6f÷&ÒÒ&W76VBò4tff–æUG&ç6f÷&ÔÖ¶U66ÆRƒãbÂãb’¢4tff–æUG&ç6f÷&Ô–FVçF—G“°¢ÕÓ°¢µ÷&W74æ–ÖF÷"FD6ö×ÆWF–öã¥â…õ÷VçW6VBT•f–Wtæ–ÖF–æu÷6—F–öâ÷6—F–öâ’°¢ÄtÆ—fTvÆ74&$'WGFöâ§7G&öæu6VÆbÒvVµ6VÆc°¢–b‡7G&öæu6VÆb’7G&öæu6VÆbÓå÷&W74æ–ÖF÷"Òæ–Ã°¢ÕÓ°¢µ÷&W74æ–ÖF÷"7F'Dæ–ÖF–öåÓ°§Ğ¢Ò‡fö–B—6WE&W76VC¢†–B—6VæFW"°¢‡fö–B—6VæFW#°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRçF÷V6‚æF÷vâ"“°¢·6VÆbÆtæ–ÖFU&W76VC¥”U5Ó°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRçF÷V6‚æF÷vâææ–ÖF–öâ×7F'FVB"“°§Ğ¢Ò‡fö–B–6ÆV%&W76VC¢†–B—6VæFW"°¢‡fö–B—6VæFW#°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRçF÷V6‚çW"“°¢·6VÆbÆtæ–ÖFU&W76VC¤äõÓ°¢ÄtF–væ÷7F–4Æör„'&Vg2æÖVçRçF÷V6‚çWææ–ÖF–öâ×7F'FVB"“°§Ğ¢Ò‡fö–B—&Vg&W6„vÆ72²µövÆ72Ç”f–ÇFW'5Ó²Ğ¤Væ@ §7FF–2T”æf–vF–öä&$V&æ6R¤ÄtÖ¶U&Vg5G&ç7&VçDæf–vF–öäV&æ6R‡fö–B’°¢–b‚Äu7—7FVÕfW'6–öäDÆV7Bƒ2ÂÂ’ÇÀ¢å46Æ74g&öÕ7G&–ær„%T”æf–vF–öä&$V&æ6R"’’&WGW&âæ–Ã°¢T”æf–vF–öä&$V&æ6R¦V&æ6RÒµµT”æf–vF–öä&$V&æ6RÆÆö5Ò–æ—EÓ°¢¶V&æ6R6öæf–wW&Uv—F…G&ç7&VçD&6¶w&÷VæEÓ°¢V&æ6Ræ&6¶w&÷VæD6öÆ÷"ÒT”6öÆ÷"æ6ÆV$6öÆ÷#°¢V&æ6Rç6†F÷t6öÆ÷"ÒT”6öÆ÷"æ6ÆV$6öÆ÷#°¢&WGW&âV&æ6S°§Ğ §fö–BÄtÇ”æf–vF–öä&$V&æ6R…T”æf–vF–öä—FVÒ¦æf–vF–öä—FVÒ’°¢–b‚Äu7—7FVÕfW'6–öäDÆV7Bƒ2ÂÂ’ÇÀ¢¶æf–vF–öä—FVÒ&W7öæG5Fõ6VÆV7F÷#¤å56VÆV7F÷$g&öÕ7G&–ær„'6WE7FæF&DV&æ6S¢"•Ò’°¢&WGW&ã°¢Ğ¢T”æf–vF–öä&$V&æ6R¦V&æ6RÒÄtÖ¶U&Vg5G&ç7&VçDæf–vF–öäV&æ6R‚“°¢–b‚V&æ6R’&WGW&ã°¢æf–vF–öä—FVÒç7FæF&DV&æ6RÒV&æ6S°¢æf–vF–öä—FVÒç67&öÆÄVFvTV&æ6RÒV&æ6S°¢æf–vF–öä—FVÒæ6ö×7DV&æ6RÒV&æ6S°¢–b„f–Æ&ÆR†”õ2RãÂ¢’’°¢æf–vF–öä—FVÒæ6ö×7E67&öÆÄVFvTV&æ6RÒV&æ6S°¢Ğ§Ğ §fö–BÄt–ç7FÆÅ67&öÆÆ&ÆU7F6²…T•f–Wt6öçG&öÆÆW"¦6öçG&öÆÆW"À¢4tfÆöBF÷–ç6WBÀ¢4tfÆöB7F6µ76–ærÀ¢T•67&öÆÅf–Wr¥õ÷7G&öær§67&öÆÅf–Wt÷WBÀ¢T•7F6µf–Wr¥õ÷7G&öær§7F6µf–Wt÷WB’°¢T•67&öÆÅf–Wr§67&öÆÅf–WrÒµµT•67&öÆÅf–WrÆÆö5Ò–æ—Ev—F„g&ÖS¦6öçG&öÆÆW"çf–Wræ&÷VæG5Ó°¢67&öÆÅf–WræWF÷&W6—¦–ætÖ6²ÒT•f–WtWF÷&W6—¦–ætfÆW†–&ÆUv–GF‚ÂT•f–WtWF÷&W6—¦–ætfÆW†–&ÆT†V–v‡C°¢¶6öçG&öÆÆW"çf–WrFE7V'f–Ws§67&öÆÅf–WuÓ° ¢T•7F6µf–Wr§7F6µf–WrÒµµT•7F6µf–WrÆÆö5Ò–æ—Ev—F„g&ÖS¤4u&V7E¦W&õÓ°¢7F6µf–Wræ†—2ÒT”Æ–÷WD6öç7G&–çD†—5fW'F–6Ã°¢7F6µf–Wrç76–ærÒ7F6µ76–æs°¢7F6µf–WrçG&ç6ÆFW4WF÷&W6—¦–ætÖ6´–çFô6öç7G&–çG2Òäó°¢·67&öÆÅf–WrFE7V'f–Ws§7F6µf–WuÓ° ¢´å4Æ–÷WD6öç7G&–çB7F—fFT6öç7G&–çG3¤°¢·7F6µf–WrçF÷æ6†÷"6öç7G&–çDWVÅFôæ6†÷#§67&öÆÅf–Wræ6öçFVçDÆ–÷WDwV–FRçF÷æ6†÷"6öç7FçC§F÷–ç6WEÒÀ¢·7F6µf–WræÆVF–ætæ6†÷"6öç7G&–çDWVÅFôæ6†÷#§67&öÆÅf–Wræg&ÖTÆ–÷WDwV–FRæÆVF–ætæ6†÷"6öç7FçC£bãÒÀ¢·7F6µf–WrçG&–Æ–ætæ6†÷"6öç7G&–çDWVÅFôæ6†÷#§67&öÆÅf–Wræg&ÖTÆ–÷WDwV–FRçG&–Æ–ætæ6†÷"6öç7FçC¢ÓbãÒÀ¢·7F6µf–Wræ&÷GFöÔæ6†÷"6öç7G&–çDWVÅFôæ6†÷#§67&öÆÅf–Wræ6öçFVçDÆ–÷WDwV–FRæ&÷GFöÔæ6†÷"6öç7FçC¢Ó"ãÒÀ¢ÕÓ° ¢–b‡67&öÆÅf–Wt÷WB’§67&öÆÅf–Wt÷WBÒ67&öÆÅf–Ws°¢–b‡7F6µf–Wt÷WB’§7F6µf–Wt÷WBÒ7F6µf–Ws°§Ğ §fö–BÄt–ç7FÆÄ&÷GFöÕ&W7&–æt&"…T•f–Wt6öçG&öÆÆW"¦6öçG&öÆÆW"ÂT•f–Wr¥õ÷7G&öær§&W7&–æt&$÷WB’°¢T•f–Wr§&W7&–æt&"ÒÄtÖ¶U&W7&–æt&"†6öçG&öÆÆW"Â6VÆV7F÷"††æFÆU&W7&–æu&W76VB’Â6VÆV7F÷"††æFÆTÆFW%&W76VB’“°¢¶6öçG&öÆÆW"çf–WrFE7V'f–Ws§&W7&–æt&%Ó°¢T”Æ–÷WDwV–FR¦wV–FRÒ6öçG&öÆÆW"çf–Wrç6fT&VÆ–÷WDwV–FS°¢´å4Æ–÷WD6öç7G&–çB7F—fFT6öç7G&–çG3¤°¢·&W7&–æt&"æÆVF–ætæ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦wV–FRæÆVF–ætæ6†÷"6öç7FçC£bãÒÀ¢·&W7&–æt&"çG&–Æ–ætæ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦wV–FRçG&–Æ–ætæ6†÷"6öç7FçC¢ÓbãÒÀ¢·&W7&–æt&"æ&÷GFöÔæ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦wV–FRæ&÷GFöÔæ6†÷"6öç7FçC¢Ó"ãÒÀ¢ÕÓ°¢–b‡&W7&–æt&$÷WB’§&W7&–æt&$÷WBÒ&W7&–æt&#°§Ğ §fö–BÄu&Vg&W6…&W7&–æt&$vÆ72…T•f–Wr§&W7&–æt&"’°¢–b‚&W7&–æt&"’&WGW&ã°¢T•f–Wr¦vÆ75f–WrÒö&¦5övWD76ö6–FVDö&¦V7B‡&W7&–æt&"Â´Äu&W7&–æt&$vÆ75f–Wt¶W’“°¢T•f–Wr§F–çEf–WrÒö&¦5övWD76ö6–FVDö&¦V7B‡&W7&–æt&"Â´Äu&W7&–æt&%F–çEf–Wt¶W’“°¢F–çEf–Wræ&6¶w&÷VæD6öÆ÷"ÒµT”6öÆ÷"6öÆ÷%v—F„G–æÖ–5&÷f–FW#¥åT”6öÆ÷"¢ôæöæçVÆÂ…T•G&—D6öÆÆV7F–öâ¢ôæöæçVÆÂG&—B’°¢–b‡G&—BçW6W$–çFW&f6U7G–ÆRÓÒT•W6W$–çFW&f6U7G–ÆTF&²’°¢&WGW&âµµT”6öÆ÷"v†—FT6öÆ÷%Ò6öÆ÷%v—F„Ç†6ö×öæVçC£ãEÓ°¢Ğ¢&WGW&âµµT”6öÆ÷"&Æ6´6öÆ÷%Ò6öÆ÷%v—F„Ç†6ö×öæVçC£ãÓ°¢ÕÓ°¢vÆ75f–Wræ†–FFVâÒäó°¢–b…¶vÆ75f–Wr—4¶–æDöd6Æ73¥´ÄtÆ—fT&6¶G&÷f–Wr6Æ75ÕÒ’°¢²„ÄtÆ—fT&6¶G&÷f–Wr¢–vÆ75f–WrÇ”f–ÇFW'5Ó°¢Ğ§Ğ §fö–BÄu66†VGVÆU&W7&–æt&$vÆ75&Vg&W6‚…T•f–Wr§&W7&–æt&"’°¢–b‚&W7&–æt&"’&WGW&ã°¢Äu&Vg&W6…&W7&–æt&$vÆ72‡&W7&–æt&"“°¢F—7F6…ö7–æ2†F—7F6…övWEöÖ–å÷VWVR‚’Âç°¢Äu&Vg&W6…&W7&–æt&$vÆ72‡&W7&–æt&"“°¢Ò“°¢F—7F6…ögFW"†F—7F6…÷F–ÖR„D•5D4…õD”ÔUôäõrÂ†–çCcE÷B’ƒãR¢å4T5õU%õ4T2’’ÂF—7F6…övWEöÖ–å÷VWVR‚’Âç°¢Äu&Vg&W6…&W7&–æt&$vÆ72‡&W7&–æt&"“°¢Ò“°¢F—7F6…ögFW"†F—7F6…÷F–ÖR„D•5D4…õD”ÔUôäõrÂ†–çCcE÷B’ƒã‚¢å4T5õU%õ4T2’’ÂF—7F6…övWEöÖ–å÷VWVR‚’Âç°¢Äu&Vg&W6…&W7&–æt&$vÆ72‡&W7&–æt&"“°¢Ò“°¢F—7F6…ögFW"†F—7F6…÷F–ÖR„D•5D4…õD”ÔUôäõrÂ†–çCcE÷B’ƒã3R¢å4T5õU%õ4T2’’ÂF—7F6…övWEöÖ–å÷VWVR‚’Âç°¢Äu&Vg&W6…&W7&–æt&$vÆ72‡&W7&–æt&"“°¢Ò“°§Ğ §fö–BÄu&W6VçE6Æ–FW%fÇVU&ö×B…T•f–Wt6öçG&öÆÆW"¦6öçG&öÆÆW"ÂT”Æ&VÂ§fÇVTÆ&VÂ’°¢–b‚·fÇVTÆ&VÂ—4¶–æDöd6Æ73¥µT”Æ&VÂ6Æ75ÕÒ’&WGW&ã° ¢T•6Æ–FW"§6Æ–FW"Òö&¦5övWD76ö6–FVDö&¦V7B‡fÇVTÆ&VÂÂ´Äu6Æ–FW$¶W’“°¢å57G&–ær§&VfW&Væ6T¶W’Òö&¦5övWD76ö6–FVDö&¦V7B‡fÇVTÆ&VÂÂ´Äu&VfW&Væ6T¶W”¶W’“°¢å4çVÖ&W"¦Ö–äçVÖ&W"Òö&¦5övWD76ö6–FVDö&¦V7B‡fÇVTÆ&VÂÂ´ÄtÖ–åfÇVT¶W’“°¢å4çVÖ&W"¦Ö„çVÖ&W"Òö&¦5övWD76ö6–FVDö&¦V7B‡fÇVTÆ&VÂÂ´ÄtÖ…fÇVT¶W’“°¢å4çVÖ&W"¦FV6–ÖÇ4çVÖ&W"Òö&¦5övWD76ö6–FVDö&¦V7B‡fÇVTÆ&VÂÂ´ÄtFV6–ÖÇ4¶W’“°¢å57G&–ær¦6öçG&öÅF—FÆRÒö&¦5övWD76ö6–FVDö&¦V7B‡fÇVTÆ&VÂÂ´Ät6öçG&öÅF—FÆT¶W’“°¢–b‚6Æ–FW"ÇÂ&VfW&Væ6T¶W’æÆVæwF‚ÇÂÖ–äçVÖ&W"ÇÂÖ„çVÖ&W"ÇÂFV6–ÖÇ4çVÖ&W"’&WGW&ã° ¢å4–çFVvW"FV6–ÖÇ2ÒFV6–ÖÇ4çVÖ&W"æ–çFVvW%fÇVS°¢4tfÆöBÖ–åfÇVRÒÖ–äçVÖ&W"æF÷V&ÆUfÇVS°¢4tfÆöBÖ…fÇVRÒÖ„çVÖ&W"æF÷V&ÆUfÇVS°¢å57G&–ær¦ÖW76vRÒ´å57G&–ær7G&–æuv—F„f÷&ÖC¤ÄtÆö6Æ—¦VB„'&Vg2çfÇVU÷&ö×BæÖW76vR"’À¢Ätf÷&ÖE6Æ–FW%fÇVR†Ö–åfÇVRÂFV6–ÖÇ2’À¢Ätf÷&ÖE6Æ–FW%fÇVR†Ö…fÇVRÂFV6–ÖÇ2•Ó° ¢Äu&W6VçEFW‡D–çWE6†VWB†6öçG&öÆÆW"À¢†6öçG&öÅF—FÆRæÆVæwF‚ò6öçG&öÅF—FÆR¢ÄtÆö6Æ—¦VB„'&Vg2çfÇVU÷&ö×BçF—FÆR"’’À¢ÖW76vRÀ¢Ätf÷&ÖE6Æ–FW%fÇVR‡6Æ–FW"çfÇVRÂFV6–ÖÇ2’À¢Ätf÷&ÖE6Æ–FW%fÇVR‡6Æ–FW"çfÇVRÂFV6–ÖÇ2’À¢T”¶W–&ö&EG—TFV6–ÖÅBÀ¢äòÀ¢â„å57G&–ær§FW‡B’°¢å4çVÖ&W"§'6VDçVÖ&W"ÒÄu'6TÆö6Æ—¦VDFV6–ÖÅ7G&–ær‡FW‡Bó¢""“°¢–b‚'6VDçVÖ&W"’&WGW&ã° ¢4tfÆöB&ufÇVRÒ'6VDçVÖ&W"æF÷V&ÆUfÇVS°¢4tfÆöB6Æ–FW%fÇVRÒÔ”â„Ô‚‡&ufÇVRÂÖ–åfÇVR’ÂÖ…fÇVR“°¢6Æ–FW"çfÇVRÒ6Æ–FW%fÇVS°¢fÇVTÆ&VÂçFW‡BÒÄtf÷&ÖE6Æ–FW%fÇVR‡&ufÇVRÂFV6–ÖÇ2“°¢Äuw&—FU&VfW&Væ6R‡&VfW&Væ6T¶W’Â‡&ufÇVR’“°¢Ò“°§Ğ §fö–BÄtæ–ÖFU6Æ–FW%FôFVfVÇB…T•6Æ–FW"§6Æ–FW"Â4tfÆöBF&vWEfÇVRÂT”Æ&VÂ§fÇVTÆ&VÂÂå4–çFVvW"FV6–ÖÇ2’°¢Äu6Æ–FW%&W6WDæ–ÖF÷"¦W†—7F–ærÒö&¦5övWD76ö6–FVDö&¦V7B‡6Æ–FW"Â´Äu6Æ–FW$æ–ÖF÷$¶W’“°¢–b†W†—7F–æræF—7Æ”Æ–æ²’°¢¶W†—7F–æræF—7Æ”Æ–æ²–çfÆ–FFUÓ°¢W†—7F–æræF—7Æ”Æ–æ²Òæ–Ã°¢Ğ ¢Äu6Æ–FW%&W6WDæ–ÖF÷"¦æ–ÖF÷"Ò´Äu6Æ–FW%&W6WDæ–ÖF÷"æWuÓ°¢æ–ÖF÷"ç6Æ–FW"Ò6Æ–FW#°¢æ–ÖF÷"çfÇVTÆ&VÂÒfÇVTÆ&VÃ°¢æ–ÖF÷"ç7F'EfÇVRÒ6Æ–FW"çfÇVS°¢æ–ÖF÷"çF&vWEfÇVRÒF&vWEfÇVS°¢æ–ÖF÷"æFV6–ÖÇ2ÒFV6–ÖÇ3°¢æ–ÖF÷"ç7F'EF–ÖRÒ47W'&VçDÖVF–F–ÖR‚“°¢æ–ÖF÷"æF—7Æ”Æ–æ²Ò´4F—7Æ”Æ–æ²F—7Æ”Æ–æµv—F…F&vWC¦æ–ÖF÷"6VÆV7F÷#¤6VÆV7F÷"‡F–6³¢•Ó°¢¶æ–ÖF÷"æF—7Æ”Æ–æ²FEFõ'VäÆö÷¥´å5'VäÆö÷Ö–å'VäÆö÷Òf÷$ÖöFS¤å5'VäÆö÷6öÖÖöäÖöFW5Ó°¢ö&¦5÷6WD76ö6–FVDö&¦V7B‡6Æ–FW"Â´Äu6Æ–FW$æ–ÖF÷$¶W’Âæ–ÖF÷"Âô$¤5ô54ô4”D”ôåõ$UD”åôäôäDôÔ”2“°§Ğ ¥T•f–Wr¤ÄtÖ¶Tæd6&DvÇ—…f–Wr„å57G&–ær§7–Ö&öÄæÖRÂT”6öÆ÷"§F–çD6öÆ÷"’°¢T•f–Wr¦6öçF–æW"ÒµµT•f–WrÆÆö5Ò–æ—Ev—F„g&ÖS¤4u&V7E¦W&õÓ°¢6öçF–æW"çG&ç6ÆFW4WF÷&W6—¦–ætÖ6´–çFô6öç7G&–çG2Òäó°¢´å4Æ–÷WD6öç7G&–çB7F—fFT6öç7G&–çG3¤°¢¶6öçF–æW"çv–GF„æ6†÷"6öç7G&–çDWVÅFô6öç7FçC£#ãÒÀ¢¶6öçF–æW"æ†V–v‡Dæ6†÷"6öç7G&–çDWVÅFô6öç7FçC£#ãÒÀ¢ÕÓ° ¢–b…·7–Ö&öÄæÖR—4WVÅFõ7G&–æs¤&ÆræÆö6·67&VVâç7F6¶VB%Ò’°¢T”–ÖvU7–Ö&öÄ6öæf–wW&F–öâ§†öæT6öæf–rĞ¢µT”–ÖvU7–Ö&öÄ6öæf–wW&F–öâ6öæf–wW&F–öåv—F…ö–çE6—¦S£rãvV–v‡C¥T”–ÖvU7–Ö&öÅvV–v‡E6VÖ–&öÆEÓ°¢T”–ÖvUf–Wr§†öæTvÇ—‚ÒµµT”–ÖvUf–WrÆÆö5Ò–æ—Ev—F„–ÖvS¥µT”–ÖvR7—7FVÔ–ÖvTæÖVC¤&—†öæR"v—F„6öæf–wW&F–öã§†öæT6öæf–uÕÓ°¢†öæTvÇ—‚çG&ç6ÆFW4WF÷&W6—¦–ætÖ6´–çFô6öç7G&–çG2Òäó°¢†öæTvÇ—‚çF–çD6öÆ÷"ÒF–çD6öÆ÷#°¢†öæTvÇ—‚æ6öçFVçDÖöFRÒT•f–Wt6öçFVçDÖöFU66ÆT7V7Df—C° ¢T•f–Wr¦Æö6´&FvRÒµµT•f–WrÆÆö5Ò–æ—Ev—F„g&ÖS¤4u&V7E¦W&õÓ°¢Æö6´&FvRçG&ç6ÆFW4WF÷&W6—¦–ætÖ6´–çFô6öç7G&–çG2Òäó°¢Æö6´&FvRæ&6¶w&÷VæD6öÆ÷"ÒµT”6öÆ÷"6V6öæF'•7—7FVÔw&÷WVD&6¶w&÷VæD6öÆ÷%Ó°¢Æö6´&FvRæÆ–W"æ6÷&æW%&F—W2Òrã°¢Æö6´&FvRæÆ–W"æ6÷&æW$7W'fRÒ´46÷&æW$7W'fT6öçF–çV÷W3° ¢T”–ÖvU7–Ö&öÄ6öæf–wW&F–öâ¦Æö6´6öæf–rĞ¢µT”–ÖvU7–Ö&öÄ6öæf–wW&F–öâ6öæf–wW&F–öåv—F…ö–çE6—¦S£‚ãvV–v‡C¥T”–ÖvU7–Ö&öÅvV–v‡D&öÆEÓ°¢T”–ÖvUf–Wr¦Æö6´vÇ—‚ÒµµT”–ÖvUf–WrÆÆö5Ò–æ—Ev—F„–ÖvS¥µT”–ÖvR7—7FVÔ–ÖvTæÖVC¤&Æö6²æf–ÆÂ"v—F„6öæf–wW&F–öã¦Æö6´6öæf–uÕÓ°¢Æö6´vÇ—‚çG&ç6ÆFW4WF÷&W6—¦–ætÖ6´–çFô6öç7G&–çG2Òäó°¢Æö6´vÇ—‚çF–çD6öÆ÷"ÒF–çD6öÆ÷#°¢Æö6´vÇ—‚æ6öçFVçDÖöFRÒT•f–Wt6öçFVçDÖöFU66ÆT7V7Df—C° ¢¶6öçF–æW"FE7V'f–Ws§†öæTvÇ—…Ó°¢¶6öçF–æW"FE7V'f–Ws¦Æö6´&FvUÓ°¢¶Æö6´&FvRFE7V'f–Ws¦Æö6´vÇ—…Ó°¢´å4Æ–÷WD6öç7G&–çB7F—fFT6öç7G&–çG3¤°¢·†öæTvÇ—‚æ6VçFW%„æ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦6öçF–æW"æ6VçFW%„æ6†÷"6öç7FçC¢ÓãÒÀ¢·†öæTvÇ—‚æ6VçFW%”æ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦6öçF–æW"æ6VçFW%”æ6†÷%ÒÀ¢·†öæTvÇ—‚çv–GF„æ6†÷"6öç7G&–çDWVÅFô6öç7FçC£RãÒÀ¢·†öæTvÇ—‚æ†V–v‡Dæ6†÷"6öç7G&–çDWVÅFô6öç7FçC£RãÒÀ¢¶Æö6´&FvRçv–GF„æ6†÷"6öç7G&–çDWVÅFô6öç7FçC£BãÒÀ¢¶Æö6´&FvRæ†V–v‡Dæ6†÷"6öç7G&–çDWVÅFô6öç7FçC£BãÒÀ¢¶Æö6´&FvRçG&–Æ–ætæ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦6öçF–æW"çG&–Æ–ætæ6†÷%ÒÀ¢¶Æö6´&FvRæ&÷GFöÔæ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦6öçF–æW"æ&÷GFöÔæ6†÷%ÒÀ¢¶Æö6´vÇ—‚æ6VçFW%„æ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦Æö6´&FvRæ6VçFW%„æ6†÷%ÒÀ¢¶Æö6´vÇ—‚æ6VçFW%”æ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦Æö6´&FvRæ6VçFW%”æ6†÷%ÒÀ¢ÕÓ°¢&WGW&â6öçF–æW#°¢Ğ ¢T”–ÖvU7–Ö&öÄ6öæf–wW&F–öâ§7–Ö&öÄ6öæf–rĞ¢µT”–ÖvU7–Ö&öÄ6öæf–wW&F–öâ6öæf–wW&F–öåv—F…ö–çE6—¦S£bãvV–v‡C¥T”–ÖvU7–Ö&öÅvV–v‡E6VÖ–&öÆEÓ°¢T”–ÖvUf–Wr¦vÇ—‚ÒµµT”–ÖvUf–WrÆÆö5Ò–æ—Ev—F„–ÖvS¥µT”–ÖvR7—7FVÔ–ÖvTæÖVC§7–Ö&öÄæÖRv—F„6öæf–wW&F–öã§7–Ö&öÄ6öæf–uÕÓ°¢vÇ—‚çG&ç6ÆFW4WF÷&W6—¦–ætÖ6´–çFô6öç7G&–çG2Òäó°¢vÇ—‚çF–çD6öÆ÷"ÒF–çD6öÆ÷#°¢vÇ—‚æ6öçFVçDÖöFRÒT•f–Wt6öçFVçDÖöFU66ÆT7V7Df—C°¢¶6öçF–æW"FE7V'f–Ws¦vÇ—…Ó°¢´å4Æ–÷WD6öç7G&–çB7F—fFT6öç7G&–çG3¤°¢¶vÇ—‚æ6VçFW%„æ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦6öçF–æW"æ6VçFW%„æ6†÷%ÒÀ¢¶vÇ—‚æ6VçFW%”æ6†÷"6öç7G&–çDWVÅFôæ6†÷#¦6öçF–æW"æ6VçFW%”æ6†÷%ÒÀ¢ÕÓ°¢&WGW&â6öçF–æW#°§Ğ ¥T”6öÆ÷"¤Äu7V'vT6&D&6¶w&÷VæD6öÆ÷"‡fö–B’°¢&WGW&âµT”6öÆ÷"6öÆ÷%v—F„G–æÖ–5&÷f–FW#¥åT”6öÆ÷"¢ôæöæçVÆÂ…T•G&—D6öÆÆV7F–öâ¢ôæöæçVÆÂG&—B’°¢–b‡G&—BçW6W$–çFW&f6U7G–ÆRÓÒT•W6W$–çFW&f6U7G–ÆTF&²’°¢&WGW&âµµT”6öÆ÷"v†—FT6öÆ÷%Ò6öÆ÷%v—F„Ç†6ö×öæVçC£ãuÓ°¢Ğ¢&WGW&âµµT”6öÆ÷"v†—FT6öÆ÷%Ò6öÆ÷%v—F„Ç†6ö×öæVçC£ãseÓ°¢ÕÓ°§Ğ ¥T•f–Wr¤ÄtÖ¶U6V7F–öäF—f–FW"‡fö–B’°¢T•f–Wr¦F—f–FW"ÒµµT•f–WrÆÆö5Ò–æ—Ev—F„g&ÖS¤4u&V7E¦W&õÓ°¢F—f–FW"çG&ç6ÆFW4WF÷&W6—¦–ætÖ6´–çFô6öç7G&–çG2Òäó°¢F—f–FW"æ&6¶w&÷VæD6öÆ÷"ÒµT”6öÆ÷"6öÆ÷%v—F„G–æÖ–5&÷f–FW#¥åT”6öÆ÷"¢ôæöæçVÆÂ…T•G&—D6öÆÆV7F–öâ¢ôæöæçVÆÂG&—B’°¢–b‡G&—BçW6W$–çFW&f6U7G–ÆRÓÒT•W6W$–çFW&f6U7G–ÆTF&²’°¢&WGW&âµµT”6öÆ÷"v†—FT6öÆ÷%Ò6öÆ÷%v—F„Ç†6ö×öæVçC£ã…Ó°¢Ğ¢&WGW&âµµT”6öÆ÷"&Æ6´6öÆ÷%Ò6öÆ÷%v—F„Ç†6ö×öæVçC£ã…Ó°¢ÕÓ°¢F—f–FW"æÆ–W"æ6÷&æW%&F—W2ÒãS°¢´å4Æ–÷WD6öç7G&–çB7F—fFT6öç7G&–çG3¤°¢¶F—f–FW"æ†V–v‡Dæ6†÷"6öç7G&–çDWVÅFô6öç7FçC£ãĞ¢ÕÓ°¢&WGW&âF—f–FW#°§Ğ ¥T”&$'WGFöä—FVÒ¤ÄtÖ¶T6—&7VÆ$&6´—FVÒ†–BF&vWBÂ4TÂ7F–öâ’°¢ÄtÆ—fTvÆ74&$'WGFöâ¦'WGFöâÒµ´ÄtÆ—fTvÆ74&$'WGFöâÆÆö5Ò–æ—Ev—F…F&vWC§F&vWB7F–öã¦7F–öâ7–Ö&öÄæÖS¤&6†Wg&öâæÆVgB%Ó°¢&WGW&âµµT”&$'WGFöä—FVÒÆÆö5Ò–æ—Ev—F„7W7FöÕf–Ws¦'WGFöåÓ°§Ğ ¥T”&$'WGFöä—FVÒ¤ÄtÖ¶T6—&7VÆ$ÖVçT—FVÒ†–BF&vWBÂ4TÂÇ”7F–öâÂ4TÂ&W6WD7F–öâÂå57G&–ær§&W6WEF—FÆR’°¢ÄtÆ—fTvÆ74&$'WGFöâ¦'WGFöâÒµ´ÄtÆ—fTvÆ74&$'WGFöâÆÆö5Ğ¢–æ—Ev—F…F&vWC¦æ–Â7F–öã¦æ–Â7–Ö&öÄæÖS¤&Æ–æRã2æ†÷&—¦öçFÂ%Ó°¢–b„Ät6åW6TÖöFW&äÖVçW2‚’’°¢õ÷vV²–BvVµF&vWBÒF&vWC°¢T”7F–öâ¦Ç’ÒµT”7F–öâ7F–öåv—F…F—FÆS¤ÄtÆö6Æ—¦VB„'&Vg2æ'WGFöâæÇ’"¢–ÖvS¥µT”–ÖvR7—7FVÔ–ÖvTæÖVC¤&6†V6¶Ö&²%Ğ¢–FVçF–f–W#¦æ–À¢†æFÆW#¥â…õö¶–æFöbT”7F–öâ¦7F–öâ’°¢‡fö–B–7F–öã°¢–B7G&öæuF&vWBÒvVµF&vWC°¢–b‡7G&öæuF&vWBbb·7G&öæuF&vWB&W7öæG5Fõ6VÆV7F÷#¦Ç”7F–öåÒ’°¢‚‡fö–B‚¢’†–BÂ4TÂ’–ö&¦5ö×6u6VæB’‡7G&öæuF&vWBÂÇ”7F–öâ“°¢Ğ¢ÕÓ°¢T”7F–öâ§&W6WBÒµT”7F–öâ7F–öåv—F…F—FÆS¢‡&W6WEF—FÆRæÆVæwF‚ò&W6WEF—FÆR¢ÄtÆö6Æ—¦VB„'&Vg2æ'WGFöâç&W6WB"’¢–ÖvS¥µT”–ÖvR7—7FVÔ–ÖvTæÖVC¤&'&÷ræ6÷VçFW&6Æö6·v—6R%Ğ¢–FVçF–f–W#¦æ–À¢†æFÆW#¥â…õö¶–æFöbT”7F–öâ¦7F–öâ’°¢‡fö–B–7F–öã°¢–B7G&öæuF&vWBÒvVµF&vWC°¢–b‡7G&öæuF&vWBbb·7G&öæuF&vWB&W7öæG5Fõ6VÆV7F÷#§&W6WD7F–öåÒ’°¢‚‡fö–B‚¢’†–BÂ4TÂ’–ö&¦5ö×6u6VæB’‡7G&öæuF&vWBÂ&W6WD7F–öâ“°¢Ğ¢ÕÓ°¢T”ÖVçR¦ÖVçRÒµT”ÖVçRÖVçUv—F…F—FÆS¤""6†–ÆG&Vã¤²Ç’Â&W6WBÕÓ°¢¶'WGFöâ6WE&–Ö'”ÖVçS¦ÖVçUÓ°¢ÒVÇ6R°¢¶'WGFöâ6öæf–wW&TÆVv7”ÖVçUF&vWC§F&vW@¢Ç”7F–öã¦Ç”7F–öà¢&W6WD7F–öã§&W6WD7F–öà¢&W6WEF—FÆS§&W6WEF—FÆUÓ°¢Ğ¢'WGFöâæ66W76–&–Æ—G”Æ&VÂÒÄtÆö6Æ—¦VB„'&Vg2æ'WGFöâæÖ÷&R"“°¢T”&$'WGFöä—FVÒ¦—FVÒÒµµT”&$'WGFöä—FVÒÆÆö5Ò–æ—Ev—F„7W7FöÕf–Ws¦'WGFöåÓ°¢—FVÒæ66W76–&–Æ—G”Æ&VÂÒ'WGFöâæ66W76–&–Æ—G”Æ&VÃ°¢&WGW&â—FVÓ°§Ğ §fö–BÄu&Vg&W6„6—&7VÆ$&6´—FVÒ…T”&$'WGFöä—FVÒ¦—FVÒ’°¢–b…¶—FVÒæ7W7FöÕf–Wr—4¶–æDöd6Æ73¥´ÄtÆ—fTvÆ74&$'WGFöâ6Æ75ÕÒ’°¢²„ÄtÆ—fTvÆ74&$'WGFöâ¢–—FVÒæ7W7FöÕf–Wr&Vg&W6„vÆ75Ó°¢Ğ§Ğ §7FF–2å4çVÖ&W"¤Äu'6TÆö6Æ—¦VDFV6–ÖÅ7G&–ær„å57G&–ær§&uFW‡B’°¢å57G&–ær§G&–ÖÖVBÒ·&uFW‡B7G&–æt'•G&–ÖÖ–æt6†&7FW'4–å6WC¥´å46†&7FW%6WBv†—FW76TæDæWvÆ–æT6†&7FW%6WEÕÓ°¢–b‚G&–ÖÖVBæÆVæwF‚’&WGW&âæ–Ã° ¢å4çVÖ&W$f÷&ÖGFW"¦f÷&ÖGFW"Òµ´å4çVÖ&W$f÷&ÖGFW"ÆÆö5Ò–æ—EÓ°¢f÷&ÖGFW"æÆö6ÆRÒ´å4Æö6ÆR7W'&VçDÆö6ÆUÓ°¢å4çVÖ&W"§'6VDçVÖ&W"Ò¶f÷&ÖGFW"çVÖ&W$g&öÕ7G&–æs§G&–ÖÖVEÓ°¢–b‡'6VDçVÖ&W"’&WGW&â'6VDçVÖ&W#° ¢å57G&–ær¦æ÷&ÖÆ—¦VBÒ·G&–ÖÖVB7G&–æt'•&WÆ6–ætö67W'&Væ6W4öe7G&–æs¤"Â"v—F…7G&–æs¤"â%Ó°¢&WGW&â…¶æ÷&ÖÆ—¦VBF÷V&ÆUfÇVUÒ“°§Ğ §7FF–2fö–BÄtF—6Ö—74÷fW&Æ•æVÂ…T•f–Wr¦÷fW&Æ’ÂT•f–Wr§æVÂ’°¢µT•f–Wræ–ÖFUv—F„GW&F–öã£ã#"æ–ÖF–öç3¥ç°¢÷fW&Æ’æÇ†Òã°¢æVÂçG&ç6f÷&ÒÒ4tff–æUG&ç6f÷&ÔÖ¶U66ÆRƒã“bÂã“b“°¢Ò6ö×ÆWF–öã¥â…õ÷VçW6VB$ôôÂf–æ—6†VB’°¢¶÷fW&Æ’&VÖ÷fTg&öÕ7WW'f–WuÓ°¢ÕÓ°§Ğ §fö–BÄu&W6VçE&W6WD6öæf—&ÖF–öâ…T•f–Wt6öçG&öÆÆW"¦6öçG&öÆÆW"’°¢Äu&W6VçE&W6WD6öæf—&ÖF–öåv—F„&öG’†6öçG&öÆÆW"ÂÄtÆö6Æ—¦VB„'&Vg2ç&W6WEö6öæf—&Òæ&öG’"’Âå56VÆV7F÷$g&öÕ7G&–ær„'W&f÷&Ôæ–ÖFVE&VfW&Væ6U&W6WB"’“°§Ğ §fö–BÄu&W6VçE&W6WD6öæf—&ÖF–öåv—F„&öG’…T•f–Wt6öçG&öÆÆW"¦6öçG&öÆÆW"Âå57G&–ær¦&öG’Â4TÂ&W6WE6VÆV7F÷"’°¢–b‚6öçG&öÆÆW"çf–Wrçv–æF÷r’&WGW&ã°¢T”ÆW'D6öçG&öÆÆW"¦ÆW'BÒµT”ÆW'D6öçG&öÆÆW ¢ÆW'D6öçG&öÆÆW%v—F…F—FÆS¤ÄtÆö6Æ—¦VB„'&Vg2ç&W6WEö6öæf—&ÒçF—FÆR"¢ÖW76vS¢†&öG’æÆVæwF‚ò&öG’¢ÄtÆö6Æ—¦VB„'&Vg2ç&W6WEö6öæf—&Òæ&öG’"’¢&VfW'&VE7G–ÆS¥T”ÆW'D6öçG&öÆÆW%7G–ÆTÆW'EÓ°­tëßm¢G§²ÚîÆ­yÔraitCollection * _Nonnull trait) {
+#import "LGPrefsUIHelpers.h"
+#import "LGPrefsDataSupport.h"
+#import "../Shared/LGLiveBackdropView.h"
+#import "../Shared/LGSharedSupport.h"
+#import <notify.h>
+#import <objc/message.h>
+#import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
+#import <math.h>
+
+void * const kLGDefaultValueKey = (void *)&kLGDefaultValueKey;
+void * const kLGValueLabelKey = (void *)&kLGValueLabelKey;
+void * const kLGDecimalsKey = (void *)&kLGDecimalsKey;
+void * const kLGSliderAnimatorKey = (void *)&kLGSliderAnimatorKey;
+void * const kLGSliderKey = (void *)&kLGSliderKey;
+void * const kLGPreferenceKeyKey = (void *)&kLGPreferenceKeyKey;
+void * const kLGMinValueKey = (void *)&kLGMinValueKey;
+void * const kLGMaxValueKey = (void *)&kLGMaxValueKey;
+void * const kLGControlTitleKey = (void *)&kLGControlTitleKey;
+void * const kLGControlSubtitleKey = (void *)&kLGControlSubtitleKey;
+void * const kLGControlledByEnabledKey = (void *)&kLGControlledByEnabledKey;
+
+static NSURL *LGTemporaryPreferencesExportURL(void) {
+    NSString *filename = [NSString stringWithFormat:@"liquidass-preferences-%@.json",
+                          NSUUID.UUID.UUIDString.lowercaseString];
+    return [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:filename]];
+}
+
+@interface LGSliderResetAnimator : NSObject
+@property (nonatomic, weak) UISlider *slider;
+@property (nonatomic, weak) UILabel *valueLabel;
+@property (nonatomic, strong) CADisplayLink *displayLink;
+@property (nonatomic, assign) CFTimeInterval startTime;
+@property (nonatomic, assign) CGFloat startValue;
+@property (nonatomic, assign) CGFloat targetValue;
+@property (nonatomic, assign) NSInteger decimals;
+@end
+
+@implementation LGSliderResetAnimator
+
+- (void)tick:(CADisplayLink *)link {
+    if (!self.slider) {
+        [self.displayLink invalidate];
+        self.displayLink = nil;
+        return;
+    }
+    CFTimeInterval elapsed = CACurrentMediaTime() - self.startTime;
+    CGFloat t = MIN(MAX(elapsed / 0.42, 0.0), 1.0);
+    CGFloat eased = 1.0 - pow(1.0 - t, 3.0);
+    CGFloat value = self.startValue + ((self.targetValue - self.startValue) * eased);
+    self.slider.value = value;
+    if (self.valueLabel) {
+        self.valueLabel.text = LGFormatSliderValue(value, self.decimals);
+    }
+    if (t >= 1.0) {
+        [self.displayLink invalidate];
+        self.displayLink = nil;
+        objc_setAssociatedObject(self.slider, kLGSliderAnimatorKey, nil, OBJC_ASSOCIATION_ASSIGN);
+    }
+}
+
+@end
+
+static UIView *LGMakeRespringBar(id target, SEL respringAction, SEL laterAction);
+static void *kLGRespringBarGlassViewKey = &kLGRespringBarGlassViewKey;
+static void *kLGRespringBarTintViewKey = &kLGRespringBarTintViewKey;
+static NSNumber *LGParseLocalizedDecimalString(NSString *rawText);
+static void LGDismissOverlayPanel(UIView *overlay, UIView *panel);
+
+@interface LGLiveGlassBarButton : UIView
+- (instancetype)initWithTarget:(id)target action:(SEL)action symbolName:(NSString *)symbolName;
+- (void)setPrimaryMenu:(UIMenu *)menu;
+- (void)configureLegacyMenuTarget:(id)target
+                       applyAction:(SEL)applyAction
+                       resetAction:(SEL)resetAction
+                         resetTitle:(NSString *)resetTitle;
+- (void)refreshGlass;
+@end
+
+@implementation LGLiveGlassBarButton {
+    LGLiveBackdropView *_glass;
+    UIView *_tint;
+    UIButton *_button;
+    UIImageView *_glyph;
+    UIViewPropertyAnimator *_pressAnimator;
+    __weak id _legacyMenuTarget;
+    SEL _legacyApplyAction;
+    SEL _legacyResetAction;
+    NSString *_legacyResetTitle;
+}
+
+- (instancetype)initWithTarget:(id)target action:(SEL)action symbolName:(NSString *)symbolName {
+    self = [super initWithFrame:CGRectMake(0.0, 0.0, 44.0, 44.0)];
+    if (!self) return nil;
+    self.backgroundColor = UIColor.clearColor;
+    [self.widthAnchor constraintEqualToConstant:44.0].active = YES;
+    [self.heightAnchor constraintEqualToConstant:44.0].active = YES;
+
+    _glass = [[LGLiveBackdropView alloc] initWithFrame:self.bounds groupName:nil
+                                             filterType:LGFilterTypeForHostPrefix(@"PrefsButton")];
+    _glass.layer.cornerRadius = 22.0;
+    _glass.layer.cornerCurve = kCACornerCurveContinuous;
+    _glass.layer.masksToBounds = YES;
+    [self addSubview:_glass];
+
+    _tint = [[UIView alloc] initWithFrame:self.bounds];
+    _tint.userInteractionEnabled = NO;
+    _tint.layer.cornerRadius = 22.0;
+    _tint.layer.cornerCurve = kCACornerCurveContinuous;
+    _tint.layer.borderWidth = 0.75;
+    _tint.layer.borderColor = [[UIColor separatorColor] colorWithAlphaComponent:0.16].CGColor;
+    _tint.backgroundColor = LGColorWithDynamicProvider(^UIColor *(UITraitCollection *trait) {
+        return trait.userInterfaceStyle == UIUserInterfaceStyleDark
+            ? [UIColor colorWithWhite:1.0 alpha:0.06] : [UIColor colorWithWhite:1.0 alpha:0.12];
+    });
+    [self addSubview:_tint];
+
+    _button = [UIButton buttonWithType:UIButtonTypeCustom];
+    _button.frame = self.bounds;
+    // A nil target plus a NULL selector is not a valid target/action pair.
+    // Older UIControl implementations can retain it and fail only when the
+    // touch event is dispatched (the legacy three-line menu path).
+    if (target && action) {
+        [_button addTarget:target action:action
+          forControlEvents:UIControlEventTouchUpInside];
+    }
+    [_button addTarget:self action:@selector(setPressed:) forControlEvents:UIControlEventTouchDown];
+    [_button addTarget:self action:@selector(clearPressed:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+    [self addSubview:_button];
+
+    id configuration = nil;
+    Class configurationClass = NSClassFromString(@"UIImageSymbolConfiguration");
+    SEL configurationSelector = NSSelectorFromString(@"configurationWithPointSize:weight:");
+    if (configurationClass && [configurationClass respondsToSelector:configurationSelector]) {
+        configuration = ((id (*)(Class, SEL, CGFloat, NSInteger))objc_msgSend)(
+            configurationClass, configurationSelector, 22.0,
+            (NSInteger)UIImageSymbolWeightSemibold);
+    }
+    _glyph = [[UIImageView alloc] initWithImage:
+        LGSystemImageNamedWithConfiguration(symbolName, configuration)];
+    _glyph.tintColor = UIColor.labelColor;
+    _glyph.contentMode = UIViewContentModeCenter;
+    _glyph.userInteractionEnabled = NO;
+    [self addSubview:_glyph];
+    return self;
+}
+
+- (CGSize)intrinsicContentSize { return CGSizeMake(44.0, 44.0); }
+- (void)setPrimaryMenu:(UIMenu *)menu {
+    SEL menuSelector = NSSelectorFromString(@"setMenu:");
+    SEL primarySelector = NSSelectorFromString(@"setShowsMenuAsPrimaryAction:");
+    if (![_button respondsToSelector:menuSelector] ||
+        ![_button respondsToSelector:primarySelector]) return;
+    ((void (*)(id, SEL, id))objc_msgSend)(_button, menuSelector, menu);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(_button, primarySelector, YES);
+}
+- (void)configureLegacyMenuTarget:(id)target
+                       applyAction:(SEL)applyAction
+                       resetAction:(SEL)resetAction
+                         resetTitle:(NSString *)resetTitle {
+    _legacyMenuTarget = target;
+    _legacyApplyAction = applyAction;
+    _legacyResetAction = resetAction;
+    _legacyResetTitle = [resetTitle copy];
+    [_button addTarget:self action:@selector(presentLegacyMenu:)
+      forControlEvents:UIControlEventTouchUpInside];
+}
+- (void)presentLegacyMenu:(id)sender {
+    (void)sender;
+    LGDiagnosticLog(@"prefs.menu.legacy.begin target=%@ apply=%@ reset=%@",
+                    NSStringFromClass([_legacyMenuTarget class]),
+                    NSStringFromSelector(_legacyApplyAction),
+                    NSStringFromSelector(_legacyResetAction));
+    UIViewController *controller = nil;
+    for (UIResponder *responder = self; responder; responder = responder.nextResponder) {
+        if ([responder isKindOfClass:UIViewController.class]) {
+            controller = (UIViewController *)responder;
+            break;
+        }
+    }
+    if (!controller && [_legacyMenuTarget isKindOfClass:[UIViewController class]]) {
+        controller = (UIViewController *)_legacyMenuTarget;
+    }
+    if (!controller) {
+        LGDiagnosticLog(@"prefs.menu.legacy.abort reason=no-presenting-controller");
+        return;
+    }
+    Class alertControllerClass = NSClassFromString(@"UIAlertController");
+    SEL factorySelector = NSSelectorFromString(
+        @"alertControllerWithTitle:message:preferredStyle:");
+    if (!alertControllerClass ||
+        ![alertControllerClass respondsToSelector:factorySelector]) {
+        LGDiagnosticLog(@"prefs.menu.legacy.abort reason=UIAlertController-factory-missing");
+        return;
+    }
+    LGDiagnosticLog(@"prefs.menu.legacy.presenter class=%@",
+                    NSStringFromClass(controller.class));
+    UIAlertController *sheet = ((id (*)(Class, SEL, NSString *, NSString *, NSInteger))objc_msgSend)(
+        alertControllerClass, factorySelector, nil, nil,
+        (NSInteger)UIAlertControllerStyleActionSheet);
+    if (!sheet) {
+        LGDiagnosticLog(@"prefs.menu.legacy.abort reason=UIAlertController-factory-returned-nil");
+        return;
+    }
+    __weak id weakTarget = _legacyMenuTarget;
+    SEL applyAction = _legacyApplyAction;
+    SEL resetAction = _legacyResetAction;
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.apply")
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        id target = weakTarget;
+        LGDiagnosticLog(@"prefs.menu.legacy.apply.begin target=%@ selector=%@",
+                        NSStringFromClass([target class]),
+                        NSStringFromSelector(applyAction));
+        if (target && applyAction && [target respondsToSelector:applyAction]) {
+            @try {
+                ((void (*)(id, SEL))objc_msgSend)(target, applyAction);
+                LGDiagnosticLog(@"prefs.menu.legacy.apply.end");
+            } @catch (NSException *exception) {
+                LGDiagnosticLog(@"prefs.menu.legacy.apply.exception name=%@ reason=%@",
+                                exception.name, exception.reason);
+            }
+        } else {
+            LGDiagnosticLog(@"prefs.menu.legacy.apply.abort reason=target-or-selector-missing");
+        }
+    }]];
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:(_legacyResetTitle.length ? _legacyResetTitle
+                                                  : LGLocalized(@"prefs.button.reset"))
+                  style:UIAlertActionStyleDestructive
+                handler:^(__unused UIAlertAction *action) {
+        id target = weakTarget;
+        if (target && resetAction && [target respondsToSelector:resetAction])
+            ((void (*)(id, SEL))objc_msgSend)(target, resetAction);
+    }]];
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.cancel")
+                  style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.sourceView = self;
+        sheet.popoverPresentationController.sourceRect = self.bounds;
+    }
+    LGDiagnosticLog(@"prefs.menu.legacy.present.begin");
+    @try {
+        [controller presentViewController:sheet animated:YES completion:^{
+            LGDiagnosticLog(@"prefs.menu.legacy.present.end");
+        }];
+    } @catch (NSException *exception) {
+        LGDiagnosticLog(@"prefs.menu.legacy.present.exception name=%@ reason=%@",
+                        exception.name, exception.reason);
+    }
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    _glass.frame = self.bounds;
+    _tint.frame = self.bounds;
+    _button.frame = self.bounds;
+    _glyph.frame = self.bounds;
+    CGFloat radius = CGRectGetHeight(self.bounds) * 0.5;
+    _glass.layer.cornerRadius = radius;
+    _tint.layer.cornerRadius = radius;
+}
+- (void)lgAnimatePressed:(BOOL)pressed {
+    CALayer *presentation = self.layer.presentationLayer;
+    if (presentation) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        self.transform = CATransform3DGetAffineTransform(presentation.transform);
+        [CATransaction commit];
+    }
+    [_pressAnimator stopAnimation:YES];
+
+    CGFloat mass = 0.8;
+    CGFloat stiffness = 300.0;
+    CGFloat damping = pressed ? 18.0 : 12.0;
+    CGFloat velocity = pressed ? 0.5 : 1.0;
+    CGFloat duration = pressed ? 0.3 : 0.5;
+    UISpringTimingParameters *timing = [[UISpringTimingParameters alloc]
+        initWithMass:mass stiffness:stiffness damping:damping
+     initialVelocity:CGVectorMake(velocity, velocity)];
+    _pressAnimator = [[UIViewPropertyAnimator alloc] initWithDuration:duration timingParameters:timing];
+    _pressAnimator.interruptible = YES;
+    __weak LGLiveGlassBarButton *weakSelf = self;
+    [_pressAnimator addAnimations:^{
+        LGLiveGlassBarButton *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.transform = pressed ? CGAffineTransformMakeScale(1.16, 1.16) : CGAffineTransformIdentity;
+    }];
+    [_pressAnimator addCompletion:^(__unused UIViewAnimatingPosition position) {
+        LGLiveGlassBarButton *strongSelf = weakSelf;
+        if (strongSelf) strongSelf->_pressAnimator = nil;
+    }];
+    [_pressAnimator startAnimation];
+}
+- (void)setPressed:(id)sender {
+    (void)sender;
+    LGDiagnosticLog(@"prefs.menu.touch.down");
+    [self lgAnimatePressed:YES];
+    LGDiagnosticLog(@"prefs.menu.touch.down.animation-started");
+}
+- (void)clearPressed:(id)sender {
+    (void)sender;
+    LGDiagnosticLog(@"prefs.menu.touch.up");
+    [self lgAnimatePressed:NO];
+    LGDiagnosticLog(@"prefs.menu.touch.up.animation-started");
+}
+- (void)refreshGlass { [_glass applyFilters]; }
+@end
+
+static UINavigationBarAppearance *LGMakePrefsTransparentNavigationAppearance(void) {
+    if (!LGSystemVersionAtLeast(13, 0, 0) ||
+        !NSClassFromString(@"UINavigationBarAppearance")) return nil;
+    UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+    [appearance configureWithTransparentBackground];
+    appearance.backgroundColor = UIColor.clearColor;
+    appearance.shadowColor = UIColor.clearColor;
+    return appearance;
+}
+
+void LGApplyNavigationBarAppearance(UINavigationItem *navigationItem) {
+    if (!LGSystemVersionAtLeast(13, 0, 0) ||
+        ![navigationItem respondsToSelector:NSSelectorFromString(@"setStandardAppearance:")]) {
+        return;
+    }
+    UINavigationBarAppearance *appearance = LGMakePrefsTransparentNavigationAppearance();
+    if (!appearance) return;
+    navigationItem.standardAppearance = appearance;
+    navigationItem.scrollEdgeAppearance = appearance;
+    navigationItem.compactAppearance = appearance;
+    if (@available(iOS 15.0, *)) {
+        navigationItem.compactScrollEdgeAppearance = appearance;
+    }
+}
+
+void LGInstallScrollableStack(UIViewController *controller,
+                              CGFloat topInset,
+                              CGFloat stackSpacing,
+                              UIScrollView *__strong *scrollViewOut,
+                              UIStackView *__strong *stackViewOut) {
+    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:controller.view.bounds];
+    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [controller.view addSubview:scrollView];
+
+    UIStackView *stackView = [[UIStackView alloc] initWithFrame:CGRectZero];
+    stackView.axis = UILayoutConstraintAxisVertical;
+    stackView.spacing = stackSpacing;
+    stackView.translatesAutoresizingMaskIntoConstraints = NO;
+    [scrollView addSubview:stackView];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [stackView.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor constant:topInset],
+        [stackView.leadingAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.leadingAnchor constant:16.0],
+        [stackView.trailingAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.trailingAnchor constant:-16.0],
+        [stackView.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor constant:-112.0],
+    ]];
+
+    if (scrollViewOut) *scrollViewOut = scrollView;
+    if (stackViewOut) *stackViewOut = stackView;
+}
+
+void LGInstallBottomRespringBar(UIViewController *controller, UIView *__strong *respringBarOut) {
+    UIView *respringBar = LGMakeRespringBar(controller, @selector(handleRespringPressed), @selector(handleLaterPressed));
+    [controller.view addSubview:respringBar];
+    UILayoutGuide *guide = controller.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [respringBar.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:16.0],
+        [respringBar.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-16.0],
+        [respringBar.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-12.0],
+    ]];
+    if (respringBarOut) *respringBarOut = respringBar;
+}
+
+void LGRefreshRespringBarGlass(UIView *respringBar) {
+    if (!respringBar) return;
+    UIView *glassView = objc_getAssociatedObject(respringBar, kLGRespringBarGlassViewKey);
+    UIView *tintView = objc_getAssociatedObject(respringBar, kLGRespringBarTintViewKey);
+    tintView.backgroundColor = LGColorWithDynamicProvider(^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
         if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
             return [[UIColor whiteColor] colorWithAlphaComponent:0.04];
         }
         return [[UIColor blackColor] colorWithAlphaComponent:0.01];
+    });
+    glassView.hidden = NO;
+    if ([glassView isKindOfClass:[LGLiveBackdropView class]]) {
+        [(LGLiveBackdropView *)glassView applyFilters];
+    }
+}
+
+void LGScheduleRespringBarGlassRefresh(UIView *respringBar) {
+    if (!respringBar) return;
+    LGRefreshRespringBarGlass(respringBar);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LGRefreshRespringBarGlass(respringBar);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LGRefreshRespringBarGlass(respringBar);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.18 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LGRefreshRespringBarGlass(respringBar);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LGRefreshRespringBarGlass(respringBar);
+    });
+}
+
+void LGPresentSliderValuePrompt(UIViewController *controller, UILabel *valueLabel) {
+    if (![valueLabel isKindOfClass:[UILabel class]]) return;
+
+    UISlider *slider = objc_getAssociatedObject(valueLabel, kLGSliderKey);
+    NSString *preferenceKey = objc_getAssociatedObject(valueLabel, kLGPreferenceKeyKey);
+    NSNumber *minNumber = objc_getAssociatedObject(valueLabel, kLGMinValueKey);
+    NSNumber *maxNumber = objc_getAssociatedObject(valueLabel, kLGMaxValueKey);
+    NSNumber *decimalsNumber = objc_getAssociatedObject(valueLabel, kLGDecimalsKey);
+    NSString *controlTitle = objc_getAssociatedObject(valueLabel, kLGControlTitleKey);
+    if (!slider || !preferenceKey.length || !minNumber || !maxNumber || !decimalsNumber) return;
+
+    NSInteger decimals = decimalsNumber.integerValue;
+    CGFloat minValue = minNumber.doubleValue;
+    CGFloat maxValue = maxNumber.doubleValue;
+    NSString *message = [NSString stringWithFormat:LGLocalized(@"prefs.value_prompt.message"),
+                         LGFormatSliderValue(minValue, decimals),
+                         LGFormatSliderValue(maxValue, decimals)];
+
+    LGPresentTextInputSheet(controller,
+                            (controlTitle.length ? controlTitle : LGLocalized(@"prefs.value_prompt.title")),
+                            message,
+                            LGFormatSliderValue(slider.value, decimals),
+                            LGFormatSliderValue(slider.value, decimals),
+                            UIKeyboardTypeDecimalPad,
+                            NO,
+                            ^(NSString *text) {
+        NSNumber *parsedNumber = LGParseLocalizedDecimalString(text ?: @"");
+        if (!parsedNumber) return;
+
+        CGFloat rawValue = parsedNumber.doubleValue;
+        CGFloat sliderValue = MIN(MAX(rawValue, minValue), maxValue);
+        slider.value = sliderValue;
+        valueLabel.text = LGFormatSliderValue(rawValue, decimals);
+        LGWritePreference(preferenceKey, @(rawValue));
+    });
+}
+
+void LGAnimateSliderToDefault(UISlider *slider, CGFloat targetValue, UILabel *valueLabel, NSInteger decimals) {
+    LGSliderResetAnimator *existing = objc_getAssociatedObject(slider, kLGSliderAnimatorKey);
+    if (existing.displayLink) {
+        [existing.displayLink invalidate];
+        existing.displayLink = nil;
+    }
+
+    LGSliderResetAnimator *animator = [LGSliderResetAnimator new];
+    animator.slider = slider;
+    animator.valueLabel = valueLabel;
+    animator.startValue = slider.value;
+    animator.targetValue = targetValue;
+    animator.decimals = decimals;
+    animator.startTime = CACurrentMediaTime();
+    animator.displayLink = [CADisplayLink displayLinkWithTarget:animator selector:@selector(tick:)];
+    [animator.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    objc_setAssociatedObject(slider, kLGSliderAnimatorKey, animator, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+UIView *LGMakeNavCardGlyphView(NSString *symbolName, UIColor *tintColor) {
+    UIView *container = [[UIView alloc] initWithFrame:CGRectZero];
+    container.translatesAutoresizingMaskIntoConstraints = NO;
+    [NSLayoutConstraint activateConstraints:@[
+        [container.widthAnchor constraintEqualToConstant:20.0],
+        [container.heightAnchor constraintEqualToConstant:20.0],
+    ]];
+
+    if ([symbolName isEqualToString:@"lg.lockscreen.stacked"]) {
+        UIImageSymbolConfiguration *phoneConfig =
+            [UIImageSymbolConfiguration configurationWithPointSize:17.0 weight:UIImageSymbolWeightSemibold];
+        UIImageView *phoneGlyph = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"iphone" withConfiguration:phoneConfig]];
+        phoneGlyph.translatesAutoresizingMaskIntoConstraints = NO;
+        phoneGlyph.tintColor = tintColor;
+        phoneGlyph.contentMode = UIViewContentModeScaleAspectFit;
+
+        UIView *lockBadge = [[UIView alloc] initWithFrame:CGRectZero];
+        lockBadge.translatesAutoresizingMaskIntoConstraints = NO;
+        lockBadge.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+        lockBadge.layer.cornerRadius = 7.0;
+        lockBadge.layer.cornerCurve = kCACornerCurveContinuous;
+
+        UIImageSymbolConfiguration *lockConfig =
+            [UIImageSymbolConfiguration configurationWithPointSize:8.0 weight:UIImageSymbolWeightBold];
+        UIImageView *lockGlyph = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"lock.fill" withConfiguration:lockConfig]];
+        lockGlyph.translatesAutoresizingMaskIntoConstraints = NO;
+        lockGlyph.tintColor = tintColor;
+        lockGlyph.contentMode = UIViewContentModeScaleAspectFit;
+
+        [container addSubview:phoneGlyph];
+        [container addSubview:lockBadge];
+        [lockBadge addSubview:lockGlyph];
+        [NSLayoutConstraint activateConstraints:@[
+            [phoneGlyph.centerXAnchor constraintEqualToAnchor:container.centerXAnchor constant:-1.0],
+            [phoneGlyph.centerYAnchor constraintEqualToAnchor:container.centerYAnchor],
+            [phoneGlyph.widthAnchor constraintEqualToConstant:15.0],
+            [phoneGlyph.heightAnchor constraintEqualToConstant:15.0],
+            [lockBadge.widthAnchor constraintEqualToConstant:14.0],
+            [lockBadge.heightAnchor constraintEqualToConstant:14.0],
+            [lockBadge.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+            [lockBadge.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
+            [lockGlyph.centerXAnchor constraintEqualToAnchor:lockBadge.centerXAnchor],
+            [lockGlyph.centerYAnchor constraintEqualToAnchor:lockBadge.centerYAnchor],
+        ]];
+        return container;
+    }
+
+    UIImageSymbolConfiguration *symbolConfig =
+        [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightSemibold];
+    UIImageView *glyph = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbolName withConfiguration:symbolConfig]];
+    glyph.translatesAutoresizingMaskIntoConstraints = NO;
+    glyph.tintColor = tintColor;
+    glyph.contentMode = UIViewContentModeScaleAspectFit;
+    [container addSubview:glyph];
+    [NSLayoutConstraint activateConstraints:@[
+        [glyph.centerXAnchor constraintEqualToAnchor:container.centerXAnchor],
+        [glyph.centerYAnchor constraintEqualToAnchor:container.centerYAnchor],
+    ]];
+    return container;
+}
+
+UIColor *LGSubpageCardBackgroundColor(void) {
+    return LGColorWithDynamicProvider(^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
+        if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            return [[UIColor whiteColor] colorWithAlphaComponent:0.07];
+        }
+        return [[UIColor whiteColor] colorWithAlphaComponent:0.76];
+    });
+}
+
+UIView *LGMakeSectionDivider(void) {
+    UIView *divider = [[UIView alloc] initWithFrame:CGRectZero];
+    divider.translatesAutoresizingMaskIntoConstraints = NO;
+    divider.backgroundColor = LGColorWithDynamicProvider(^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
+        if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            return [[UIColor whiteColor] colorWithAlphaComponent:0.08];
+        }
+        return [[UIColor blackColor] colorWithAlphaComponent:0.08];
+    });
+    divider.layer.cornerRadius = 0.5;
+    [NSLayoutConstraint activateConstraints:@[
+        [divider.heightAnchor constraintEqualToConstant:1.0]
+    ]];
+    return divider;
+}
+
+UIBarButtonItem *LGMakeCircularBackItem(id target, SEL action) {
+    LGLiveGlassBarButton *button = [[LGLiveGlassBarButton alloc] initWithTarget:target action:action symbolName:@"chevron.left"];
+    return [[UIBarButtonItem alloc] initWithCustomView:button];
+}
+
+UIBarButtonItem *LGMakeCircularMenuItem(id target, SEL applyAction, SEL resetAction, NSString *resetTitle) {
+    LGLiveGlassBarButton *button = [[LGLiveGlassBarButton alloc]
+        initWithTarget:nil action:nil symbolName:@"line.3.horizontal"];
+    if (LGCanUseModernMenus()) {
+        __weak id weakTarget = target;
+        UIAction *apply = [UIAction actionWithTitle:LGLocalized(@"prefs.button.apply")
+                                           image:[UIImage systemImageNamed:@"checkmark"]
+                                      identifier:nil
+                                         handler:^(__kindof UIAction *action) {
+        (void)action;
+        id strongTarget = weakTarget;
+        if (strongTarget && [strongTarget respondsToSelector:applyAction]) {
+            ((void (*)(id, SEL))objc_msgSend)(strongTarget, applyAction);
+        }
     }];
+        UIAction *reset = [UIAction actionWithTitle:(resetTitle.length ? resetTitle : LGLocalized(@"prefs.button.reset"))
+                                           image:[UIImage systemImageNamed:@"arrow.counterclockwise"]
+                                      identifier:nil
+                                         handler:^(__kindof UIAction *action) {
+        (void)action;
+        id strongTarget = weakTarget;
+        if (strongTarget && [strongTarget respondsToSelector:resetAction]) {
+            ((void (*)(id, SEL))objc_msgSend)(strongTarget, resetAction);
+        }
+    }];
+        UIMenu *menu = [UIMenu menuWithTitle:@"" children:@[ apply, reset ]];
+        [button setPrimaryMenu:menu];
+    } else {
+        [button configureLegacyMenuTarget:target
+                              applyAction:applyAction
+                              resetAction:resetAction
+                                resetTitle:resetTitle];
+    }
+    button.accessibilityLabel = LGLocalized(@"prefs.button.more");
+    UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithCustomView:button];
+    item.accessibilityLabel = button.accessibilityLabel;
+    return item;
+}
+
+void LGRefreshCircularBackItem(UIBarButtonItem *item) {
+    if ([item.customView isKindOfClass:[LGLiveGlassBarButton class]]) {
+        [(LGLiveGlassBarButton *)item.customView refreshGlass];
+    }
+}
+
+static NSNumber *LGParseLocalizedDecimalString(NSString *rawText) {
+    NSString *trimmed = [rawText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!trimmed.length) return nil;
+
+    NSNumberFormatter *formatter = [[NSNumberFormatter alloc] init];
+    formatter.locale = [NSLocale currentLocale];
+    NSNumber *parsedNumber = [formatter numberFromString:trimmed];
+    if (parsedNumber) return parsedNumber;
+
+    NSString *normalized = [trimmed stringByReplacingOccurrencesOfString:@"," withString:@"."];
+    return @([normalized doubleValue]);
+}
+
+static void LGDismissOverlayPanel(UIView *overlay, UIView *panel) {
+    [UIView animateWithDuration:0.22 animations:^{
+        overlay.alpha = 0.0;
+        panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
+    } completion:^(__unused BOOL finished) {
+        [overlay removeFromSuperview];
+    }];
+}
+
+void LGPresentResetConfirmation(UIViewController *controller) {
+    LGPresentResetConfirmationWithBody(controller, LGLocalized(@"prefs.reset_confirm.body"), NSSelectorFromString(@"performAnimatedPreferenceReset"));
+}
+
+void LGPresentResetConfirmationWithBody(UIViewController *controller, NSString *body, SEL resetSelector) {
+    if (!controller.view.window) return;
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:LGLocalized(@"prefs.reset_confirm.title")
+                         message:(body.length ? body : LGLocalized(@"prefs.reset_confirm.body"))
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.cancel")
+                  style:UIAlertActionStyleCancel
+                handler:nil]];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.reset")
+                  style:UIAlertActionStyleDestructive
+                handler:^(__unused UIAlertAction *action) {
+        if (resetSelector && [controller respondsToSelector:resetSelector]) {
+            ((void (*)(id, SEL))objc_msgSend)(controller, resetSelector);
+        } else {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                (int64_t)(0.67 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                LGResetAllPreferences();
+            });
+        }
+    }]];
+    [controller presentViewController:alert animated:YES completion:nil];
+}
+
+void LGPresentRespringConfirmation(UIViewController *controller) {
+    if (!controller.view.window) return;
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:LGLocalized(@"prefs.respring_confirm.title")
+                         message:LGLocalized(@"prefs.respring_confirm.body")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.later")
+                  style:UIAlertActionStyleCancel
+                handler:nil]];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.respring")
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        LGSetNeedsRespring(NO);
+        notify_post(LGPrefsRespringNotificationCString);
+    }]];
+    [controller presentViewController:alert animated:YES completion:nil];
+}
+
+void LGPresentReopenSettingsConfirmation(UIViewController *controller) {
+    if (!controller.view.window) return;
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:LGLocalized(@"prefs.reopen_settings.title")
+                         message:LGLocalized(@"prefs.reopen_settings.body")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.later")
+                  style:UIAlertActionStyleCancel
+                handler:nil]];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.reopen_settings")
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+            (int64_t)(0.18 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            LGForceSynchronizePreferences();
+            exit(0);
+        });
+    }]];
+    [controller presentViewController:alert animated:YES completion:nil];
+}
+
+void LGPresentInfoSheet(UIViewController *controller, NSString *title, NSString *message) {
+    if (!controller.view.window) return;
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:(title.length ? title : LGLocalized(@"prefs.info.title"))
+                         message:(message.length ? message : @"")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:LGLocalized(@"prefs.button.ok")
+                  style:UIAlertActionStyleDefault
+                handler:nil]];
+    [controller presentViewController:alert animated:YES completion:nil];
+}
+
+void LGPresentConfirmationSheet(UIViewController *controller,
+                                NSString *title,
+                                NSString *message,
+                                NSString *cancelTitle,
+                                NSString *confirmTitle,
+                                BOOL destructive,
+                                void (^confirmBlock)(void)) {
+    if (!controller.view.window) return;
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:(title.length ? title : @"")
+                         message:(message.length ? message : @"")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:(cancelTitle.length ? cancelTitle : LGLocalized(@"prefs.button.cancel"))
+                  style:UIAlertActionStyleCancel
+                handler:nil]];
+    [alert addAction:[UIAlertAction
+        actionWithTitle:(confirmTitle.length ? confirmTitle : LGLocalized(@"prefs.button.ok"))
+                  style:(destructive ? UIAlertActionStyleDestructive
+                                     : UIAlertActionStyleDefault)
+                handler:^(__unused UIAlertAction *action) {
+        if (confirmBlock) confirmBlock();
+    }]];
+    [controller presentViewController:alert animated:YES completion:nil];
+}
+
+void LGPresentTextInputSheet(UIViewController *controller,
+                             NSString *title,
+                             NSString *message,
+                             NSString *initialText,
+                             NSString *placeholder,
+                             UIKeyboardType keyboardType,
+                             BOOL monospaced,
+                             void (^applyBlock)(NSString *text)) {
+    if (!controller.view.window) return;
+    UIView *existing = [controller.view viewWithTag:0x1AD6];
+    if (existing) [existing removeFromSuperview];
+
+    UIView *overlay = [[UIView alloc] initWithFrame:controller.view.bounds];
+    overlay.tag = 0x1AD6;
+    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    overlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.24];
+    overlay.alpha = 0.0;
+
+    UIControl *dismissControl = [[UIControl alloc] initWithFrame:overlay.bounds];
+    dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [overlay addSubview:dismissControl];
+
+    UIVisualEffectView *panel = [[UIVisualEffectView alloc]
+        initWithEffect:LGMaterialBlurEffectForTraitCollection(controller.traitCollection)];
+    panel.translatesAutoresizingMaskIntoConstraints = NO;
+    panel.layer.cornerRadius = 32.0;
+    panel.layer.cornerCurve = kCACornerCurveContinuous;
+    panel.layer.masksToBounds = YES;
+    panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    titleLabel.text = title.length ? title : @"";
+    titleLabel.font = [UIFont systemFontOfSize:24.0 weight:UIFontWeightBold];
+    titleLabel.numberOfLines = 0;
+
+    UILabel *bodyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    bodyLabel.text = message.length ? message : @"";
+    bodyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
+    bodyLabel.textColor = [UIColor secondaryLabelColor];
+    bodyLabel.numberOfLines = 0;
+
+    UIView *textContainer = [[UIView alloc] initWithFrame:CGRectZero];
+    textContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    textContainer.backgroundColor = [UIColor tertiarySystemFillColor];
+    textContainer.layer.cornerRadius = 18.0;
+    textContainer.layer.cornerCurve = kCACornerCurveContinuous;
+    textContainer.layer.masksToBounds = YES;
+
+    UITextField *textField = [[UITextField alloc] initWithFrame:CGRectZero];
+    textField.translatesAutoresizingMaskIntoConstraints = NO;
+    textField.backgroundColor = UIColor.clearColor;
+    textField.font = monospaced ? LGMonospacedSystemFont(15.0, UIFontWeightMedium)
+                                : [UIFont systemFontOfSize:17.0 weight:UIFontWeightMedium];
+    textField.textColor = [UIColor labelColor];
+    textField.text = initialText ?: @"";
+    textField.placeholder = placeholder ?: @"";
+    textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    textField.keyboardType = keyboardType;
+    textField.autocorrectionType = UITextAutocorrectionTypeNo;
+    textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    textField.smartDashesType = UITextSmartDashesTypeNo;
+    textField.smartQuotesType = UITextSmartQuotesTypeNo;
+    textField.smartInsertDeleteType = UITextSmartInsertDeleteTypeNo;
+    textField.spellCheckingType = UITextSpellCheckingTypeNo;
+
+    UIButton *cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    cancelButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [cancelButton setTitle:LGLocalized(@"prefs.button.cancel") forState:UIControlStateNormal];
+    [cancelButton setTitleColor:[UIColor secondaryLabelColor] forState:UIControlStateNormal];
+    cancelButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
+    cancelButton.backgroundColor = [UIColor tertiarySystemFillColor];
+    cancelButton.layer.cornerRadius = 23.0;
+    cancelButton.layer.cornerCurve = kCACornerCurveContinuous;
+    cancelButton.layer.masksToBounds = YES;
+
+    UIButton *applyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    applyButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [applyButton setTitle:LGLocalized(@"prefs.button.apply") forState:UIControlStateNormal];
+    [applyButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    applyButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
+    applyButton.backgroundColor = [UIColor systemBlueColor];
+    applyButton.layer.cornerRadius = 23.0;
+    applyButton.layer.cornerCurve = kCACornerCurveContinuous;
+    applyButton.layer.masksToBounds = YES;
+
+    UIStackView *buttonRow = [[UIStackView alloc] initWithArrangedSubviews:@[cancelButton, applyButton]];
+    buttonRow.translatesAutoresizingMaskIntoConstraints = NO;
+    buttonRow.axis = UILayoutConstraintAxisHorizontal;
+    buttonRow.spacing = 12.0;
+    buttonRow.distribution = UIStackViewDistributionFillEqually;
+
+    [overlay addSubview:panel];
+    [panel.contentView addSubview:titleLabel];
+    [panel.contentView addSubview:bodyLabel];
+    [panel.contentView addSubview:textContainer];
+    [textContainer addSubview:textField];
+    [panel.contentView addSubview:buttonRow];
+
+    NSLayoutConstraint *panelCenterYConstraint = [panel.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [panel.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
+        panelCenterYConstraint,
+        [panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor constant:20.0],
+        [panel.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor constant:-20.0],
+        [panel.widthAnchor constraintEqualToConstant:320.0],
+        [titleLabel.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:22.0],
+        [titleLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
+        [titleLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
+        [bodyLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:10.0],
+        [bodyLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
+        [bodyLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
+        [textContainer.topAnchor constraintEqualToAnchor:bodyLabel.bottomAnchor constant:16.0],
+        [textContainer.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
+        [textContainer.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
+        [textContainer.heightAnchor constraintEqualToConstant:48.0],
+        [textField.topAnchor constraintEqualToAnchor:textContainer.topAnchor],
+        [textField.leadingAnchor constraintEqualToAnchor:textContainer.leadingAnchor constant:14.0],
+        [textField.trailingAnchor constraintEqualToAnchor:textContainer.trailingAnchor constant:-14.0],
+        [textField.bottomAnchor constraintEqualToAnchor:textContainer.bottomAnchor],
+        [buttonRow.topAnchor constraintEqualToAnchor:textContainer.bottomAnchor constant:20.0],
+        [buttonRow.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
+        [buttonRow.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
+        [buttonRow.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-16.0],
+        [cancelButton.heightAnchor constraintEqualToConstant:46.0],
+        [applyButton.heightAnchor constraintEqualToConstant:46.0],
+    ]];
+
+    __block id keyboardWillChangeObserver = nil;
+    __block id keyboardWillHideObserver = nil;
+    __weak UIView *weakOverlay = overlay;
+    __weak UIVisualEffectView *weakPanel = panel;
+    __weak UIViewController *weakController = controller;
+    __weak UITextField *weakTextField = textField;
+
+    void (^cleanupObservers)(void) = ^{
+        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+        if (keyboardWillChangeObserver) {
+            [center removeObserver:keyboardWillChangeObserver];
+            keyboardWillChangeObserver = nil;
+        }
+        if (keyboardWillHideObserver) {
+            [center removeObserver:keyboardWillHideObserver];
+            keyboardWillHideObserver = nil;
+        }
+    };
+
+    keyboardWillChangeObserver =
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardWillChangeFrameNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+        UIView *strongOverlay = weakOverlay;
+        UIVisualEffectView *strongPanel = weakPanel;
+        UIViewController *strongController = weakController;
+        if (!strongOverlay || !strongPanel || !strongController) return;
+
+        CGRect keyboardFrameScreen = [note.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+        CGRect keyboardFrame = [strongController.view convertRect:keyboardFrameScreen fromView:nil];
+        NSTimeInterval duration = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+        UIViewAnimationOptions options = (([note.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16) & UIViewAnimationOptionCurveEaseInOut);
+
+        [strongOverlay layoutIfNeeded];
+        CGRect panelFrame = [strongPanel.superview convertRect:strongPanel.frame toView:strongController.view];
+        CGFloat overlap = CGRectGetMaxY(panelFrame) - CGRectGetMinY(keyboardFrame) + 18.0;
+        panelCenterYConstraint.constant = overlap > 0.0 ? -(overlap + 8.0) : 0.0;
+
+        [UIView animateWithDuration:duration
+                              delay:0.0
+                            options:options | UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{
+            [strongOverlay layoutIfNeeded];
+        } completion:nil];
+    }];
+
+    keyboardWillHideObserver =
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardWillHideNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+        UIView *strongOverlay = weakOverlay;
+        if (!strongOverlay) return;
+        NSTimeInterval duration = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+        UIViewAnimationOptions options = (([note.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16) & UIViewAnimationOptionCurveEaseInOut);
+        panelCenterYConstraint.constant = 0.0;
+        [UIView animateWithDuration:duration
+                              delay:0.0
+                            options:options | UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{
+            [strongOverlay layoutIfNeeded];
+        } completion:nil];
+    }];
+
+    LGAddControlAction(dismissControl, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
+        [weakTextField resignFirstResponder];
+        cleanupObservers();
+        LGDismissOverlayPanel(overlay, panel);
+    });
+    LGAddControlAction(cancelButton, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
+        [weakTextField resignFirstResponder];
+        cleanupObservers();
+        LGDismissOverlayPanel(overlay, panel);
+    });
+    LGAddControlAction(applyButton, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
+        [weakTextField resignFirstResponder];
+        cleanupObservers();
+        if (applyBlock) applyBlock(textField.text ?: @"");
+        LGDismissOverlayPanel(overlay, panel);
+    });
+
+    [controller.view addSubview:overlay];
+    [UIView animateWithDuration:0.22 animations:^{
+        overlay.alpha = 1.0;
+        panel.transform = CGAffineTransformIdentity;
+    } completion:^(__unused BOOL finished) {
+        [textField becomeFirstResponder];
+    }];
+}
+
+void LGPresentMultilineTextInputSheet(UIViewController *controller,
+                                      NSString *title,
+                                      NSString *message,
+                                      NSString *initialText,
+                                      NSString *placeholder,
+                                      void (^applyBlock)(NSString *text)) {
+    if (!controller.view.window) return;
+    UIView *existing = [controller.view viewWithTag:0x1AD4];
+    if (existing) [existing removeFromSuperview];
+
+    UIView *overlay = [[UIView alloc] initWithFrame:controller.view.bounds];
+    overlay.tag = 0x1AD4;
+    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    overlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.24];
+    overlay.alpha = 0.0;
+
+    UIControl *dismissControl = [[UIControl alloc] initWithFrame:overlay.bounds];
+    dismissControl.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [overlay addSubview:dismissControl];
+
+    UIVisualEffectView *panel = [[UIVisualEffectView alloc]
+        initWithEffect:LGMaterialBlurEffectForTraitCollection(controller.traitCollection)];
+    panel.translatesAutoresizingMaskIntoConstraints = NO;
+    panel.layer.cornerRadius = 32.0;
+    panel.layer.cornerCurve = kCACornerCurveContinuous;
+    panel.layer.masksToBounds = YES;
+    panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    titleLabel.text = title.length ? title : @"";
+    titleLabel.font = [UIFont systemFontOfSize:24.0 weight:UIFontWeightBold];
+    titleLabel.numberOfLines = 0;
+
+    UILabel *bodyLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    bodyLabel.text = message.length ? message : @"";
+    bodyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
+    bodyLabel.textColor = [UIColor secondaryLabelColor];
+    bodyLabel.numberOfLines = 0;
+
+    UIView *textContainer = [[UIView alloc] initWithFrame:CGRectZero];
+    textContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    textContainer.backgroundColor = [UIColor tertiarySystemFillColor];
+    textContainer.layer.cornerRadius = 20.0;
+    textContainer.layer.cornerCurve = kCACornerCurveContinuous;
+    textContainer.layer.masksToBounds = YES;
+
+    UITextView *textView = [[UITextView alloc] initWithFrame:CGRectZero];
+    textView.translatesAutoresizingMaskIntoConstraints = NO;
+    textView.backgroundColor = UIColor.clearColor;
+    textView.font = LGMonospacedSystemFont(13.0, UIFontWeightMedium);
+    textView.textColor = [UIColor labelColor];
+    textView.textContainerInset = UIEdgeInsetsMake(12.0, 10.0, 12.0, 10.0);
+    textView.autocorrectionType = UITextAutocorrectionTypeNo;
+    textView.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    textView.smartDashesType = UITextSmartDashesTypeNo;
+    textView.smartQuotesType = UITextSmartQuotesTypeNo;
+    textView.smartInsertDeleteType = UITextSmartInsertDeleteTypeNo;
+    textView.spellCheckingType = UITextSpellCheckingTypeNo;
+    textView.keyboardType = UIKeyboardTypeASCIICapable;
+    textView.text = initialText ?: @"";
+
+    UILabel *placeholderLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    placeholderLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    placeholderLabel.text = placeholder.length ? placeholder : @"";
+    placeholderLabel.font = LGMonospacedSystemFont(13.0, UIFontWeightMedium);
+    placeholderLabel.textColor = [UIColor tertiaryLabelColor];
+    placeholderLabel.numberOfLines = 0;
+    placeholderLabel.userInteractionEnabled = NO;
+    placeholderLabel.hidden = textView.text.length > 0;
+
+    [textContainer addSubview:textView];
+    [textContainer addSubview:placeholderLabel];
+
+    UIButton *cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    cancelButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [cancelButton setTitle:LGLocalized(@"prefs.button.cancel") forState:UIControlStateNormal];
+    [cancelButton setTitleColor:[UIColor secondaryLabelColor] forState:UIControlStateNormal];
+    cancelButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
+    cancelButton.backgroundColor = [UIColor tertiarySystemFillColor];
+    cancelButton.layer.cornerRadius = 23.0;
+    cancelButton.layer.cornerCurve = kCACornerCurveContinuous;
+    cancelButton.layer.masksToBounds = YES;
+
+    UIButton *applyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    applyButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [applyButton setTitle:LGLocalized(@"prefs.button.apply") forState:UIControlStateNormal];
+    [applyButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    applyButton.titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
+    applyButton.backgroundColor = [UIColor systemBlueColor];
+    applyButton.layer.cornerRadius = 23.0;
+    applyButton.layer.cornerCurve = kCACornerCurveContinuous;
+    applyButton.layer.masksToBounds = YES;
+
+    UIStackView *buttonRow = [[UIStackView alloc] initWithArrangedSubviews:@[cancelButton, applyButton]];
+    buttonRow.translatesAutoresizingMaskIntoConstraints = NO;
+    buttonRow.axis = UILayoutConstraintAxisHorizontal;
+    buttonRow.spacing = 12.0;
+    buttonRow.distribution = UIStackViewDistributionFillEqually;
+
+    [overlay addSubview:panel];
+    [panel.contentView addSubview:titleLabel];
+    [panel.contentView addSubview:bodyLabel];
+    [panel.contentView addSubview:textContainer];
+    [panel.contentView addSubview:buttonRow];
+
+    NSLayoutConstraint *panelCenterYConstraint = [panel.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [panel.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor],
+        panelCenterYConstraint,
+        [panel.leadingAnchor constraintGreaterThanOrEqualToAnchor:overlay.leadingAnchor constant:20.0],
+        [panel.trailingAnchor constraintLessThanOrEqualToAnchor:overlay.trailingAnchor constant:-20.0],
+        [panel.widthAnchor constraintEqualToConstant:320.0],
+        [titleLabel.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:22.0],
+        [titleLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
+        [titleLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
+        [bodyLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:10.0],
+        [bodyLabel.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:18.0],
+        [bodyLabel.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-18.0],
+        [textContainer.topAnchor constraintEqualToAnchor:bodyLabel.bottomAnchor constant:16.0],
+        [textContainer.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
+        [textContainer.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
+        [textContainer.heightAnchor constraintEqualToConstant:158.0],
+        [textView.topAnchor constraintEqualToAnchor:textContainer.topAnchor],
+        [textView.leadingAnchor constraintEqualToAnchor:textContainer.leadingAnchor],
+        [textView.trailingAnchor constraintEqualToAnchor:textContainer.trailingAnchor],
+        [textView.bottomAnchor constraintEqualToAnchor:textContainer.bottomAnchor],
+        [placeholderLabel.topAnchor constraintEqualToAnchor:textContainer.topAnchor constant:12.0],
+        [placeholderLabel.leadingAnchor constraintEqualToAnchor:textContainer.leadingAnchor constant:14.0],
+        [placeholderLabel.trailingAnchor constraintEqualToAnchor:textContainer.trailingAnchor constant:-14.0],
+        [buttonRow.topAnchor constraintEqualToAnchor:textContainer.bottomAnchor constant:20.0],
+        [buttonRow.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:16.0],
+        [buttonRow.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-16.0],
+        [buttonRow.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-16.0],
+        [cancelButton.heightAnchor constraintEqualToConstant:46.0],
+        [applyButton.heightAnchor constraintEqualToConstant:46.0],
+    ]];
+
+    void (^syncPlaceholder)(void) = ^{
+        placeholderLabel.hidden = textView.text.length > 0;
+    };
+    syncPlaceholder();
+
+    __block id textDidChangeObserver = nil;
+    __block id keyboardWillChangeObserver = nil;
+    __block id keyboardWillHideObserver = nil;
+    __weak UIView *weakOverlay = overlay;
+    __weak UIVisualEffectView *weakPanel = panel;
+    __weak UIViewController *weakController = controller;
+    __weak UITextView *weakTextView = textView;
+
+    void (^cleanupObservers)(void) = ^{
+        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+        if (textDidChangeObserver) {
+            [center removeObserver:textDidChangeObserver];
+            textDidChangeObserver = nil;
+        }
+        if (keyboardWillChangeObserver) {
+            [center removeObserver:keyboardWillChangeObserver];
+            keyboardWillChangeObserver = nil;
+        }
+        if (keyboardWillHideObserver) {
+            [center removeObserver:keyboardWillHideObserver];
+            keyboardWillHideObserver = nil;
+        }
+    };
+
+    textDidChangeObserver =
+        [[NSNotificationCenter defaultCenter] addObserverForName:UITextViewTextDidChangeNotification
+                                                          object:textView
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(__unused NSNotification *note) {
+        syncPlaceholder();
+    }];
+
+    keyboardWillChangeObserver =
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardWillChangeFrameNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+        UIView *strongOverlay = weakOverlay;
+        UIVisualEffectView *strongPanel = weakPanel;
+        UIViewController *strongController = weakController;
+        if (!strongOverlay || !strongPanel || !strongController) return;
+
+        CGRect keyboardFrameScreen = [note.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+        CGRect keyboardFrame = [strongController.view convertRect:keyboardFrameScreen fromView:nil];
+        NSTimeInterval duration = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+        UIViewAnimationOptions options = (([note.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16) & UIViewAnimationOptionCurveEaseInOut);
+
+        [strongOverlay layoutIfNeeded];
+        CGRect panelFrame = [strongPanel.superview convertRect:strongPanel.frame toView:strongController.view];
+        CGFloat overlap = CGRectGetMaxY(panelFrame) - CGRectGetMinY(keyboardFrame) + 18.0;
+        panelCenterYConstraint.constant = overlap > 0.0 ? -(overlap + 8.0) : 0.0;
+
+        [UIView animateWithDuration:duration
+                              delay:0.0
+                            options:options | UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{
+            [strongOverlay layoutIfNeeded];
+        } completion:nil];
+    }];
+
+    keyboardWillHideObserver =
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardWillHideNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+        UIView *strongOverlay = weakOverlay;
+        if (!strongOverlay) return;
+        NSTimeInterval duration = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+        UIViewAnimationOptions options = (([note.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16) & UIViewAnimationOptionCurveEaseInOut);
+        panelCenterYConstraint.constant = 0.0;
+        [UIView animateWithDuration:duration
+                              delay:0.0
+                            options:options | UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{
+            [strongOverlay layoutIfNeeded];
+        } completion:nil];
+    }];
+    LGAddControlAction(dismissControl, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
+        [weakTextView resignFirstResponder];
+        cleanupObservers();
+        LGDismissOverlayPanel(overlay, panel);
+    });
+
+    LGAddControlAction(cancelButton, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
+        [weakTextView resignFirstResponder];
+        cleanupObservers();
+        LGDismissOverlayPanel(overlay, panel);
+    });
+
+    LGAddControlAction(applyButton, UIControlEventTouchUpInside, ^(__kindof UIControl *_) {
+        [weakTextView resignFirstResponder];
+        cleanupObservers();
+        if (applyBlock) applyBlock(textView.text ?: @"");
+        LGDismissOverlayPanel(overlay, panel);
+    });
+
+    [controller.view addSubview:overlay];
+    [UIView animateWithDuration:0.22 animations:^{
+        overlay.alpha = 1.0;
+        panel.transform = CGAffineTransformIdentity;
+    } completion:^(__unused BOOL finished) {
+        [textView becomeFirstResponder];
+    }];
+}
+
+static UIView *LGMakeRespringBar(id target, SEL respringAction, SEL laterAction) {
+    UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
+    card.translatesAutoresizingMaskIntoConstraints = NO;
+    card.layer.cornerRadius = 26.0;
+    card.layer.cornerCurve = kCACornerCurveContinuous;
+    card.layer.masksToBounds = YES;
+    card.alpha = 0.0;
+    card.hidden = YES;
+    card.transform = CGAffineTransformMakeTranslation(0.0, 10.0);
+
+    LGLiveBackdropView *glassView = [[LGLiveBackdropView alloc]
+        initWithFrame:CGRectZero groupName:nil
+        filterType:LGFilterTypeForHostPrefix(@"PrefsButton")];
+    glassView.translatesAutoresizingMaskIntoConstraints = NO;
+    glassView.userInteractionEnabled = NO;
+    glassView.layer.cornerRadius = 26.0;
+    [card addSubview:glassView];
+    objc_setAssociatedObject(card, kLGRespringBarGlassViewKey, glassView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    UIView *tintView = [[UIView alloc] initWithFrame:CGRectZero];
+    tintView.translatesAutoresizingMaskIntoConstraints = NO;
+    tintView.userInteractionEnabled = NO;
+    tintView.backgroundColor = LGColorWithDynamicProvider(^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
+        if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            return [[UIColor whiteColor] colorWithAlphaComponent:0.04];
+        }
+        return [[UIColor blackColor] colorWithAlphaComponent:0.01];
+    });
     [card addSubview:tintView];
     objc_setAssociatedObject(card, kLGRespringBarTintViewKey, tintView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
@@ -34,12 +1259,12 @@ YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíßN½õ:-jZ.¶›­–)Ş³R6–×÷'B$Äu&Vg5T”†VÇW'2æ‚ ¢6–×
     [laterButton setTitle:LGLocalized(@"prefs.button.later") forState:UIControlStateNormal];
     [laterButton setTitleColor:[UIColor secondaryLabelColor] forState:UIControlStateNormal];
     laterButton.titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
-    laterButton.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
+    laterButton.backgroundColor = LGColorWithDynamicProvider(^UIColor * _Nonnull(UITraitCollection * _Nonnull trait) {
         if (trait.userInterfaceStyle == UIUserInterfaceStyleDark) {
             return [[UIColor whiteColor] colorWithAlphaComponent:0.10];
         }
         return [[UIColor blackColor] colorWithAlphaComponent:0.06];
-    }];
+    });
     laterButton.layer.cornerRadius = 14.0;
     laterButton.layer.cornerCurve = kCACornerCurveContinuous;
     [laterButton addTarget:target action:laterAction forControlEvents:UIControlEventTouchUpInside];
