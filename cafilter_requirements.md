@@ -12,7 +12,7 @@ To investigate and potentially implement Option A (the true native `CAFilter` li
     *   Provide the exact iOS version (e.g., 12.5.7) and build number (e.g., 16H81) of the test device. This helps cross-reference known structures if multiple iOS 12 versions exist.
 
 3.  **Optional: backboardd / LiquidAss Logs (if a test build is run):**
-    *   If we eventually create a test build that attempts symbol resolution on-device (without registering), providing the contents of `/var/mobile/Library/Accessibility/liquidglass.log` will be crucial to see what `LGSymbolResolver` finds.
+    *   If we eventually create a test build that attempts symbol resolution on-device (without registering), providing the contents of `/var/mobile/Library/Preferences/dylv.liquidass-diagnostics.log` will be crucial to see what `LGSymbolResolver` finds.
 
 ### What Information We Need to Derive Safely:
 
