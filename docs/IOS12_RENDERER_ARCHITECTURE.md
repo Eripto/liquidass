@@ -140,7 +140,7 @@ structure layouts is used by the iOS 12 path. A registration retry cannot fix
 the current zero-glass state because the old code stopped before attempting
 registration at all.
 
-## Exact blocker in the current 0.1.0b port
+## Exact blocker in the iOS 12 port
 
 `LiquidAssBackboardd/Tweak.mm` exits its constructor for every OS below iOS 13.
 That means on iOS 12:
