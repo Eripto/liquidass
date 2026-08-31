@@ -145,8 +145,17 @@ static CGFloat LGNativeBlurRadiusForFilterType(NSString *filterType) {
     NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
     NSString *key = [prefix stringByAppendingString:@".Blur"];
     id value = LGGlassPreferenceValue(key);
-    return [value respondsToSelector:@selector(doubleValue)]
+    CGFloat radius = [value respondsToSelector:@selector(doubleValue)]
         ? MAX(0.0, [value doubleValue]) : host->blur;
+    // The modern Cover Sheet is a zero-blur refraction surface. Its iOS 12
+    // substitute has no custom Metal filter, so zero would create an effect
+    // view with a nil effect and therefore no visible replacement at all.
+    if (LGIsIOS12() &&
+        LGHostIdentifierForFilterType(filterType.UTF8String) ==
+            LGHostIdentifierCoverSheet && radius <= 0.01) {
+        radius = 8.0;
+    }
+    return radius;
 }
 
 static BOOL LGLegacyIOS12UsesDarkMaterial(NSString *filterType) {
@@ -560,8 +569,17 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     if (!_legacyIOS12BlurView || !_legacyIOS12BlurView.effect ||
         !self.window || CGRectIsEmpty(self.bounds)) return NO;
     UIView *backdrop = LGFindVisualEffectBackdropView(_legacyIOS12BlurView);
-    return backdrop && !CGRectIsEmpty(backdrop.bounds) && backdrop.alpha > 0.01 &&
-           !backdrop.hidden;
+    if (backdrop) {
+        return !CGRectIsEmpty(backdrop.bounds) && backdrop.alpha > 0.01 &&
+               !backdrop.hidden;
+    }
+    // UIKit's private visual-effect subtree changed names across iOS 12.x.
+    // The public contract is the attached UIVisualEffectView with a non-nil
+    // effect; do not reject a functioning fallback merely because its private
+    // backdrop class name does not contain the English word "Backdrop".
+    return _legacyIOS12BlurView.window == self.window &&
+           !CGRectIsEmpty(_legacyIOS12BlurView.bounds) &&
+           !_legacyIOS12BlurView.hidden && _legacyIOS12BlurView.alpha > 0.01;
 }
 
 - (void)dealloc {
@@ -793,8 +811,9 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
             (_legacyIOS12CaptureAttempts <= 3 && self.window)) {
             CGFloat screenScale = UIScreen.mainScreen.scale;
             CGSize captureSize = backdrop ? backdrop.bounds.size : CGSizeZero;
-            LGDiagnosticLog(@"renderer.ios12.capture glass=%u type=%@ success=%d effect=%@ effectAlpha=%.3f backdropClass=%@ points={%.1f,%.1f} estimatedPixels={%.0f,%.0f} backdropTexture=UIKit-private window=%d finalAlpha=%.3f tintPremultiplication=UIKit-managed",
+            LGDiagnosticLog(@"renderer.ios12.capture glass=%u type=%@ success=%d verification=%@ effect=%@ effectAlpha=%.3f backdropClass=%@ points={%.1f,%.1f} estimatedPixels={%.0f,%.0f} backdropTexture=UIKit-system-managed window=%d finalAlpha=%.3f tintPremultiplication=UIKit-managed",
                             _lgId, _lgFilterType ?: @"default", ready,
+                            backdrop ? @"private-backdrop-bounds" : @"public-effect-attached",
                             _legacyIOS12BlurView.effect
                                 ? NSStringFromClass(_legacyIOS12BlurView.effect.class)
                                 : @"nil",
@@ -1068,3 +1087,4 @@ BOOL LGMaterialHasGlass(UIView *mat, const void *assocKey) {
     return [objc_getAssociatedObject(mat, kLGMaterialSuppressedKey) boolValue] &&
            glass.lgRendererReady;
 }
+

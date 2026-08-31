@@ -408,7 +408,11 @@ static void LGCoverSheetUpdateBottomCornerMask(LGLiveBackdropView *glass) {
 }
 
 static LGLiveBackdropView *LGCoverSheetEnsureGlass(UIView *panel) {
-    UIView *parent = panel.superview;
+    // On iOS 12 the only available host is the Dashboard controller's root
+    // view, which contains the clock and controls as well as its background.
+    // Put the fallback inside that root at index zero; replacing/hiding the
+    // entire root removes all stock lock-screen content.
+    UIView *parent = LGIsIOS12() ? panel : panel.superview;
     if (!parent) return nil;
 
     LGLiveBackdropView *glass =
@@ -427,7 +431,9 @@ static LGLiveBackdropView *LGCoverSheetEnsureGlass(UIView *panel) {
         }
     }
     if (!glass) {
-        glass = LGCreateRegisteredGlass(panel.frame, nil, @"CoverSheet");
+        glass = LGCreateRegisteredGlass(LGIsIOS12() ? panel.bounds : panel.frame,
+                                        nil, @"CoverSheet");
+        if (!glass) return nil;
         glass.autoresizingMask = UIViewAutoresizingNone;
         glass.userInteractionEnabled = NO;
         glass.backgroundColor = UIColor.clearColor;
@@ -455,13 +461,33 @@ static LGLiveBackdropView *LGCoverSheetEnsureGlass(UIView *panel) {
         [glass removeFromSuperview];
     }
 
-    [parent insertSubview:glass belowSubview:panel];
+    if (LGIsIOS12()) {
+        [panel insertSubview:glass atIndex:0];
+        LGDiagnosticLog(@"coversheet.ios12.insert success=%d host=%@ glassFrame=%@ stockRootHidden=%d stockRootAlpha=%.3f",
+                        glass.superview == panel, NSStringFromClass(panel.class),
+                        NSStringFromCGRect(glass.frame), panel.hidden, panel.alpha);
+    } else {
+        [parent insertSubview:glass belowSubview:panel];
+    }
     return glass;
 }
 
 static void LGCoverSheetSyncGlassGeometry(UIView *panel,
                                           LGLiveBackdropView *glass) {
-    if (!panel || !glass || glass.superview != panel.superview) return;
+    if (!panel || !glass) return;
+    if (LGIsIOS12()) {
+        if (glass.superview != panel) return;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        glass.frame = panel.bounds;
+        CALayer *dimLayer = objc_getAssociatedObject(
+            glass, kLGCoverSheetDimLayerKey);
+        dimLayer.frame = glass.bounds;
+        [CATransaction commit];
+        [glass applyFilters];
+        return;
+    }
+    if (glass.superview != panel.superview) return;
 
     // presentation geometry keeps the glass attached during interactive pulls
     CALayer *modelLayer = panel.layer;
@@ -672,6 +698,21 @@ static void LGCoverSheetSyncPanel(UIView *panel) {
     LGLiveBackdropView *glass = LGCoverSheetEnsureGlass(panel);
     if (!glass) return;
     LGCoverSheetSyncGlassGeometry(panel, glass);
+    if (LGIsIOS12()) {
+        // Transactional iOS 12 fallback: the root Dashboard view is never
+        // hidden. The public blur is merely shown behind its stock children
+        // when the transition mode asks for glass.
+        CGFloat stockAlpha = LGCoverSheetRestorePanelVisibility(panel);
+        panel.alpha = stockAlpha;
+        BOOL showGlass = LGCoverSheetModeUsesGlass(sLGCoverSheetMode) &&
+                         glass.lgRendererReady;
+        glass.hidden = !showGlass;
+        glass.alpha = 1.0;
+        LGDiagnosticLog(@"coversheet.ios12.commit mode=%ld rendererReady=%d glassHidden=%d glassAlpha=%.3f stockRootHidden=%d stockRootAlpha=%.3f action=preserve-stock",
+                        (long)sLGCoverSheetMode, glass.lgRendererReady,
+                        glass.hidden, glass.alpha, panel.hidden, panel.alpha);
+        return;
+    }
     BOOL beginDismissalFadeIn =
         sLGCoverSheetBeginDismissalFadeIn &&
         sLGCoverSheetMode == LGCoverSheetModeDismissing;
@@ -974,3 +1015,4 @@ prepareForDismissalTransitionForReversingTransition:(BOOL)reversing
         }
     });
 }
+

@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
+#import "../Shared/LGSharedSupport.h"
 #import <objc/runtime.h>
 
 static const CGFloat kPCActiveScale         = 1.16;
@@ -178,15 +179,7 @@ static void injectPasscodeButton(UIView *button) {
         pcRestoreBg(prev);
     }
 
-    pcRememberBg(host);
-    host.backgroundColor = UIColor.clearColor;
-    host.alpha = 1.0;
-    host.opaque = NO;
-    host.clipsToBounds = YES;
     CGFloat r = fmin(CGRectGetWidth(host.bounds), CGRectGetHeight(host.bounds)) * 0.5;
-    host.layer.cornerRadius  = r;
-    host.layer.cornerCurve   = kCACornerCurveCircular;
-    host.layer.masksToBounds = YES;
 
     LGLiveBackdropView *glass = objc_getAssociatedObject(host, kPCGlassKey);
     BOOL freshInject = NO;
@@ -201,10 +194,25 @@ static void injectPasscodeButton(UIView *button) {
     if (glass.superview != host) [host insertSubview:glass atIndex:0];
     glass.frame = host.bounds;
     glass.layer.cornerRadius  = r;
-    glass.layer.cornerCurve   = kCACornerCurveCircular;
+    if (@available(iOS 13.0, *)) glass.layer.cornerCurve = kCACornerCurveCircular;
     glass.layer.masksToBounds = YES;
     [glass applyFilters];
     lgTrackGlass(glass, @"Passcode", nil);
+    if (LGIsIOS12() && !glass.lgRendererReady) {
+        pcRestoreBg(host);
+        LGDiagnosticLog(@"passcode.ios12.commit action=preserve-stock reason=renderer-not-ready host=%@ frame=%@",
+                        NSStringFromClass(host.class), NSStringFromCGRect(host.frame));
+        return;
+    }
+
+    pcRememberBg(host);
+    host.backgroundColor = UIColor.clearColor;
+    host.alpha = 1.0;
+    host.opaque = NO;
+    host.clipsToBounds = YES;
+    host.layer.cornerRadius  = r;
+    if (@available(iOS 13.0, *)) host.layer.cornerCurve = kCACornerCurveCircular;
+    host.layer.masksToBounds = YES;
 
     UIView *tint = objc_getAssociatedObject(host, kPCTintKey);
     if (!tint) {
@@ -216,7 +224,7 @@ static void injectPasscodeButton(UIView *button) {
     if (tint.superview != host) [host addSubview:tint];
     tint.frame = host.bounds;
     tint.layer.cornerRadius  = r;
-    tint.layer.cornerCurve   = kCACornerCurveCircular;
+    if (@available(iOS 13.0, *)) tint.layer.cornerCurve = kCACornerCurveCircular;
     tint.layer.masksToBounds = YES;
     [host bringSubviewToFront:tint];
 
@@ -439,3 +447,4 @@ static void restorePasscodeForDisable(void) {
         %init(LGLegacyPasscode);
     lgObservePreferenceReloadNamed(@"Passcode", ^{ restorePasscodeForDisable(); });
 }
+

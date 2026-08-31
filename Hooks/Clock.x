@@ -12,6 +12,7 @@
 extern BOOL LG_prefBool(NSString *key, BOOL fallback);
 extern CGFloat LG_prefFloat(NSString *key, CGFloat fallback);
 extern NSString *LG_prefString(NSString *key, NSString *fallback);
+extern void LGDiagnosticLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 
 #define LG_FLOAT_PREF_FUNC(fn, key, def)        static CGFloat fn(void) { return LG_prefFloat(@key, (CGFloat)(def)); }
 #define LG_BOOL_PREF_FUNC(fn, key, def)         static BOOL fn(void) { return LG_prefBool(@key, (def)); }
@@ -143,12 +144,39 @@ static void LGStopClockDisplayLinkDriver(LGClockDisplayLink *state) {
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame groupName:nil
                     filterType:LGFilterTypeForHostPrefix(@"Clock")];
-    if (self) self.hidden = YES;
+    if (self) {
+        // The modern clock is a glyph-masked CABackdropLayer whose mask is
+        // also consumed by backboardd. The iOS 12 renderer is instead a
+        // local UIVisualEffectView surface, so it must not wait for that
+        // cross-process mask hand-off before it becomes visible.
+        self.hidden = !LGIsIOS12();
+        if (LGIsIOS12()) {
+            self.layer.borderWidth = 0.75;
+            self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.28].CGColor;
+            self.layer.masksToBounds = YES;
+            LGDiagnosticLog(@"clock.ios12.backdrop.init class=%@ hidden=%d alpha=%.3f metalDevice=not-created shader=not-loaded pipeline=not-created renderer=UIVisualEffectView",
+                            NSStringFromClass(self.class), self.hidden, self.alpha);
+        }
+    }
     return self;
 }
 - (void)setCornerRadius:(CGFloat)r { _cornerRadius = r; self.layer.cornerRadius = r; }
 - (void)setShapeMaskImage:(UIImage *)image {
     _shapeMaskImage = image;
+    if (LGIsIOS12()) {
+        // A blur view masked to only the clock glyphs is effectively
+        // invisible on iOS 12. Use the rendered glyph only as proof that
+        // clock layout succeeded and display a real blurred plaque behind
+        // the untouched stock label.
+        self.maskView = nil;
+        self.shapeMaskView = nil;
+        self.hidden = (image == nil);
+        if (image) {
+            LGDiagnosticLog(@"clock.ios12.mask.local size={%.1f,%.1f} scale=%.2f crossProcess=disabled surface=unmasked-blur",
+                            image.size.width, image.size.height, image.scale);
+        }
+        return;
+    }
     if (!image) {
         self.maskView = nil;
         self.shapeMaskView = nil;
@@ -187,6 +215,14 @@ static uint64_t sLGClockMaskNextGeneration = 0;
 static void LGQueueClockMaskImage(UIImage *image, LGClockBackdropView *target) {
     if (!image || !target) return;
     uint64_t generation = ++sLGClockMaskNextGeneration;
+    if (LGIsIOS12()) {
+        // backboardd deliberately does not register the custom Metal filter
+        // on iOS 12. Do not make the local fallback depend on writing the
+        // mask file that only the modern renderer consumes.
+        target.shapeMaskImage = image;
+        [target.layer setNeedsDisplay];
+        return;
+    }
     if (LGWriteClockMaskImage(image, generation)) {
         target.shapeMaskImage = image;
         [target.layer setNeedsDisplay];
@@ -210,6 +246,9 @@ static void *kLGClockApplyingDateTextKey = &kLGClockApplyingDateTextKey;
 static void *kLGClockOriginalDateTextKey = &kLGClockOriginalDateTextKey;
 static void *kLGClockLastCustomDateTextKey = &kLGClockLastCustomDateTextKey;
 static void *kLGClockLastBailReasonKey = &kLGClockLastBailReasonKey;
+static void *kLGClockLastTraceSignatureKey = &kLGClockLastTraceSignatureKey;
+static void *kLGClockLastHierarchySignatureKey = &kLGClockLastHierarchySignatureKey;
+static void *kLGClockDidLogLayoutHookKey = &kLGClockDidLogLayoutHookKey;
 static void *kLGClockDeferredApplyPendingKey = &kLGClockDeferredApplyPendingKey;
 static void *kLGClockLastDeferredApplyTimeKey = &kLGClockLastDeferredApplyTimeKey;
 static LGClockDisplayLink sClockDisplayLink = {0};
@@ -261,7 +300,21 @@ static void LGSetLayerTreeOpacity(CALayer *layer, float opacity) {
 }
 
 static BOOL LGClockEnabled(void) {
-    return lgHostEnabled(@"Clock");
+    BOOL liquidGlassEnabled = lgHostEnabled(@"Clock");
+    if (LGIsIOS12()) {
+        id globalValue = LGGlassPreferenceValue(@"Global.Enabled");
+        BOOL enabled = [globalValue respondsToSelector:@selector(boolValue)]
+            ? [globalValue boolValue] : NO;
+        static NSInteger lastSignature = -1;
+        NSInteger signature = (enabled ? 1 : 0) | (liquidGlassEnabled ? 2 : 0);
+        if (signature != lastSignature) {
+            lastSignature = signature;
+            LGDiagnosticLog(@"LiquidAss: enabled=%@, liquidGlass=%@, iOS12 renderer selected",
+                            enabled ? @"YES" : @"NO",
+                            liquidGlassEnabled ? @"YES" : @"NO");
+        }
+    }
+    return liquidGlassEnabled;
 }
 
 static NSHashTable<UIView *> *LGClockNotificationObstacleViews(void) {
@@ -1071,6 +1124,11 @@ static void LGClockSyncDisplayLinkActivity(void) {
 static void LGClockSetCoverSheetVisible(BOOL visible) {
     if (sClockCoverSheetVisible == visible) return;
     sClockCoverSheetVisible = visible;
+    if (LGIsIOS12()) {
+        LGDiagnosticLog(@"clock.hook.chain coverSheetVisible=%d controller=%@",
+                        visible, NSClassFromString(@"SBDashBoardViewController")
+                            ? @"SBDashBoardViewController" : @"unknown");
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         if (visible) {
             LGRefreshRegisteredClockHosts();
@@ -1252,6 +1310,19 @@ static BOOL LGClockShouldMutateStockLayoutForView(UIView *view) {
     if (!host) return NO;
     if (!LGClockHostCanReceiveOverlay(host)) return NO;
     if (LGClockHasBlockingPresentation(host)) return NO;
+    if (LGIsIOS12()) {
+        UIView *overlay = objc_getAssociatedObject(host, kLGClockOverlayKey);
+        if (!overlay || !overlay.superview || overlay.window != host.window ||
+            overlay.hidden || overlay.alpha <= 0.01) return NO;
+        LGLiveBackdropView *glass = nil;
+        for (UIView *subview in overlay.subviews) {
+            if ([subview isKindOfClass:[LGLiveBackdropView class]]) {
+                glass = (LGLiveBackdropView *)subview;
+                break;
+            }
+        }
+        if (!glass || !glass.lgRendererReady) return NO;
+    }
     return YES;
 }
 
@@ -1742,10 +1813,15 @@ static UIView *LGClockBestModernOverlayContainer(UIView *host, UILabel *label, U
 static UIView *LGClockOverlayContainerForHost(UIView *host) {
     if (!host) return nil;
     UIView *container = host.superview ?: host;
-    for (UIView *cursor = host; cursor; cursor = cursor.superview) {
-        cursor.clipsToBounds = NO;
-        cursor.layer.masksToBounds = NO;
-        if (cursor == container) break;
+    // Clearing stock clipping before a replacement exists caused unrelated
+    // lock-screen layout changes on iOS 12. The fallback stays inside the
+    // legacy host container and needs no such mutation.
+    if (!LGIsIOS12()) {
+        for (UIView *cursor = host; cursor; cursor = cursor.superview) {
+            cursor.clipsToBounds = NO;
+            cursor.layer.masksToBounds = NO;
+            if (cursor == container) break;
+        }
     }
     return container;
 }
@@ -1778,6 +1854,7 @@ static UIView *LGClockOverlayContainerForHost(UIView *host) {
 @property (nonatomic, strong) UIImage *cachedMaskImage;
 - (void)syncFromSourceLabel:(UILabel *)label;
 - (void)refreshForDisplayLink;
+- (BOOL)lg_isReadyForClockDisplay;
 @end
 
 @interface LGClockScrollObserver : NSObject
@@ -1841,6 +1918,11 @@ static UIView *LGClockOverlayContainerForHost(UIView *host) {
     self.backgroundColor = UIColor.clearColor;
 
     _glassView = [[LGClockBackdropView alloc] initWithFrame:self.bounds];
+    if (!_glassView) {
+        LGDiagnosticLog(@"clock.overlay.allocation.failed component=LGClockBackdropView frame=%@",
+                        NSStringFromCGRect(frame));
+        return nil;
+    }
     _glassView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _glassView.cornerRadius = 0.0;
     [self addSubview:_glassView];
@@ -1850,7 +1932,19 @@ static UIView *LGClockOverlayContainerForHost(UIView *host) {
     _maskLabel.backgroundColor = UIColor.clearColor;
     _maskLabel.numberOfLines = 1;
 
+    LGDiagnosticLog(@"clock.overlay.allocation.success class=%@ frame=%@ glass=%@ renderer=%@",
+                    NSStringFromClass(self.class), NSStringFromCGRect(frame),
+                    NSStringFromClass(_glassView.class),
+                    LGIsIOS12() ? @"iOS12-UIVisualEffectView" : @"modern-CABackdropLayer-Metal");
+
     return self;
+}
+
+- (BOOL)lg_isReadyForClockDisplay {
+    if (!self.superview || !self.window || self.hidden || self.alpha <= 0.01 ||
+        CGRectIsEmpty(self.bounds) || !self.glassView || self.glassView.hidden ||
+        self.glassView.alpha <= 0.01) return NO;
+    return self.glassView.lgRendererReady;
 }
 
 - (void)lg_applyMaskLabel {
@@ -2056,6 +2150,10 @@ static UIView *LGClockOverlayContainerForHost(UIView *host) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     self.glassView.frame = self.bounds;
+    if (LGIsIOS12()) {
+        CGFloat radius = MIN(22.0, MAX(12.0, CGRectGetHeight(self.bounds) * 0.20));
+        self.glassView.cornerRadius = radius;
+    }
     [self lg_updateMask];
 }
 
@@ -2318,8 +2416,11 @@ static void LGRestoreClockSourceView(UIView *view) {
     if (!view) return;
     NSNumber *originalAlpha = objc_getAssociatedObject(view, kLGClockOriginalAlphaKey);
     NSNumber *originalLayerOpacity = objc_getAssociatedObject(view, kLGClockOriginalLayerOpacityKey);
-    view.alpha = originalAlpha ? originalAlpha.doubleValue : 1.0;
-    view.layer.opacity = originalLayerOpacity ? originalLayerOpacity.floatValue : 1.0f;
+    // If LiquidAss never suppressed this view, preserve SpringBoard's own
+    // animation state instead of forcing it to fully opaque.
+    if (!originalAlpha && !originalLayerOpacity) return;
+    if (originalAlpha) view.alpha = originalAlpha.doubleValue;
+    if (originalLayerOpacity) view.layer.opacity = originalLayerOpacity.floatValue;
     LGSetLayerTreeOpacity(view.layer, view.layer.opacity);
     objc_setAssociatedObject(view, kLGClockOriginalAlphaKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(view, kLGClockOriginalLayerOpacityKey, nil, OBJC_ASSOCIATION_ASSIGN);
@@ -2350,6 +2451,78 @@ static void LGEnsureClockScrollObserver(UIView *host, LGClockGlassView *overlay)
     objc_setAssociatedObject(host, kLGClockScrollObserverKey, observer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+static void LGRestoreClockSourceViews(NSArray<UIView *> *visibleSourceViews,
+                                      LGClockGlassView *overlay) {
+    NSMutableOrderedSet<UIView *> *sources = [NSMutableOrderedSet orderedSet];
+    for (UIView *view in visibleSourceViews) {
+        if (view) [sources addObject:view];
+    }
+    UILabel *oldSource = overlay.sourceLabel;
+    if (oldSource) {
+        UIView *oldVisible = LGClockLegacyVisibleSourceViewForLabel(oldSource);
+        if (oldVisible) [sources addObject:oldVisible];
+    }
+    for (UIView *view in sources) LGRestoreClockSourceView(view);
+}
+
+static NSString *LGClockTraceViewState(UIView *view) {
+    if (!view) return @"nil";
+    UIView *superview = view.superview;
+    NSUInteger index = superview
+        ? [superview.subviews indexOfObjectIdenticalTo:view] : NSNotFound;
+    return [NSString stringWithFormat:
+        @"class=%@ frame=%@ bounds=%@ super=%@ index=%@ window=%@ hidden=%d alpha=%.3f layerOpacity=%.3f z=%.3f",
+        NSStringFromClass(view.class), NSStringFromCGRect(view.frame),
+        NSStringFromCGRect(view.bounds), NSStringFromClass(superview.class),
+        index == NSNotFound ? @"none" : [NSString stringWithFormat:@"%lu", (unsigned long)index],
+        NSStringFromClass(view.window.class), view.hidden, view.alpha,
+        view.layer.opacity, view.layer.zPosition];
+}
+
+static void LGClockLogFinalHierarchy(UIView *host, UILabel *sourceLabel,
+                                     LGClockGlassView *overlay, BOOL ready) {
+    if (!host) return;
+    NSString *signature = [NSString stringWithFormat:@"%@|%@|%d|%d|%.1fx%.1f",
+                           NSStringFromClass(host.class),
+                           NSStringFromClass(overlay.superview.class),
+                           ready, overlay.hidden,
+                           CGRectGetWidth(overlay.bounds), CGRectGetHeight(overlay.bounds)];
+    NSString *previous = objc_getAssociatedObject(host, kLGClockLastHierarchySignatureKey);
+    if ([previous isEqualToString:signature]) return;
+    objc_setAssociatedObject(host, kLGClockLastHierarchySignatureKey, signature,
+                             OBJC_ASSOCIATION_COPY_NONATOMIC);
+
+    LGDiagnosticLog(@"clock.hierarchy.begin rendererReady=%d window=%@ windowSubviews=%lu",
+                    ready, NSStringFromClass(host.window.class),
+                    (unsigned long)host.window.subviews.count);
+    LGDiagnosticLog(@"clock.hierarchy.stock %@", LGClockTraceViewState(sourceLabel));
+    LGDiagnosticLog(@"clock.hierarchy.host %@", LGClockTraceViewState(host));
+    LGDiagnosticLog(@"clock.hierarchy.overlay %@", LGClockTraceViewState(overlay));
+    LGDiagnosticLog(@"clock.hierarchy.glass %@ rendererReady=%d",
+                    LGClockTraceViewState(overlay.glassView),
+                    overlay.glassView.lgRendererReady);
+
+    UIView *container = overlay.superview;
+    [container.subviews enumerateObjectsUsingBlock:^(UIView *view, NSUInteger index, BOOL *stop) {
+        (void)stop;
+        if (view == host || view == overlay ||
+            [host isDescendantOfView:view] || [overlay isDescendantOfView:view]) {
+            LGDiagnosticLog(@"clock.hierarchy.container-child index=%lu %@",
+                            (unsigned long)index, LGClockTraceViewState(view));
+        }
+    }];
+    UIView *cursor = overlay;
+    NSUInteger depth = 0;
+    while (cursor && depth < 12) {
+        LGDiagnosticLog(@"clock.hierarchy.ancestor depth=%lu %@",
+                        (unsigned long)depth, LGClockTraceViewState(cursor));
+        if ([cursor isKindOfClass:[UIWindow class]]) break;
+        cursor = cursor.superview;
+        depth++;
+    }
+    LGDiagnosticLog(@"clock.hierarchy.end rendererReady=%d", ready);
+}
+
 #pragma mark - Host installation and cleanup
 
 static void LGApplyClockReplacement(UIView *host) {
@@ -2357,12 +2530,34 @@ static void LGApplyClockReplacement(UIView *host) {
         return;
     }
 
+    LGDiagnosticLog(@"clock.apply.enter kind=%@ host=%@ frame=%@ bounds=%@ window=%@ hidden=%d alpha=%.3f z=%.3f",
+                    LGClockHostKind(host), NSStringFromClass(host.class),
+                    NSStringFromCGRect(host.frame), NSStringFromCGRect(host.bounds),
+                    NSStringFromClass(host.window.class), host.hidden, host.alpha,
+                    host.layer.zPosition);
+
     UILabel *sourceLabel = LGClockPrimarySourceLabelForHost(host);
     NSArray<UIView *> *visibleSourceViews = LGClockVisibleSourceViewsForHost(host, sourceLabel);
     LGClockGlassView *overlay = objc_getAssociatedObject(host, kLGClockOverlayKey);
     BOOL enabled = LGClockEnabled();
     BOOL overlayEligible = LGClockHostCanReceiveOverlay(host);
     BOOL blocking = LGClockHasBlockingPresentation(host);
+    NSString *traceSignature = [NSString stringWithFormat:@"%d|%d|%d|%@|%@",
+                                enabled, overlayEligible, blocking,
+                                NSStringFromClass(sourceLabel.class),
+                                NSStringFromCGRect(sourceLabel.frame)];
+    NSString *previousTrace = objc_getAssociatedObject(host, kLGClockLastTraceSignatureKey);
+    if (![previousTrace isEqualToString:traceSignature]) {
+        objc_setAssociatedObject(host, kLGClockLastTraceSignatureKey, traceSignature,
+                                 OBJC_ASSOCIATION_COPY_NONATOMIC);
+        LGDiagnosticLog(@"clock.target.found kind=%@ host=%@ source=%@ originalFrame=%@ labels=%lu visibleSources=%lu enabled=%d eligible=%d blocking=%d",
+                        LGClockHostKind(host), NSStringFromClass(host.class),
+                        NSStringFromClass(sourceLabel.class),
+                        NSStringFromCGRect(sourceLabel.frame),
+                        (unsigned long)LGClockSourceLabelsForHost(host).count,
+                        (unsigned long)visibleSourceViews.count,
+                        enabled, overlayEligible, blocking);
+    }
     if (!enabled || !overlayEligible || !sourceLabel || blocking) {
         NSString *reason = !enabled ? @"disabled"
             : !overlayEligible ? @"not-eligible"
@@ -2388,45 +2583,145 @@ static void LGApplyClockReplacement(UIView *host) {
                        NSStringFromClass(host.class),
                        NSStringFromCGRect(host.frame));
         }
+        LGRestoreClockSourceViews(visibleSourceViews, overlay);
         [overlay removeFromSuperview];
         objc_setAssociatedObject(host, kLGClockOverlayKey, nil, OBJC_ASSOCIATION_ASSIGN);
         LGDetachClockScrollObserver(host);
-        for (UIView *view in visibleSourceViews) {
-            LGRestoreClockSourceView(view);
-        }
+        LGDiagnosticLog(@"clock.apply.abort kind=%@ reason=%@ stockPreserved=1",
+                        LGClockHostKind(host), reason);
         return;
     }
     objc_setAssociatedObject(host, kLGClockLastBailReasonKey, nil, OBJC_ASSOCIATION_ASSIGN);
-
-    for (UIView *view in visibleSourceViews) {
-        if (!objc_getAssociatedObject(view, kLGClockOriginalAlphaKey)) {
-            objc_setAssociatedObject(view, kLGClockOriginalAlphaKey, @(view.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            objc_setAssociatedObject(view, kLGClockOriginalLayerOpacityKey, @(view.layer.opacity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        view.alpha = 0.0;
-        LGSetLayerTreeOpacity(view.layer, 0.0f);
-    }
 
     UIFont *preferredFont = LGClockPreferredRenderFont(sourceLabel, host);
     UIView *overlayContainer = LGIsLegacyClockHost(host)
         ? LGClockOverlayContainerForHost(host)
         : LGClockBestModernOverlayContainer(host, sourceLabel, preferredFont, nil);
+    if (!overlayContainer) {
+        LGRestoreClockSourceViews(visibleSourceViews, overlay);
+        [overlay removeFromSuperview];
+        objc_setAssociatedObject(host, kLGClockOverlayKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        LGDiagnosticLog(@"clock.apply.abort kind=%@ reason=no-overlay-container stockPreserved=1",
+                        LGClockHostKind(host));
+        return;
+    }
 
     if (!overlay) {
+        LGDiagnosticLog(@"clock.overlay.allocate.begin kind=%@ initialFrame=%@ container=%@",
+                        LGClockHostKind(host), NSStringFromCGRect(sourceLabel.frame),
+                        NSStringFromClass(overlayContainer.class));
         overlay = [[LGClockGlassView alloc] initWithFrame:sourceLabel.frame];
+        if (!overlay) {
+            LGRestoreClockSourceViews(visibleSourceViews, nil);
+            LGDiagnosticLog(@"clock.apply.abort kind=%@ reason=overlay-allocation-failed stockPreserved=1",
+                            LGClockHostKind(host));
+            return;
+        }
         objc_setAssociatedObject(host, kLGClockOverlayKey, overlay, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [overlayContainer addSubview:overlay];
-    } else if (overlay.superview != overlayContainer) {
+    }
+
+    if (overlay.superview != overlayContainer) {
         [overlay removeFromSuperview];
-        [overlayContainer addSubview:overlay];
+        if (LGIsIOS12() && host.superview == overlayContainer) {
+            LGDiagnosticLog(@"clock.overlay.insert.begin selector=insertSubview:belowSubview: container=%@ sibling=%@",
+                            NSStringFromClass(overlayContainer.class), NSStringFromClass(host.class));
+            [overlayContainer insertSubview:overlay belowSubview:host];
+        } else if (LGIsIOS12() && overlayContainer == host) {
+            LGDiagnosticLog(@"clock.overlay.insert.begin selector=insertSubview:atIndex: container=%@ index=0",
+                            NSStringFromClass(overlayContainer.class));
+            [overlayContainer insertSubview:overlay atIndex:0];
+        } else {
+            LGDiagnosticLog(@"clock.overlay.insert.begin selector=addSubview: container=%@",
+                            NSStringFromClass(overlayContainer.class));
+            [overlayContainer addSubview:overlay];
+        }
+    }
+
+    BOOL inserted = overlay.superview == overlayContainer &&
+                    overlay.window == host.window;
+    LGDiagnosticLog(@"clock.overlay.insert.end success=%d requestedContainer=%@ resultingSuperview=%@ window=%@ frame=%@ hidden=%d alpha=%.3f z=%.3f",
+                    inserted, NSStringFromClass(overlayContainer.class),
+                    NSStringFromClass(overlay.superview.class),
+                    NSStringFromClass(overlay.window.class),
+                    NSStringFromCGRect(overlay.frame), overlay.hidden,
+                    overlay.alpha, overlay.layer.zPosition);
+    if (!inserted) {
+        LGRestoreClockSourceViews(visibleSourceViews, overlay);
+        [overlay removeFromSuperview];
+        objc_setAssociatedObject(host, kLGClockOverlayKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        LGDiagnosticLog(@"clock.apply.abort kind=%@ reason=insertion-failed stockPreserved=1",
+                        LGClockHostKind(host));
+        return;
     }
 
     overlay.clockHost = host;
     LGAttachClockHostIfNeeded(host);
     LGEnsureClockScrollObserver(host, overlay);
     LGClockSeedObstacleRegistriesFromWindow(host.window);
-    [overlay syncFromSourceLabel:sourceLabel];
-    [overlay.superview bringSubviewToFront:overlay];
+    @try {
+        LGDiagnosticLog(@"clock.renderer.sync.begin source=%@ textLength=%lu",
+                        NSStringFromClass(sourceLabel.class),
+                        (unsigned long)(sourceLabel.text ?: sourceLabel.attributedText.string).length);
+        [overlay syncFromSourceLabel:sourceLabel];
+        [overlay setNeedsLayout];
+        [overlay layoutIfNeeded];
+        [overlay.glassView applyFilters];
+        LGDiagnosticLog(@"clock.renderer.sync.end overlayFrame=%@ glassFrame=%@",
+                        NSStringFromCGRect(overlay.frame),
+                        NSStringFromCGRect(overlay.glassView.frame));
+    } @catch (NSException *exception) {
+        LGRestoreClockSourceViews(visibleSourceViews, overlay);
+        [overlay removeFromSuperview];
+        objc_setAssociatedObject(host, kLGClockOverlayKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        LGDiagnosticLog(@"clock.apply.exception name=%@ reason=%@ stockPreserved=1",
+                        exception.name, exception.reason);
+        return;
+    }
+
+    if (LGIsIOS12() && host.superview == overlay.superview) {
+        [overlay.superview insertSubview:overlay belowSubview:host];
+    } else if (!LGIsIOS12()) {
+        [overlay.superview bringSubviewToFront:overlay];
+    }
+
+    BOOL rendererReady = [overlay lg_isReadyForClockDisplay];
+    BOOL replacementReady = inserted && rendererReady &&
+                            overlay.superview && overlay.window == host.window;
+    LGDiagnosticLog(@"clock.renderer.final selected=%@ ready=%d backdrop=%d overlayFrame=%@ glassFrame=%@ hidden=%d alpha=%.3f z=%.3f",
+                    LGIsIOS12() ? @"iOS12-UIVisualEffectView-fallback" : @"modern-Metal",
+                    replacementReady, overlay.glassView.lgRendererReady,
+                    NSStringFromCGRect(overlay.frame),
+                    NSStringFromCGRect(overlay.glassView.frame),
+                    overlay.hidden, overlay.alpha, overlay.layer.zPosition);
+
+    if (LGIsIOS12()) {
+        // The iOS 12 fallback is a blurred/tinted plaque behind the native
+        // clock. The native clock remains the readable foreground even after
+        // the fallback is ready.
+        LGRestoreClockSourceViews(visibleSourceViews, overlay);
+        LGDiagnosticLog(@"clock.stock.commit action=preserve reason=iOS12-readable-foreground replacementReady=%d",
+                        replacementReady);
+    } else if (replacementReady) {
+        // Newer systems retain the existing glyph-replacement appearance, but
+        // suppression is now committed only after allocation and insertion.
+        for (UIView *view in visibleSourceViews) {
+            if (!objc_getAssociatedObject(view, kLGClockOriginalAlphaKey)) {
+                objc_setAssociatedObject(view, kLGClockOriginalAlphaKey, @(view.alpha),
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                objc_setAssociatedObject(view, kLGClockOriginalLayerOpacityKey,
+                                         @(view.layer.opacity),
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+            view.alpha = 0.0;
+            LGSetLayerTreeOpacity(view.layer, 0.0f);
+        }
+        LGDiagnosticLog(@"clock.stock.commit action=suppress count=%lu replacementReady=1",
+                        (unsigned long)visibleSourceViews.count);
+    } else {
+        LGRestoreClockSourceViews(visibleSourceViews, overlay);
+        LGDiagnosticLog(@"clock.stock.commit action=preserve reason=replacement-not-ready");
+    }
+    LGClockLogFinalHierarchy(host, sourceLabel, overlay, replacementReady);
 }
 
 static void LGClockRunDeferredApply(UIView *host) {
@@ -2575,15 +2870,26 @@ static void LGRefreshAllClockHosts(void) {
 - (void)didMoveToWindow {
     %orig;
     UIView *self_ = (UIView *)self;
+    LGDiagnosticLog(@"clock.hook.enter method=-[SBFLockScreenDateView didMoveToWindow] target=%@ frame=%@ window=%@",
+                    NSStringFromClass(self_.class), NSStringFromCGRect(self_.frame),
+                    NSStringFromClass(self_.window.class));
     LGPositionLegacyDateSubtitleForClockHost(self_);
-    LGApplyClockReplacement(self_);
+    if (self_.window) LGScheduleClockApply(self_, YES, 0.0);
+    else LGApplyClockReplacement(self_);
 }
 
 - (void)layoutSubviews {
     %orig;
     UIView *self_ = (UIView *)self;
+    if (![objc_getAssociatedObject(self_, kLGClockDidLogLayoutHookKey) boolValue]) {
+        objc_setAssociatedObject(self_, kLGClockDidLogLayoutHookKey, @YES,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        LGDiagnosticLog(@"clock.hook.enter method=-[SBFLockScreenDateView layoutSubviews] target=%@ frame=%@ bounds=%@ window=%@",
+                        NSStringFromClass(self_.class), NSStringFromCGRect(self_.frame),
+                        NSStringFromCGRect(self_.bounds), NSStringFromClass(self_.window.class));
+    }
     LGPositionLegacyDateSubtitleForClockHost(self_);
-    LGApplyClockReplacement(self_);
+    if (self_.window) LGScheduleClockApply(self_, NO, 1.0 / 30.0);
 }
 
 %end
@@ -2737,16 +3043,19 @@ static void LGRefreshAllClockHosts(void) {
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
+    if (LGIsIOS12()) LGDiagnosticLog(@"clock.hook.enter method=-[SBDashBoardViewController viewWillAppear:] animated=%d", animated);
     LGClockSetCoverSheetVisible(YES);
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
+    if (LGIsIOS12()) LGDiagnosticLog(@"clock.hook.enter method=-[SBDashBoardViewController viewDidAppear:] animated=%d", animated);
     LGClockSetCoverSheetVisible(YES);
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
     %orig;
+    if (LGIsIOS12()) LGDiagnosticLog(@"clock.hook.enter method=-[SBDashBoardViewController viewDidDisappear:] animated=%d", animated);
     LGClockSetCoverSheetVisible(NO);
 }
 
@@ -2763,7 +3072,15 @@ static void LGRefreshAllClockHosts(void) {
     if (LGIsModernClockSourceLabel((UIView *)self) || LGIsLegacyClockTextLabel((UIView *)self)) {
         UIView *host = self.superview;
         while (host && !LGIsClockHost(host)) host = host.superview;
-        if (host) LGRequestClockApplyForSourceMutation(host);
+        if (host) {
+            if (LGIsIOS12()) {
+                LGDiagnosticLog(@"clock.hook.enter method=-[UILabel setText:] source=%@ host=%@ textLength=%lu",
+                                NSStringFromClass(((UIView *)self).class),
+                                NSStringFromClass(host.class),
+                                (unsigned long)text.length);
+            }
+            LGRequestClockApplyForSourceMutation(host);
+        }
     }
 }
 
@@ -2772,7 +3089,14 @@ static void LGRefreshAllClockHosts(void) {
     if (LGIsModernClockSourceLabel((UIView *)self) || LGIsLegacyClockTextLabel((UIView *)self)) {
         UIView *host = self.superview;
         while (host && !LGIsClockHost(host)) host = host.superview;
-        if (host) LGRequestClockApplyForSourceMutation(host);
+        if (host) {
+            if (LGIsIOS12()) {
+                LGDiagnosticLog(@"clock.hook.enter method=-[UILabel setFont:] source=%@ host=%@ font=%@ size=%.1f",
+                                NSStringFromClass(((UIView *)self).class),
+                                NSStringFromClass(host.class), font.fontName, font.pointSize);
+            }
+            LGRequestClockApplyForSourceMutation(host);
+        }
     }
 }
 
@@ -2783,6 +3107,15 @@ static void LGRefreshAllClockHosts(void) {
 %ctor {
     if (!LGIsSpringBoardProcess()) return;
     lgObservePreferenceReloadNamed(@"Clock", ^{ LGRefreshAllClockHosts(); });
+    if (LGIsIOS12()) {
+        LGDiagnosticLog(@"clock.ios12.classes SBFLockScreenDateView=%@ SBUILegibilityLabel=%@ SBDashBoardViewController=%@ SBCoverSheetViewController=%@ CSProminentTimeView=%@ selectedHost=SBFLockScreenDateView",
+                        NSClassFromString(@"SBFLockScreenDateView") ? @"found" : @"missing",
+                        NSClassFromString(@"SBUILegibilityLabel") ? @"found" : @"missing",
+                        NSClassFromString(@"SBDashBoardViewController") ? @"found" : @"missing",
+                        NSClassFromString(@"SBCoverSheetViewController") ? @"found" : @"missing",
+                        NSClassFromString(@"CSProminentTimeView") ? @"found" : @"missing");
+    }
     LGClockLog(@"ctor: init LGClockSpringBoard, fontPath=%@", LGClockVariableFontPath() ?: @"(none)");
     %init(LGClockSpringBoard);
 }
+

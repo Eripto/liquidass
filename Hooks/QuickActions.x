@@ -34,6 +34,12 @@ static void qaSetBackdropHidden(UIVisualEffectView *effectView) {
     backdrop.alpha = 0.0;
 }
 
+static void qaRestoreBackdrop(UIVisualEffectView *effectView) {
+    UIView *backdrop = objc_getAssociatedObject(effectView, kQABackdropKey);
+    NSNumber *alpha = objc_getAssociatedObject(effectView, kQABackdropAlphaKey);
+    if (backdrop && alpha) backdrop.alpha = alpha.doubleValue;
+}
+
 static BOOL isQuickActionsHost(UIView *view) {
     if (![view isKindOfClass:[UIVisualEffectView class]] || !view.window) return NO;
     NSArray<NSString *> *classNames = @[
@@ -59,8 +65,6 @@ static void injectQuickActionsGlass(UIVisualEffectView *fx) {
     UIView *container = fx.contentView;
     if (CGRectGetWidth(container.bounds) < 4.0 || CGRectGetHeight(container.bounds) < 4.0) return;
 
-    qaSetBackdropHidden(fx);
-
     if (@available(iOS 13.0, *)) {
         fx.overrideUserInterfaceStyle        = UIUserInterfaceStyleLight;
         container.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
@@ -77,12 +81,17 @@ static void injectQuickActionsGlass(UIVisualEffectView *fx) {
     if (glass.superview != container) [container insertSubview:glass atIndex:0];
     glass.frame               = container.bounds;
     glass.layer.cornerRadius  = fmin(CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds)) * 0.5;
-    glass.layer.cornerCurve   = kCACornerCurveContinuous;
+    if (@available(iOS 13.0, *)) glass.layer.cornerCurve = kCACornerCurveContinuous;
     glass.layer.masksToBounds = YES;
     [glass applyFilters];
     if (!sQuickActionHosts) sQuickActionHosts = [NSHashTable weakObjectsHashTable];
     [sQuickActionHosts addObject:fx];
     lgTrackGlass(glass, @"QuickActions", nil);
+    if (!LGIsIOS12() || glass.lgRendererReady) {
+        qaSetBackdropHidden(fx);
+    } else {
+        qaRestoreBackdrop(fx);
+    }
 }
 
 static void removeQuickActionsGlass(UIVisualEffectView *fx) {
@@ -91,9 +100,7 @@ static void removeQuickActionsGlass(UIVisualEffectView *fx) {
         fx.overrideUserInterfaceStyle             = UIUserInterfaceStyleUnspecified;
         fx.contentView.overrideUserInterfaceStyle = UIUserInterfaceStyleUnspecified;
     }
-    UIView *backdrop = objc_getAssociatedObject(fx, kQABackdropKey);
-    NSNumber *alpha = objc_getAssociatedObject(fx, kQABackdropAlphaKey);
-    if (backdrop && alpha) backdrop.alpha = alpha.doubleValue;
+    qaRestoreBackdrop(fx);
     objc_setAssociatedObject(fx, kQABackdropKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(fx, kQABackdropAlphaKey, nil, OBJC_ASSOCIATION_ASSIGN);
     if (glass) {
@@ -127,3 +134,4 @@ static void LGReconcileQuickActionHosts(void) {
 %ctor {
     lgObservePreferenceReloadNamed(@"QuickActions", ^{ LGReconcileQuickActionHosts(); });
 }
+

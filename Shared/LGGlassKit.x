@@ -111,8 +111,33 @@ void lgTrackGlass(UIView *glass, NSString *prefix, UIView *material) {
     [sGlassRecs setObject:rec forKey:glass];
 }
 
+static BOOL LGIOS12HasReadyTrackedReplacement(UIView *stockView,
+                                               NSString *prefix) {
+    if (!stockView.window || !sGlassRecs.count) return NO;
+    for (UIView *candidate in sGlassRecs.keyEnumerator.allObjects) {
+        LGGlassRec *record = [sGlassRecs objectForKey:candidate];
+        if (!record || ![record.prefix isEqualToString:prefix]) continue;
+        if (!candidate.superview || candidate.window != stockView.window ||
+            candidate.hidden || candidate.alpha <= 0.01 ||
+            CGRectIsEmpty(candidate.bounds)) continue;
+        if ([candidate isKindOfClass:[LGLiveBackdropView class]] &&
+            !((LGLiveBackdropView *)candidate).lgRendererReady) continue;
+        return YES;
+    }
+    return NO;
+}
+
 void lgSuppressStock(UIView *v, NSString *prefix, BOOL setHidden) {
     if (!v || !prefix.length) return;
+    if (setHidden && LGIsIOS12() &&
+        !LGIOS12HasReadyTrackedReplacement(v, prefix)) {
+        // Widget/passcode hooks historically hid their stock surface before
+        // their replacement was attached. Preserve it until a visible,
+        // renderer-ready replacement in the same window is tracked.
+        setHidden = NO;
+        LGDiagnosticLog(@"suppression.ios12.blocked prefix=%@ stock=%@ reason=no-ready-replacement hidden=%d alpha=%.3f",
+                        prefix, NSStringFromClass(v.class), v.hidden, v.alpha);
+    }
     if (setHidden) v.hidden = YES;
     if (!sSuppressed) sSuppressed = [NSMapTable weakToStrongObjectsMapTable];
     [sSuppressed setObject:prefix forKey:v];
@@ -346,3 +371,4 @@ __attribute__((constructor)) static void lgGlassInitEnableObserver(void) {
 - (void)setCenter:(CGPoint)center{ %orig(center); LGResyncGlassGeometry((UIView *)self, kGlassKey); }
 
 %end
+
