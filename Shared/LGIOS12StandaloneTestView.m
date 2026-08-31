@@ -172,7 +172,7 @@ static NSString * const kLGIOS12MetalSource = @
     self.layer.shadowRadius = 16.0;
     self.layer.shadowOffset = CGSizeMake(0.0, 8.0);
 
-    _device = MTLCreateSystemDefaultDevice();
+    _device = [LGIOS12LiveBackdropProvider sharedProvider].device;
     LGIOS12Log(@"Metal device creation success=%d device=%@",
                _device != nil, _device.name ?: @"nil");
     if (!_device) return self;
@@ -265,6 +265,10 @@ static NSString * const kLGIOS12MetalSource = @
 
 - (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
     if (!texture) return;
+    if (texture.device != _device) {
+        LGIOS12Log(@"MTLTexture rejected: device mismatch (texture device=%@, renderer device=%@)", texture.device.name ?: @"nil", _device.name ?: @"nil");
+        return;
+    }
     _backdropTexture = texture;
     _rendererReady = _computePipeline && _presentPipeline && _commandQueue && _backdropTexture != nil;
     if (_rendererReady && self.hidden) {
