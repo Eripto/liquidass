@@ -54,7 +54,7 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
         _clients = [NSHashTable weakObjectsHashTable];
         _excludedGlassViews = [NSHashTable weakObjectsHashTable];
 
-        _targetRefreshInterval = 1.0 / 15.0; // Start at 15 FPS
+        _targetRefreshInterval = 1.0 / 10.0; // Start at 10 FPS
 
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(applicationDidEnterBackground)
@@ -117,9 +117,9 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
             if (!self->_displayLink && self->_clients.count > 0) {
                 self->_displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkFired:)];
                 if ([self->_displayLink respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
-                    self->_displayLink.preferredFramesPerSecond = 15;
+                    self->_displayLink.preferredFramesPerSecond = 10;
                 } else {
-                    self->_displayLink.frameInterval = 4; // 60/4 = 15 fps
+                    self->_displayLink.frameInterval = 6; // 60/6 = 10 fps
                 }
                 [self->_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
                 LGIOS12ProviderLog(@"Active refresh loop started (target: %.1f FPS)", 1.0 / self->_targetRefreshInterval);
@@ -234,10 +234,12 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
         // Adaptive throttling logic
         double totalMs = captureMs + uploadMs;
         if (totalMs > 100.0) { // If it takes more than 100ms (10fps max limit)
-            _targetRefreshInterval = MAX(1.0 / 5.0, _targetRefreshInterval * 1.5); // Throttle down, min 5fps
+            // Increase interval to lower FPS. Cap at 5 FPS (0.2s)
+            _targetRefreshInterval = MIN(1.0 / 5.0, _targetRefreshInterval * 1.5);
             LGIOS12ProviderLog(@"Throttling refresh rate to %.1f FPS due to load", 1.0 / _targetRefreshInterval);
-        } else if (totalMs < 30.0 && _targetRefreshInterval > (1.0 / 15.0)) { // If we have headroom
-            _targetRefreshInterval = MIN(1.0 / 15.0, _targetRefreshInterval * 0.8); // Throttle up, max 15fps
+        } else if (totalMs < 60.0 && _targetRefreshInterval > (1.0 / 10.0)) { // If we have headroom
+            // Decrease interval to raise FPS. Floor at 10 FPS (0.1s)
+            _targetRefreshInterval = MAX(1.0 / 10.0, _targetRefreshInterval * 0.8);
             LGIOS12ProviderLog(@"Increasing refresh rate to %.1f FPS", 1.0 / _targetRefreshInterval);
         }
 

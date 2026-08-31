@@ -141,6 +141,7 @@ static NSString * const kLGIOS12MetalSource = @
 
 @interface LGIOS12FloatingGlassTestView : UIView <MTKViewDelegate, LGIOS12LiveBackdropClient>
 @property (nonatomic, readonly) BOOL rendererReady;
+@property (nonatomic, readonly) BOOL metalInitialized;
 - (instancetype)initWithFrame:(CGRect)frame;
 @end
 
@@ -248,11 +249,13 @@ static NSString * const kLGIOS12MetalSource = @
     [self addGestureRecognizer:pan];
     [[LGIOS12LiveBackdropProvider sharedProvider] registerClient:self];
     [[LGIOS12LiveBackdropProvider sharedProvider] registerGlassViewForExclusion:self];
-    _rendererReady = YES;
+    self.hidden = YES;
     return self;
 }
 
+
 - (BOOL)rendererReady { return _rendererReady; }
+- (BOOL)metalInitialized { return _computePipeline && _presentPipeline && _commandQueue; }
 - (void)dealloc {
     [[LGIOS12LiveBackdropProvider sharedProvider] unregisterClient:self];
     [[LGIOS12LiveBackdropProvider sharedProvider] unregisterGlassViewForExclusion:self];
@@ -263,7 +266,10 @@ static NSString * const kLGIOS12MetalSource = @
 - (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
     if (!texture) return;
     _backdropTexture = texture;
-    _rendererReady = _computePipeline && _presentPipeline && _commandQueue;
+    _rendererReady = _computePipeline && _presentPipeline && _commandQueue && _backdropTexture != nil;
+    if (_rendererReady && self.hidden) {
+        self.hidden = NO;
+    }
     LGIOS12Log(@"MTLTexture acquired success=1 source=%@ dimensions=%lux%lu format=%lu usage=%lu",
                source, (unsigned long)texture.width,
                (unsigned long)texture.height,
@@ -493,10 +499,10 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
     LGIOS12FloatingGlassTestView *test =
         [[LGIOS12FloatingGlassTestView alloc] initWithFrame:frame];
 
-    LGIOS12Log(@"LiquidGlassView allocation class=%@ success=%d frame=%@ rendererReady=%d",
+    LGIOS12Log(@"LiquidGlassView allocation class=%@ success=%d frame=%@ metalInitialized=%d",
                NSStringFromClass(test.class), test != nil,
-               NSStringFromCGRect(frame), test.rendererReady);
-    if (!test || !test.rendererReady) {
+               NSStringFromCGRect(frame), test.metalInitialized);
+    if (!test || !test.metalInitialized) {
         LGIOS12Log(@"standalone install aborted reason=renderer-init-failed stockUI=untouched");
         return;
     }
