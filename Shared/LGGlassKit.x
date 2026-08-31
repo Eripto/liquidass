@@ -2,6 +2,7 @@
 #import "LGLiveBackdropView.h"
 #import "LGHostRegistry.h"
 #import "LGSharedSupport.h"
+#import <objc/message.h>
 #import <objc/runtime.h>
 
 #pragma mark - class / ancestry helpers
@@ -194,6 +195,12 @@ void LGRegisterMaterialHost(NSString *prefix,
 }
 
 static void lgRouteMaterialHost(UIView *material) {
+    // A public UIVisualEffectView is the iOS 12 fallback renderer. Never
+    // interpret any of its private implementation views as a host requiring
+    // another LiquidAss glass, which would recursively nest renderers.
+    for (UIView *ancestor = material; ancestor; ancestor = ancestor.superview) {
+        if ([ancestor isKindOfClass:[LGLiveBackdropView class]]) return;
+    }
     if (!material.window) {
         LGRemoveGlassFromMaterial(material, kGlassKey);
         return;
@@ -228,6 +235,54 @@ static void lgReconcileInjectionsForDisable(void) {
     }
 }
 
+static void lgRouteIOS12MaterialHostsInView(UIView *view, Class materialClass,
+                                            NSUInteger *visited,
+                                            NSUInteger *materialCount) {
+    if (!view || [view isKindOfClass:[LGLiveBackdropView class]]) return;
+    if (visited) (*visited)++;
+    if (materialClass && [view isKindOfClass:materialClass]) {
+        if (materialCount) (*materialCount)++;
+        lgRouteMaterialHost(view);
+    }
+    for (UIView *subview in [view.subviews copy]) {
+        lgRouteIOS12MaterialHostsInView(subview, materialClass, visited,
+                                       materialCount);
+    }
+}
+
+static void lgActivateIOS12FallbackForExistingHosts(void) {
+    if (!LGIsIOS12()) return;
+    Class materialClass = NSClassFromString(@"MTMaterialView");
+    Class applicationClass = NSClassFromString(@"UIApplication");
+    SEL sharedSelector = NSSelectorFromString(@"sharedApplication");
+    SEL windowsSelector = NSSelectorFromString(@"windows");
+    if (!materialClass || !applicationClass ||
+        ![applicationClass respondsToSelector:sharedSelector]) {
+        LGDiagnosticLog(@"springboard.reload.ios12.scan.skipped materialClass=%@ applicationClass=%@",
+                        materialClass ? NSStringFromClass(materialClass) : @"missing",
+                        applicationClass ? NSStringFromClass(applicationClass) : @"missing");
+        return;
+    }
+    id application = ((id (*)(Class, SEL))objc_msgSend)(applicationClass,
+                                                        sharedSelector);
+    if (![application respondsToSelector:windowsSelector]) {
+        LGDiagnosticLog(@"springboard.reload.ios12.scan.skipped selector=windows");
+        return;
+    }
+    NSArray<UIWindow *> *windows = ((id (*)(id, SEL))objc_msgSend)(
+        application, windowsSelector);
+    NSUInteger visited = 0;
+    NSUInteger materialCount = 0;
+    LGDiagnosticLog(@"springboard.reload.ios12.scan.begin windows=%lu materialClass=%@",
+                    (unsigned long)windows.count, NSStringFromClass(materialClass));
+    for (UIWindow *window in [windows copy]) {
+        lgRouteIOS12MaterialHostsInView(window, materialClass, &visited,
+                                       &materialCount);
+    }
+    LGDiagnosticLog(@"springboard.reload.ios12.scan.end views=%lu materials=%lu",
+                    (unsigned long)visited, (unsigned long)materialCount);
+}
+
 static void lgEnablePrefsReloadCallback(CFNotificationCenterRef c, void *o, CFStringRef n,
                                         const void *obj, CFDictionaryRef info) {
     LGLog(@"prefs Reload received; invalidating SpringBoard host-enable cache");
@@ -239,6 +294,8 @@ static void lgEnablePrefsReloadCallback(CFNotificationCenterRef c, void *o, CFSt
         LGDiagnosticLog(@"springboard.reload.reconcile.begin handlers=%lu",
                         (unsigned long)sReloadHandlers.count);
         lgReconcileInjectionsForDisable();
+        LGDiagnosticLog(@"springboard.reload.reconcile.end");
+        lgActivateIOS12FallbackForExistingHosts();
         LGLog(@"prefs Reload reconciled material hosts; extraHandlers=%lu",
               (unsigned long)sReloadHandlers.count);
         NSUInteger index = 0;

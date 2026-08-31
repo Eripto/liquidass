@@ -256,6 +256,8 @@ void LGForceSynchronizePreferences(void) {
                                      (__bridge CFStringRef)LGPrefsDomain);
         }
         BOOL wrote = CFPreferencesAppSynchronize((__bridge CFStringRef)LGPrefsDomain);
+        LGDiagnosticLog(@"prefs.apply.notify.begin name=%s",
+                        LGPrefsChangedNotificationCString);
         int notifyResult = notify_post(LGPrefsChangedNotificationCString);
         LGLog(@"[prefs-apply] committed=%lu removed=%lu wrote=%d; posting Reload",
               (unsigned long)pendingValues.count,
@@ -263,6 +265,7 @@ void LGForceSynchronizePreferences(void) {
               wrote);
         LGDiagnosticLog(@"prefs.apply.cfpreferences.end wrote=%d notifyResult=%d",
                         wrote, notifyResult);
+        LGDiagnosticLog(@"prefs.apply.notify.end result=%d", notifyResult);
     });
 
     [sLGPendingPreferences removeAllObjects];

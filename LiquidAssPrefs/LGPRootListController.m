@@ -530,7 +530,9 @@ static NSString *LGFormatRuntimeCacheUsage(unsigned long long bytes) {
 }
 
 - (void)handleApplyPressed {
+    LGDiagnosticLog(@"prefs.apply.action.begin scope=root");
     LGForceSynchronizePreferences();
+    LGDiagnosticLog(@"prefs.apply.action.end scope=root");
 }
 
 - (void)handleRespringPressed {

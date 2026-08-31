@@ -240,23 +240,59 @@ static CGFloat LGScaleForSize(CGSize s) {
 - (void)reapplyFilterForParameterReload;
 @end
 
+static void LGRefreshAllLiveGlasses(NSString *reason) {
+    // Clear cached prefs before rebuilding every live filter.  This is also
+    // the iOS 12 renderer reload path because backboardd deliberately does
+    // not register the post-iOS-12 custom QuartzCore/Metal filter there.
+    LGInvalidateGlassPreferenceCache();
+    NSArray<LGLiveBackdropView *> *glasses = sLGAllGlasses.allObjects;
+    LGDiagnosticLog(@"renderer.reload.begin reason=%@ filters=%lu process=%@",
+                    reason ?: @"unknown", (unsigned long)glasses.count,
+                    LGMainBundleIdentifier());
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    NSUInteger index = 0;
+    for (LGLiveBackdropView *glass in glasses) {
+        LGDiagnosticLog(@"renderer.reload.filter.begin reason=%@ index=%lu class=%@ type=%@ bounds=%@",
+                        reason ?: @"unknown", (unsigned long)index,
+                        NSStringFromClass(glass.class), glass.lgFilterType ?: @"default",
+                        NSStringFromCGRect(glass.bounds));
+        @try {
+            [glass reapplyFilterForParameterReload];
+            [glass updateSpecular];
+            LGDiagnosticLog(@"renderer.reload.filter.end reason=%@ index=%lu",
+                            reason ?: @"unknown", (unsigned long)index);
+        } @catch (NSException *exception) {
+            LGDiagnosticLog(@"renderer.reload.filter.exception reason=%@ index=%lu exception=%@ detail=%@",
+                            reason ?: @"unknown", (unsigned long)index,
+                            exception.name, exception.reason);
+        }
+        index++;
+    }
+    [CATransaction commit];
+    LGDiagnosticLog(@"renderer.reload.end reason=%@ filters=%lu",
+                    reason ?: @"unknown", (unsigned long)glasses.count);
+}
+
 static void LGParametersReloaded(CFNotificationCenterRef center, void *observer,
                                  CFStringRef name, const void *object,
                                  CFDictionaryRef userInfo) {
-    (void)center; (void)observer; (void)name; (void)object; (void)userInfo;
+    (void)center; (void)observer; (void)object; (void)userInfo;
+    NSString *reason = (__bridge NSString *)name ?: @"ParametersReloaded";
     dispatch_async(dispatch_get_main_queue(), ^{
+        LGRefreshAllLiveGlasses(reason);
+    });
+}
 
-        // clear cached prefs before rebuilding every live filter
-        LGInvalidateGlassPreferenceCache();
-        NSArray<LGLiveBackdropView *> *glasses = sLGAllGlasses.allObjects;
-        LGLog(@"render parameters ready; refreshing %lu live filters",
-              (unsigned long)glasses.count);
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        for (LGLiveBackdropView *glass in glasses) {
-            [glass reapplyFilterForParameterReload];
-        }
-        [CATransaction commit];
+static void LGIOS12PreferencesReloaded(CFNotificationCenterRef center, void *observer,
+                                       CFStringRef name, const void *object,
+                                       CFDictionaryRef userInfo) {
+    (void)center; (void)observer; (void)object; (void)userInfo;
+    NSString *reason = (__bridge NSString *)name ?: @"PreferencesReloaded";
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LGDiagnosticLog(@"renderer.ios12.direct-reload.received notification=%@",
+                        reason);
+        LGRefreshAllLiveGlasses(reason);
     });
 }
 
@@ -268,6 +304,17 @@ static void LGEnsureFilterRefreshObserver(void) {
                                     LGParametersReloaded,
                                     kLGParametersReloadedNotification, NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
+    if (LGIsIOS12()) {
+        // The modern backboardd renderer is unavailable on iOS 12 and thus
+        // cannot translate Reload into ParametersReloaded.  Listen to the
+        // original preference notification only on iOS 12.
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+                                        LGIOS12PreferencesReloaded,
+                                        kLGMotionPrefsReloadNotification, NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
+        LGDiagnosticLog(@"renderer.ios12.direct-reload.observer-installed process=%@",
+                        LGMainBundleIdentifier());
+    }
 }
 
 static void LGApplyMotionHighlightAngle(void) {
@@ -343,8 +390,9 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     CALayer         *_specularBoostMask;
     CALayer         *_nativeBlurLayer;
     CALayer         *_legacyTintLayer;
-    UIVisualEffectView *_legacyPreferencesBlurView;
+    UIVisualEffectView *_legacyIOS12BlurView;
     CGFloat          _nativeBlurRadius;
+    NSInteger        _legacyIOS12BlurStyle;
     BOOL             _backdropConfigured;
     BOOL             _filterAttached;
     uint32_t         _lgId;
@@ -370,10 +418,10 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
 }
 
 + (Class)layerClass {
-    // Private CABackdropLayer commits are unstable in the iOS 12 Settings
-    // process. SpringBoard retains its native backdrop path; preferences use
-    // the public visual-effect fallback below.
-    if (LGIsIOS12() && LGIsPreferencesProcess()) return [CALayer class];
+    // Never instantiate the private CABackdropLayer on iOS 12.  Setting its
+    // private filter/KVC state can survive construction and then abort the
+    // render-server transaction when the layer is committed.
+    if (LGIsIOS12()) return [CALayer class];
     return NSClassFromString(@"CABackdropLayer") ?: [CALayer class];
 }
 
@@ -402,17 +450,26 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     self.backgroundColor        = [UIColor clearColor];
     self.opaque                 = NO;
 
-    if (LGIsIOS12() && LGIsPreferencesProcess()) {
-        UIBlurEffect *effect = LGMaterialBlurEffectForTraitCollection(self.traitCollection);
-        _legacyPreferencesBlurView = [[UIVisualEffectView alloc] initWithEffect:effect];
-        _legacyPreferencesBlurView.frame = self.bounds;
-        _legacyPreferencesBlurView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
-                                                       UIViewAutoresizingFlexibleHeight;
-        _legacyPreferencesBlurView.userInteractionEnabled = NO;
-        _legacyPreferencesBlurView.clipsToBounds = YES;
-        [self insertSubview:_legacyPreferencesBlurView atIndex:0];
-        LGDiagnosticLog(@"prefs.backdrop.init public-iOS12-fallback type=%@",
-                        _lgFilterType ?: @"default");
+    _legacyIOS12BlurStyle = NSNotFound;
+    if (LGIsIOS12()) {
+        Class effectViewClass = NSClassFromString(@"UIVisualEffectView");
+        SEL initializer = NSSelectorFromString(@"initWithEffect:");
+        if (effectViewClass && [effectViewClass instancesRespondToSelector:initializer]) {
+            UIBlurEffect *effect = LGMaterialBlurEffectForTraitCollection(self.traitCollection);
+            _legacyIOS12BlurView = [[effectViewClass alloc] initWithEffect:effect];
+            _legacyIOS12BlurView.frame = self.bounds;
+            _legacyIOS12BlurView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                                    UIViewAutoresizingFlexibleHeight;
+            _legacyIOS12BlurView.userInteractionEnabled = NO;
+            _legacyIOS12BlurView.clipsToBounds = YES;
+            [self insertSubview:_legacyIOS12BlurView atIndex:0];
+            LGDiagnosticLog(@"renderer.ios12.fallback.init process=%@ type=%@ class=%@",
+                            LGMainBundleIdentifier(), _lgFilterType ?: @"default",
+                            NSStringFromClass(effectViewClass));
+        } else {
+            LGDiagnosticLog(@"renderer.ios12.fallback.init tint-only process=%@ type=%@ reason=UIVisualEffectView-unavailable",
+                            LGMainBundleIdentifier(), _lgFilterType ?: @"default");
+        }
     }
 
     self.autoresizingMask       = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -514,10 +571,16 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
         return;
     }
     UIColor *legacyTint = LGLegacyTintColorForFilterType(_lgFilterType);
-    if (_legacyPreferencesBlurView) {
+    if (_legacyIOS12BlurView) {
         [_legacyTintLayer removeFromSuperlayer];
         _legacyTintLayer = nil;
-        _legacyPreferencesBlurView.contentView.backgroundColor = legacyTint;
+        UIView *contentView = nil;
+        SEL contentViewSelector = NSSelectorFromString(@"contentView");
+        if ([_legacyIOS12BlurView respondsToSelector:contentViewSelector]) {
+            contentView = ((id (*)(id, SEL))objc_msgSend)(
+                _legacyIOS12BlurView, contentViewSelector);
+        }
+        contentView.backgroundColor = legacyTint;
         return;
     }
     if (!_legacyTintLayer) {
@@ -566,7 +629,14 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
                                   clear,
                                   (id)[UIColor colorWithWhite:1.0 alpha:kLGSpecularBrightBoostOpacity].CGColor];
         _specularBoost.locations = @[@0.0, @0.5, @1.0];
-        _specularBoost.compositingFilter = @"overlayBlendMode";
+        if (LGIsIOS12()) {
+            // iOS 12's render server is not asked to resolve a named
+            // compositing filter. A plain alpha gradient is less refractive
+            // but uses only public CoreAnimation behavior.
+            _specularBoost.opacity = 0.42;
+        } else {
+            _specularBoost.compositingFilter = @"overlayBlendMode";
+        }
         _specularBoostMask = [CALayer layer];
         _specularBoostMask.backgroundColor = UIColor.clearColor.CGColor;
         _specularBoostMask.borderColor = UIColor.blackColor.CGColor;
@@ -604,15 +674,34 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
 
 - (void)applyFilters {
     CALayer *layer = self.layer;
-    if (LGIsIOS12() && LGIsPreferencesProcess()) {
-        _legacyPreferencesBlurView.frame = self.bounds;
-        _legacyPreferencesBlurView.layer.cornerRadius = self.layer.cornerRadius;
-        _legacyPreferencesBlurView.clipsToBounds = YES;
+    if (LGIsIOS12()) {
+        CGFloat configuredRadius = LGNativeBlurRadiusForFilterType(_lgFilterType);
+        NSInteger wantedStyle = NSNotFound;
+        if (configuredRadius > 0.01) {
+            wantedStyle = configuredRadius < 12.0 ? UIBlurEffectStyleExtraLight
+                        : configuredRadius < 30.0 ? UIBlurEffectStyleLight
+                                                   : UIBlurEffectStyleRegular;
+        }
+        if (_legacyIOS12BlurView && _legacyIOS12BlurStyle != wantedStyle) {
+            UIBlurEffect *effect = wantedStyle == NSNotFound
+                ? nil : [UIBlurEffect effectWithStyle:(UIBlurEffectStyle)wantedStyle];
+            SEL effectSelector = NSSelectorFromString(@"setEffect:");
+            if ([_legacyIOS12BlurView respondsToSelector:effectSelector]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(
+                    _legacyIOS12BlurView, effectSelector, effect);
+                _legacyIOS12BlurStyle = wantedStyle;
+            }
+        }
+        _legacyIOS12BlurView.frame = self.bounds;
+        _legacyIOS12BlurView.layer.cornerRadius = self.layer.cornerRadius;
+        _legacyIOS12BlurView.clipsToBounds = YES;
         [self updateLegacyIOS12Tint];
         if (!_backdropConfigured) {
             _backdropConfigured = YES;
-            LGDiagnosticLog(@"prefs.backdrop.apply public-iOS12-fallback type=%@ bounds=%@",
-                            _lgFilterType ?: @"default", NSStringFromCGRect(self.bounds));
+            LGDiagnosticLog(@"renderer.ios12.fallback.apply process=%@ type=%@ bounds=%@ blur=%.2f style=%ld",
+                            LGMainBundleIdentifier(), _lgFilterType ?: @"default",
+                            NSStringFromCGRect(self.bounds), configuredRadius,
+                            (long)wantedStyle);
         }
         _filterAttached = NO;
         return;
@@ -627,14 +716,12 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
             LGSafeSetLayerValue(layer, @NO, @"layerUsesCoreImageFilters");
             LGSafeSetLayerValue(layer, @YES, @"windowServerAware");
             LGSafeSetLayerValue(layer, _lgGroupName, @"groupName");
-            // These keys are absent on some iOS 12 QuartzCore builds.  Keep
-            // them on newer systems, but do not let an unknown KVC key abort
-            // the native Gaussian fallback.
-            if (!LGIsIOS12()) {
-                LGSafeSetLayerValue(layer, @"dylv.liquidglass",
-                                    @"groupNamespace");
-                LGSafeSetLayerValue(layer, @YES, @"ignoresScreenClip");
-            }
+            // iOS 12 returned through the public visual-effect path above;
+            // these private keys therefore remain exclusive to the modern
+            // renderer just as they were before the compatibility fallback.
+            LGSafeSetLayerValue(layer, @"dylv.liquidglass",
+                                @"groupNamespace");
+            LGSafeSetLayerValue(layer, @YES, @"ignoresScreenClip");
             _backdropConfigured = YES;
         }
 
@@ -665,28 +752,6 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
         NSArray *existing = layer.filters;
         CGFloat nativeBlur = LGNativeBlurRadiusForFilterType(_lgFilterType ?: wantType);
         Class filterCls = NSClassFromString(@"CAFilter");
-
-        // The custom filter registration relies on private QuartzCore renderer
-        // layouts that are only verified for iOS 13+.  iOS 12 instead uses the
-        // native backdrop Gaussian plus the same tint/specular layers.
-        if (LGIsIOS12()) {
-            [_nativeBlurLayer removeFromSuperlayer];
-            _nativeBlurLayer = nil;
-            [self updateLegacyIOS12Tint];
-            CGFloat fallbackRadius = MAX(nativeBlur, 1.0);
-            id gaussian = LGCreateNativeGaussianFilter(filterCls, fallbackRadius);
-            if (gaussian) {
-                layer.filters = @[gaussian];
-                _filterAttached = YES;
-                _nativeBlurRadius = fallbackRadius;
-            } else {
-                layer.filters = nil;
-                _filterAttached = NO;
-                LGLog(@"glass#%u iOS 12 native CAFilter unavailable; using tint/specular fallback",
-                      _lgId);
-            }
-            return;
-        }
 
         [self updateLegacyIOS12Tint];
         [self updateNativeBlurOverlayWithRadius:nativeBlur filterClass:filterCls];
