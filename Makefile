@@ -16,7 +16,9 @@ export TARGET_CODESIGN TARGET_CODESIGN_FLAGS
 # Several post-iOS-12 declarations are intentionally invoked through guarded
 # paths or supplied by LGCompatibility's add-if-missing runtime shims.
 export ADDITIONAL_CFLAGS += -Wno-unguarded-availability-new
-LIQUIDASS_DEBUG ?= 0
+# Temporary stage diagnostics are intentionally on for the iOS 12 renderer
+# bring-up package.  They are bounded/one-shot in render-hot paths.
+LIQUIDASS_DEBUG ?= 1
 export LIQUIDASS_DEBUG
 
 INSTALL_TARGET_PROCESSES = backboardd SpringBoard
@@ -32,9 +34,10 @@ liquidass_FILES     = Tweak.x Hooks/Dock.x Hooks/Folder.x Hooks/AppIcons.x Hooks
                       LiquidAssPrefs/LGPrefsLiquidSlider.m \
                       LiquidAssPrefs/LGPrefsLiquidSwitch.m \
                       Shared/LGGlassKit.x Shared/LGLiveBackdropView.m \
+                      Shared/LGIOS12StandaloneTestView.m \
                       Shared/LGSharedSupport.m Shared/LGCompatibility.m
 liquidass_CFLAGS    = -fobjc-arc -DLIQUIDASS_DEBUG=$(LIQUIDASS_DEBUG)
-liquidass_FRAMEWORKS = UIKit QuartzCore CoreText CoreGraphics CoreMotion
+liquidass_FRAMEWORKS = UIKit QuartzCore CoreText CoreGraphics CoreMotion Metal MetalKit
 
 include $(THEOS)/makefiles/tweak.mk
 SUBPROJECTS += LiquidAssBackboardd

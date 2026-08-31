@@ -442,6 +442,7 @@ static void restorePasscodeForDisable(void) {
 %end
 
 %ctor {
+    if (LGIsIOS12()) return;
     %init(LGPasscodeHooks);
     if (NSClassFromString(@"SBUIPasscodeLockNumberPad"))
         %init(LGLegacyPasscode);

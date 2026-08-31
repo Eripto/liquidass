@@ -265,6 +265,7 @@ static void injectLegacyWidgetGlass(UIView *platter) {
 
 
 %ctor {
+    if (LGIsIOS12()) return;
     if (LGSystemVersionAtLeast(14, 0, 0) &&
         (NSClassFromString(@"CHUISWidgetHostViewController") ||
          NSClassFromString(@"CHUISAvocadoHostViewController"))) {

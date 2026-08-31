@@ -991,6 +991,7 @@ prepareForDismissalTransitionForReversingTransition:(BOOL)reversing
 %end
 
 %ctor {
+    if (LGIsIOS12()) return;
     sLGCoverSheetPanels = [NSHashTable weakObjectsHashTable];
     sLGCoverSheetWallpaperViews = [NSHashTable weakObjectsHashTable];
     if (LGSystemVersionAtLeast(13, 0, 0) &&

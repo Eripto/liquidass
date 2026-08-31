@@ -78,6 +78,7 @@ static void LGUpdateSpotlightGlass(UIView *view) {
 %end
 
 %ctor {
+    if (LGIsIOS12()) return;
     if ([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:
             (NSOperatingSystemVersion){16, 0, 0}]) {
         %init(LGSpotlightHooks);

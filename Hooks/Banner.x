@@ -56,6 +56,7 @@ static BOOL LGIsLightLockscreenNotificationView(UIView *view) {
 }
 
 static UIColor *LGForcedPlatterTextColor(UIView *view) {
+    if (LGIsIOS12()) return nil;
     if (!view || view.traitCollection.userInterfaceStyle != UIUserInterfaceStyleLight) return nil;
     if (LGIsTopBannerPresentation(view)) return UIColor.blackColor;
     return LGIsLightLockscreenNotificationView(view) ? UIColor.whiteColor : nil;
@@ -72,6 +73,7 @@ static NSAttributedString *LGAttributedTextWithColor(NSAttributedString *text, U
 }
 
 static void LGDisableLockscreenStackDimming(id controller) {
+    if (LGIsIOS12()) return;
     // stack dimming belongs to notifications and not top banners
     if (!controller || LGIsTopBannerPresentation([controller isKindOfClass:[UIViewController class]]
                                                    ? ((UIViewController *)controller).view : nil)) return;
@@ -101,6 +103,7 @@ static CGFloat LGActionButtonRadius(UIView *material) {
 }
 
 static void LGUpdatePlatterGlass(UIView *material) {
+    if (LGIsIOS12()) return;
     // one platter class serves banners notifications and action buttons
 
     if (!material.window) return;
@@ -125,6 +128,8 @@ static void LGUpdatePlatterGlass(UIView *material) {
                                            LGActionButtonRadius(material), nil);
     }
 }
+
+%group LGBannerHooks
 
 %hook MTMaterialView
 - (void)didMoveToWindow {
@@ -178,3 +183,10 @@ static void LGUpdatePlatterGlass(UIView *material) {
     LGDisableLockscreenStackDimming(self);
 }
 %end
+
+%end
+
+%ctor {
+    if (LGIsIOS12()) return;
+    %init(LGBannerHooks);
+}

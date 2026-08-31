@@ -367,6 +367,7 @@ static void styleContextMenuListSubviews(UIView *listView) {
 %end
 
 %ctor {
+    if (LGIsIOS12()) return;
     if (!LGSystemVersionAtLeast(13, 0, 0) ||
         !NSClassFromString(@"_UIContextMenuContainerView")) return;
     %init(LGContextMenuHooks);

@@ -718,6 +718,8 @@ static void LGUpdateKeyboardVisualEffect(UIView *effectView) {
                                     lgHostEnabled(@"Keyboard") ? YES : requestedHidden);
 }
 
+%group LGKeyboardHooks
+
 %hook UIKBBackdropView
 
 - (void)didMoveToWindow {
@@ -1081,7 +1083,11 @@ static void LGUpdateKeyboardVisualEffect(UIView *effectView) {
 
 %end
 
+%end
+
 %ctor {
+    if (LGIsIOS12()) return;
+    %init(LGKeyboardHooks);
     gLGKeyboardBackdrops = [NSHashTable weakObjectsHashTable];
     gLGKeyboardVisualEffects = [NSHashTable weakObjectsHashTable];
     gLGKeyboardRegeneratedKeyplanes = [NSHashTable weakObjectsHashTable];

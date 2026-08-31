@@ -60,6 +60,8 @@ static void LGInstallAppIconGlass(UIView *iconView) {
     lgTrackGlass(glass, @"AppIcons", nil);
 }
 
+%group LGAppIconsHooks
+
 %hook SBIconImageView
 
 - (void)didMoveToWindow {
@@ -73,3 +75,10 @@ static void LGInstallAppIconGlass(UIView *iconView) {
 }
 
 %end
+
+%end
+
+%ctor {
+    if (LGIsIOS12()) return;
+    %init(LGAppIconsHooks);
+}

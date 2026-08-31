@@ -117,6 +117,8 @@ static void LGReconcileQuickActionHosts(void) {
     }
 }
 
+%group LGQuickActionsHooks
+
 %hook UIVisualEffectView
 - (void)didMoveToWindow {
     %orig;
@@ -131,7 +133,11 @@ static void LGReconcileQuickActionHosts(void) {
 }
 %end
 
+%end
+
 %ctor {
+    if (LGIsIOS12()) return;
+    %init(LGQuickActionsHooks);
     lgObservePreferenceReloadNamed(@"QuickActions", ^{ LGReconcileQuickActionHosts(); });
 }
 

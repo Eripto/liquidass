@@ -3106,15 +3106,11 @@ static void LGRefreshAllClockHosts(void) {
 
 %ctor {
     if (!LGIsSpringBoardProcess()) return;
-    lgObservePreferenceReloadNamed(@"Clock", ^{ LGRefreshAllClockHosts(); });
     if (LGIsIOS12()) {
-        LGDiagnosticLog(@"clock.ios12.classes SBFLockScreenDateView=%@ SBUILegibilityLabel=%@ SBDashBoardViewController=%@ SBCoverSheetViewController=%@ CSProminentTimeView=%@ selectedHost=SBFLockScreenDateView",
-                        NSClassFromString(@"SBFLockScreenDateView") ? @"found" : @"missing",
-                        NSClassFromString(@"SBUILegibilityLabel") ? @"found" : @"missing",
-                        NSClassFromString(@"SBDashBoardViewController") ? @"found" : @"missing",
-                        NSClassFromString(@"SBCoverSheetViewController") ? @"found" : @"missing",
-                        NSClassFromString(@"CSProminentTimeView") ? @"found" : @"missing");
+        LGDiagnosticLog(@"renderer.ios12.clock-hooks quarantined=YES reason=standalone-test-not-device-proven");
+        return;
     }
+    lgObservePreferenceReloadNamed(@"Clock", ^{ LGRefreshAllClockHosts(); });
     LGClockLog(@"ctor: init LGClockSpringBoard, fontPath=%@", LGClockVariableFontPath() ?: @"(none)");
     %init(LGClockSpringBoard);
 }

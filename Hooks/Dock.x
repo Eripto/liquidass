@@ -85,6 +85,7 @@ static void configureDockGlass(UIView *material, LGLiveBackdropView *glass) {
 }
 
 %ctor {
+    if (LGIsIOS12()) return;
     LGRegisterMaterialHost(@"Dock", 80, ^BOOL(UIView *material) {
         return dockModeForMaterial(material) != LGDockModeNone;
     }, UIEdgeInsetsZero, ^CGFloat(__unused UIView *material) {

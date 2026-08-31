@@ -53,6 +53,7 @@ static void injectAppLibraryPod(UIView *pod) {
 %end
 
 %ctor {
+    if (LGIsIOS12()) return;
     if (!LGSystemVersionAtLeast(14, 0, 0) ||
         !NSClassFromString(@"SBHLibraryCategoryPodBackgroundView")) return;
     %init(LGAppLibraryHooks);

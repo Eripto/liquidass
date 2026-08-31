@@ -94,6 +94,8 @@ static void injectOpenFolder(UIView *mat) {
     }
 }
 
+%group LGFolderHooks
+
 %hook MTMaterialView
 - (void)didMoveToWindow {
     %orig;
@@ -117,3 +119,12 @@ static void injectOpenFolder(UIView *mat) {
     else if (isOpenFolderMaterial(self_)) injectOpenFolder(self_);
 }
 %end
+
+
+%end
+
+
+%ctor {
+    if (LGIsIOS12()) return;
+    %init(LGFolderHooks);
+}

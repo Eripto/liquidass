@@ -9,6 +9,7 @@ static BOOL isSearchPillMaterial(UIView *mat) {
 }
 
 %ctor {
+    if (LGIsIOS12()) return;
     LGRegisterMaterialHost(@"SearchPill", 100, ^BOOL(UIView *material) {
         return isSearchPillMaterial(material);
     }, UIEdgeInsetsZero, ^CGFloat(UIView *material) {

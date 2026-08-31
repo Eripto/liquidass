@@ -631,6 +631,8 @@ static void roundModuleContainer(UIView *module) {
 
 #pragma mark - hooks
 
+%group LGControlCenterHooks
+
 %hook CCUIContentModuleContainerView
 - (void)layoutSubviews { %orig; roundModuleContainer((UIView *)self); }
 - (void)didMoveToWindow { %orig; roundModuleContainer((UIView *)self); }
@@ -765,7 +767,11 @@ static void roundModuleContainer(UIView *module) {
 
 %end
 
+%end
+
 %ctor {
+    if (LGIsIOS12()) return;
+    %init(LGControlCenterHooks);
     lgObservePreferenceReloadNamed(@"ControlCenter", ^{
         if (!lgHostEnabled(@"ControlCenter")) ccRestoreAllRoundedViews();
         for (UIView *root in ccOverlayRoots().allObjects) {

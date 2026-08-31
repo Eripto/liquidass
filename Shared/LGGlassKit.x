@@ -28,6 +28,16 @@ BOOL isExactClass(UIView *v, NSString *name) {
 #pragma mark - per-host enable prefs
 
 BOOL lgHostEnabled(NSString *prefix) {
+    if (LGIsIOS12()) {
+        // The only iOS 12 surface allowed while the renderer is being proven
+        // is LGIOS12FloatingGlassTestView.  Returning NO here makes every
+        // existing dock/folder/notification/clock/etc. path preserve stock UI.
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            LGDiagnosticLog(@"renderer.ios12.stock-hooks quarantined=YES reason=standalone-test-not-device-proven");
+        });
+        return NO;
+    }
     if (!prefix.length) return YES;
     id global = LGGlassPreferenceValue(@"Global.Enabled");
     if (![prefix isEqualToString:@"Global"] && [global isKindOfClass:[NSNumber class]] && ![global boolValue])
@@ -345,12 +355,15 @@ static void lgEnablePrefsReloadCallback(CFNotificationCenterRef c, void *o, CFSt
 }
 
 __attribute__((constructor)) static void lgGlassInitEnableObserver(void) {
+    if (LGIsIOS12()) return;
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
         NULL, lgEnablePrefsReloadCallback, CFSTR("dylv.liquidassprefs/Reload"),
         NULL, CFNotificationSuspensionBehaviorCoalesce);
 }
 
 #pragma mark - shared material lifecycle
+
+%group LGSharedMaterialLifecycleHooks
 
 %hook MTMaterialView
 
@@ -372,3 +385,9 @@ __attribute__((constructor)) static void lgGlassInitEnableObserver(void) {
 
 %end
 
+%end
+
+%ctor {
+    if (LGIsIOS12()) return;
+    %init(LGSharedMaterialLifecycleHooks);
+}

@@ -846,6 +846,7 @@ static void LGAlertProbeHierarchy(UIAlertController *controller, NSString *reaso
 %end
 
 %ctor {
+    if (LGIsIOS12()) return;
     if (!LGIsSpringBoardProcess() && !LGIsPreferencesProcess()) return;
     %init(LGAlertsSpringBoard);
 }

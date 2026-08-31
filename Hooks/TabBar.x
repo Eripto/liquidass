@@ -1126,6 +1126,8 @@ static void LGScheduleTabBarDump(UITabBar *bar, NSString *reason) {
     });
 }
 
+%group LGTabBarHooks
+
 %hook UITabBar
 
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
@@ -1162,6 +1164,8 @@ static void LGScheduleTabBarDump(UITabBar *bar, NSString *reason) {
 
 %end
 
+%end
+
 static void LGRefreshTabBarsInView(UIView *view) {
     if ([view isKindOfClass:UITabBar.class]) {
         LGStyleStockTabBar((UITabBar *)view);
@@ -1169,15 +1173,7 @@ static void LGRefreshTabBarsInView(UIView *view) {
     for (UIView *subview in view.subviews) LGRefreshTabBarsInView(subview);
 }
 
-%ctor {
-    lgObservePreferenceReloadNamed(@"TabBar", ^{
-        dispatch_async(dispatch_get_main_queue(), ^{
-            for (UIWindow *window in UIApplication.sharedApplication.windows) {
-                LGRefreshTabBarsInView(window);
-            }
-        });
-    });
-}
+%group LGTabBarButtonHooks
 
 %hook UITabBarButton
 
@@ -1217,3 +1213,20 @@ static void LGRefreshTabBarsInView(UIView *view) {
 }
 
 %end
+
+
+%end
+
+
+%ctor {
+    if (LGIsIOS12()) return;
+    %init(LGTabBarHooks);
+    %init(LGTabBarButtonHooks);
+    lgObservePreferenceReloadNamed(@"TabBar", ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            for (UIWindow *window in UIApplication.sharedApplication.windows) {
+                LGRefreshTabBarsInView(window);
+            }
+        });
+    });
+}

@@ -1526,6 +1526,7 @@ static void LGSettingsSuppressModernSwitchElementIfNeeded(UIView *element) {
 %end
 
 %ctor {
+    if (LGIsIOS12()) return;
     NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier ?: @"";
 
     if ([bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
