@@ -1,4 +1,5 @@
 #import "LGSharedSupport.h"
+#import "LGIOS12MetalShader.h"
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -12,19 +13,6 @@
 // it captures SpringBoard, uploads that real backdrop to Metal, refracts it in
 // a compute pass, and presents the result in one isolated floating view.
 
-typedef struct {
-    vector_float2 outputResolution;
-    vector_float2 sourceResolution;
-    vector_float2 cardOrigin;
-    float radius;
-    float bezelWidth;
-    float glassThickness;
-    float refractionScale;
-    float refractiveIndex;
-    float blurRadius;
-    float specularOpacity;
-    float specularAngle;
-} LGIOS12TestUniforms;
 
 static NSString * const kLGIOS12DiagnosticsPrefix = @"renderer.ios12.test";
 static CFStringRef const kLGIOS12PrefsReloadNotification =
@@ -57,7 +45,7 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 #pragma clang diagnostic pop
 }
 
-static NSString * const kLGIOS12MetalSource = @
+static NSString * const kLGIOS12LiveMetalSource = @
 "#include <metal_stdlib>\n"
 "using namespace metal;\n"
 "struct Uniforms {\n"
@@ -172,7 +160,7 @@ static NSString * const kLGIOS12MetalSource = @
     self.layer.shadowRadius = 16.0;
     self.layer.shadowOffset = CGSizeMake(0.0, 8.0);
 
-    _device = MTLCreateSystemDefaultDevice();
+    _device = [LGIOS12LiveBackdropProvider sharedProvider].device;
     LGIOS12Log(@"Metal device creation success=%d device=%@",
                _device != nil, _device.name ?: @"nil");
     if (!_device) return self;
@@ -180,7 +168,7 @@ static NSString * const kLGIOS12MetalSource = @
     NSError *error = nil;
     MTLCompileOptions *options = [MTLCompileOptions new];
     options.fastMathEnabled = YES;
-    id<MTLLibrary> library = [_device newLibraryWithSource:kLGIOS12MetalSource
+    id<MTLLibrary> library = [_device newLibraryWithSource:kLGIOS12LiveMetalSource
                                                    options:options error:&error];
     LGIOS12Log(@"shader load success=%d error=%@",
                library != nil, error.localizedDescription ?: @"none");
@@ -265,6 +253,10 @@ static NSString * const kLGIOS12MetalSource = @
 
 - (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
     if (!texture) return;
+    if (texture.device != _device) {
+        LGIOS12Log(@"MTLTexture rejected: device mismatch (texture device=%@, renderer device=%@)", texture.device.name ?: @"nil", _device.name ?: @"nil");
+        return;
+    }
     _backdropTexture = texture;
     _rendererReady = _computePipeline && _presentPipeline && _commandQueue && _backdropTexture != nil;
     if (_rendererReady && self.hidden) {
@@ -349,7 +341,7 @@ static NSString * const kLGIOS12MetalSource = @
 
     CGRect screenRect = [self convertRect:self.bounds toView:nil];
     CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
-    LGIOS12TestUniforms uniforms = {
+    LGIOS12LiveUniforms uniforms = {
         .outputResolution = { (float)width, (float)height },
         .sourceResolution = { (float)_backdropTexture.width,
                               (float)_backdropTexture.height },
@@ -363,6 +355,7 @@ static NSString * const kLGIOS12MetalSource = @
         .blurRadius = (float)(7.0 * screenScale),
         .specularOpacity = 0.72f,
         .specularAngle = (float)M_PI_4,
+        .tintColor = { 0.06f, 0.06f, 0.06f, 0.16f }
     };
 
     if (!_loggedUniforms) {

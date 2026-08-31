@@ -7,6 +7,7 @@
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import "LGIOS12LiveBackdropProvider.h"
+#import "LGIOS12MetalShader.h"
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <time.h>
@@ -94,6 +95,8 @@ static CFStringRef const kLGMotionPrefsReloadNotification = CFSTR("dylv.liquidas
 static void LGApplyMotionHighlightAngle(void);
 static void LGRefreshMotionHighlights(void);
 static void LGEnsureFilterRefreshObserver(void);
+void LGUpdateMaterialReplacement(UIView *material, LGLiveBackdropView *glass);
+
 
 static BOOL LGIsSpringBoardBundle(void) {
     return [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"];
@@ -310,270 +313,11 @@ static CGFloat LGScaleForSize(CGSize s) {
     return fmin(kLGScaleMax, fmax(kLGScaleMin, scale));
 }
 
-
-static id<MTLCommandQueue> sLGIOS12CommandQueue = nil;
-static id<MTLComputePipelineState> sLGIOS12ComputePipeline = nil;
-static id<MTLRenderPipelineState> sLGIOS12PresentPipeline = nil;
-static BOOL sLGIOS12MetalInitAttempted = NO;
-static BOOL sLGIOS12MetalInitSuccess = NO;
-
-static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
-    if (sLGIOS12MetalInitAttempted) return;
-    sLGIOS12MetalInitAttempted = YES;
-    if (!device) return;
-
-    NSError *error = nil;
-    MTLCompileOptions *options = [MTLCompileOptions new];
-    options.fastMathEnabled = YES;
-    id<MTLLibrary> library = [device newLibraryWithSource:kLGIOS12LiveMetalSource options:options error:&error];
-    if (!library) return;
-
-    id<MTLFunction> computeFunction = [library newFunctionWithName:@"liquidGlassIOS12"];
-    sLGIOS12ComputePipeline = computeFunction ? [device newComputePipelineStateWithFunction:computeFunction error:&error] : nil;
-
-    id<MTLFunction> vertex = [library newFunctionWithName:@"presentVertex"];
-    id<MTLFunction> fragment = [library newFunctionWithName:@"presentFragment"];
-    MTLRenderPipelineDescriptor *descriptor = [MTLRenderPipelineDescriptor new];
-    descriptor.vertexFunction = vertex;
-    descriptor.fragmentFunction = fragment;
-    descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-    descriptor.colorAttachments[0].blendingEnabled = YES;
-    descriptor.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
-    descriptor.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-    descriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
-    descriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-    sLGIOS12PresentPipeline = (vertex && fragment) ? [device newRenderPipelineStateWithDescriptor:descriptor error:&error] : nil;
-
-    sLGIOS12CommandQueue = [device newCommandQueue];
-
-    sLGIOS12MetalInitSuccess = sLGIOS12ComputePipeline && sLGIOS12PresentPipeline && sLGIOS12CommandQueue;
-}
-
-static NSString * const kLGIOS12LiveMetalSource = @
-"#include <metal_stdlib>\n"
-"using namespace metal;\n"
-"struct Uniforms {\n"
-"  float2 outputResolution; float2 sourceResolution; float2 cardOrigin;\n"
-"  float radius; float bezelWidth; float glassThickness; float refractionScale;\n"
-"  float refractiveIndex; float blurRadius; float specularOpacity; float specularAngle;\n"
-"  float4 tintColor;\n"
-"};\n"
-"float surfaceConvexSquircle(float x) { return pow(1.0-pow(1.0-x,4.0),0.25); }\n"
-"float2 refractRay(float2 normal,float eta) {\n"
-"  float cosI=-normal.y; float k=1.0-eta*eta*(1.0-cosI*cosI);\n"
-"  if(k<0.0) return float2(0.0); float root=sqrt(k);\n"
-"  return float2(-(eta*cosI+root)*normal.x, eta-(eta*cosI+root)*normal.y);\n"
-"}\n"
-"float rawRefraction(float ratio,float thickness,float bezel,float eta) {\n"
-"  float x=clamp(ratio,0.05,0.95); float y=surfaceConvexSquircle(x);\n"
-"  float derivative=(surfaceConvexSquircle(x+0.001)-y)/0.001;\n"
-"  float magnitude=sqrt(derivative*derivative+1.0);\n"
-"  float2 ray=refractRay(float2(-derivative/magnitude,-1.0/magnitude),eta);\n"
-"  if(length(ray)<0.0001 || abs(ray.y)<0.0001) return 0.0;\n"
-"  return ray.x*(y*bezel+thickness)/ray.y;\n"
-"}\n"
-"float displacement(float ratio,float thickness,float bezel,float eta) {\n"
-"  float peak=rawRefraction(0.05,thickness,bezel,eta);\n"
-"  if(abs(peak)<0.0001) return 0.0;\n"
-"  return (rawRefraction(ratio,thickness,bezel,eta)/peak)*(1.0-smoothstep(0.0,1.0,ratio));\n"
-"}\n"
-"kernel void liquidGlassIOS12(texture2d<float,access::sample> source [[texture(0)]],\n"
-"                             texture2d<float,access::write> output [[texture(1)]],\n"
-"                             constant Uniforms &u [[buffer(0)]],\n"
-"                             uint2 gid [[thread_position_in_grid]]) {\n"
-"  uint W=output.get_width(), H=output.get_height(); if(gid.x>=W || gid.y>=H) return;\n"
-"  constexpr sampler s(filter::linear,address::clamp_to_edge);\n"
-"  float2 px=float2(gid)+0.5; float2 halfSize=u.outputResolution*0.5;\n"
-"  float radius=min(u.radius,min(halfSize.x,halfSize.y)); float2 p=px-halfSize;\n"
-"  float2 q=abs(p)-(halfSize-float2(radius));\n"
-"  float signedDistance=length(max(q,float2(0.0)))+min(max(q.x,q.y),0.0)-radius;\n"
-"  float edgeAlpha=clamp(0.5-signedDistance,0.0,1.0);\n"
-"  if(edgeAlpha<=0.0){ output.write(float4(0.0),gid); return; }\n"
-"  float edgeDistance=max(0.0,-signedDistance); float2 innerHalf=max(halfSize-float2(radius),float2(0.0));\n"
-"  float2 cornerDelta=p-clamp(p,-innerHalf,innerHalf); float2 dir;\n"
-"  if(length(cornerDelta)>0.001) dir=normalize(cornerDelta);\n"
-"  else { float dx=halfSize.x-abs(p.x), dy=halfSize.y-abs(p.y);\n"
-"         dir=(dx<dy)?float2(p.x<0.0?-1.0:1.0,0.0):float2(0.0,p.y<0.0?-1.0:1.0); }\n"
-"  float bezel=max(u.bezelWidth,1.0); float ratio=clamp(edgeDistance/bezel,0.0,1.0);\n"
-"  float normDisp=edgeDistance<bezel?displacement(ratio,u.glassThickness,bezel,1.0/max(u.refractiveIndex,1.001)):0.0;\n"
-"  float2 dispPx=-dir*normDisp*bezel*u.refractionScale;\n"
-"  float2 sampleUV=clamp((u.cardOrigin+px+dispPx)/u.sourceResolution,0.0,1.0);\n"
-"  float2 texel=1.0/u.sourceResolution; float blurStep=max(1.0,u.blurRadius*0.35);\n"
-"  float4 sharp=source.sample(s,sampleUV);\n"
-"  float4 blurred=sharp*0.24;\n"
-"  blurred+=source.sample(s,sampleUV+float2( blurStep,0.0)*texel)*0.11;\n"
-"  blurred+=source.sample(s,sampleUV+float2(-blurStep,0.0)*texel)*0.11;\n"
-"  blurred+=source.sample(s,sampleUV+float2(0.0, blurStep)*texel)*0.11;\n"
-"  blurred+=source.sample(s,sampleUV+float2(0.0,-blurStep)*texel)*0.11;\n"
-"  blurred+=source.sample(s,sampleUV+float2( blurStep, blurStep)*texel)*0.08;\n"
-"  blurred+=source.sample(s,sampleUV+float2(-blurStep, blurStep)*texel)*0.08;\n"
-"  blurred+=source.sample(s,sampleUV+float2( blurStep,-blurStep)*texel)*0.08;\n"
-"  blurred+=source.sample(s,sampleUV+float2(-blurStep,-blurStep)*texel)*0.08;\n"
-"  float4 color=mix(sharp,blurred,0.62);\n"
-"  color.rgb=mix(color.rgb,u.tintColor.rgb,u.tintColor.a);\n"
-"  float2 lightDir=float2(cos(u.specularAngle),-sin(u.specularAngle));\n"
-"  float stroke=clamp(1.0-edgeDistance/max(2.0,bezel*0.20),0.0,1.0);\n"
-"  float lobe=pow(clamp(abs(dot(dir,lightDir)),0.0,1.0),7.0);\n"
-"  float fresnel=pow(clamp(1.0-ratio,0.0,1.0),2.2);\n"
-"  float highlight=(lobe*stroke*u.specularOpacity)+(fresnel*0.16);\n"
-"  color.rgb=mix(color.rgb,float3(1.0),clamp(highlight,0.0,0.55));\n"
-"  output.write(float4(color.rgb,edgeAlpha*0.96),gid);\n"
-"}\n"
-"struct PresentOut { float4 position [[position]]; float2 uv; };\n"
-"vertex PresentOut presentVertex(uint vertexID [[vertex_id]]) {\n"
-"  float2 positions[3]={float2(-1.0,-1.0),float2(3.0,-1.0),float2(-1.0,3.0)};\n"
-"  float2 uvs[3]={float2(0.0,1.0),float2(2.0,1.0),float2(0.0,-1.0)};\n"
-"  PresentOut out; out.position=float4(positions[vertexID],0.0,1.0); out.uv=uvs[vertexID]; return out;\n"
-"}\n"
-"fragment float4 presentFragment(PresentOut in [[stage_in]],\n"
-"                                texture2d<float,access::sample> image [[texture(0)]]) {\n"
-"  constexpr sampler s(filter::linear,address::clamp_to_edge); return image.sample(s,in.uv);\n"
-"}\n";
-
-typedef struct {
-    vector_float2 outputResolution;
-    vector_float2 sourceResolution;
-    vector_float2 cardOrigin;
-    float radius;
-    float bezelWidth;
-    float glassThickness;
-    float refractionScale;
-    float refractiveIndex;
-    float blurRadius;
-    float specularOpacity;
-    float specularAngle;
-    vector_float4 tintColor;
-} LGIOS12LiveUniforms;
-
 @interface LGLiveBackdropView () <LGIOS12LiveBackdropClient, MTKViewDelegate>
 - (void)updateSpecular;
 - (void)applySpecularAngle:(CGFloat)angle;
 - (void)reapplyFilterForParameterReload;
-
-#pragma mark - LGIOS12LiveBackdropClient
-
-- (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
-    if (!texture || texture.device != _device) return;
-    _backdropTexture = texture;
-    [_metalView draw];
-}
-
-- (void)providerDidFailToUpdateBackdrop:(NSError *)error {
-    // Keep last texture or fail gracefully
-}
-
-#pragma mark - MTKViewDelegate
-
-- (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
-    _outputTexture = nil;
-}
-
-- (void)drawInMTKView:(MTKView *)view {
-    if (_metalInitializationFailed || !_backdropTexture || CGRectIsEmpty(self.bounds) || !self.window) return;
-
-    id<CAMetalDrawable> drawable = view.currentDrawable;
-    MTLRenderPassDescriptor *renderPass = view.currentRenderPassDescriptor;
-    if (!drawable || !renderPass) return;
-
-    NSUInteger width = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.width));
-    NSUInteger height = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.height));
-
-    if (!_outputTexture || _outputTexture.width != width || _outputTexture.height != height) {
-        MTLTextureDescriptor *outputDescriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:width height:height mipmapped:NO];
-        outputDescriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
-        _outputTexture = [_device newTextureWithDescriptor:outputDescriptor];
-    }
-    if (!_outputTexture) return;
-
-    CGRect screenRect = [self convertRect:self.bounds toView:nil];
-    CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
-
-    NSString *effectiveType = [self lgEffectiveFilterType];
-    const LGHostDefinition *hostDef = LGHostDefinitionForFilterType(effectiveType.UTF8String);
-    if (!hostDef) hostDef = &kLGHostRegistry[LGHostIdentifierDefault];
-    NSString *prefix = [NSString stringWithUTF8String:hostDef->preferencePrefix];
-
-    CGFloat blurRadius = LGNativeBlurRadiusForFilterType(effectiveType);
-
-    id tkValue = LGGlassPreferenceValue([prefix stringByAppendingString:@".GlassThickness"]);
-    float glassThickness = [tkValue respondsToSelector:@selector(doubleValue)] ? [tkValue doubleValue] : hostDef->glassThickness;
-
-    id rsValue = LGGlassPreferenceValue([prefix stringByAppendingString:@".RefractionScale"]);
-    float refractionScale = [rsValue respondsToSelector:@selector(doubleValue)] ? [rsValue doubleValue] : hostDef->refractionScale;
-
-    id riValue = LGGlassPreferenceValue([prefix stringByAppendingString:@".RefractiveIndex"]);
-    float refractiveIndex = [riValue respondsToSelector:@selector(doubleValue)] ? [riValue doubleValue] : hostDef->refractiveIndex;
-
-    float bezelWidth = 34.0f;
-    id bwValue = LGGlassPreferenceValue([prefix stringByAppendingString:@".BezelRatio"]);
-    if ([bwValue respondsToSelector:@selector(doubleValue)]) {
-        bezelWidth = MIN(width, height) * [bwValue doubleValue] / screenScale;
-    }
-
-    UIColor *legacyTint = LGLegacyTintColorForFilterType(effectiveType);
-    CGFloat r, g, b, a;
-    LGColorRGBA(legacyTint, &r, &g, &b, &a);
-
-    LGIOS12LiveUniforms uniforms = {
-        .outputResolution = { (float)width, (float)height },
-        .sourceResolution = { (float)_backdropTexture.width, (float)_backdropTexture.height },
-        .cardOrigin = { (float)(CGRectGetMinX(screenRect) * screenScale), (float)(CGRectGetMinY(screenRect) * screenScale) },
-        .radius = (float)(self.layer.cornerRadius * screenScale),
-        .bezelWidth = (float)(bezelWidth * screenScale),
-        .glassThickness = glassThickness,
-        .refractionScale = refractionScale,
-        .refractiveIndex = refractiveIndex,
-        .blurRadius = (float)(blurRadius * screenScale),
-        .specularOpacity = LGSpecularEnabledForFilterType(effectiveType) ? 0.72f : 0.0f,
-        .specularAngle = (float)sLGSpecularAngle,
-        .tintColor = { (float)r, (float)g, (float)b, (float)a }
-    };
-
-    id<MTLCommandBuffer> commandBuffer = [sLGIOS12CommandQueue commandBuffer];
-    if (!commandBuffer) return;
-
-    id<MTLComputeCommandEncoder> compute = [commandBuffer computeCommandEncoder];
-    if (!compute) return;
-
-    [compute setComputePipelineState:sLGIOS12ComputePipeline];
-    [compute setTexture:_backdropTexture atIndex:0];
-    [compute setTexture:_outputTexture atIndex:1];
-    [compute setBytes:&uniforms length:sizeof(uniforms) atIndex:0];
-
-    MTLSize threads = MTLSizeMake(8, 8, 1);
-    MTLSize groups = MTLSizeMake((width + 7) / 8, (height + 7) / 8, 1);
-    [compute dispatchThreadgroups:groups threadsPerThreadgroup:threads];
-    [compute endEncoding];
-
-    id<MTLRenderCommandEncoder> present = [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
-    if (!present) return;
-
-    [present setRenderPipelineState:sLGIOS12PresentPipeline];
-    [present setFragmentTexture:_outputTexture atIndex:0];
-    [present drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-    [present endEncoding];
-
-    [commandBuffer presentDrawable:drawable];
-
-    __weak typeof(self) weakSelf = self;
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (strongSelf && !strongSelf->_hasRenderedFirstFrame) {
-                strongSelf->_hasRenderedFirstFrame = YES;
-                [strongSelf setNeedsLayout];
-                if (strongSelf.lgInjectedMaterial) {
-                    LGUpdateMaterialReplacement(strongSelf.lgInjectedMaterial, strongSelf);
-                }
-            }
-        });
-    }];
-
-    [commandBuffer commit];
-}
-
 @end
-
 
 static void LGRefreshAllLiveGlasses(NSString *reason) {
     // Clear cached prefs before rebuilding every live filter.  This is also
@@ -716,6 +460,45 @@ static void LGEnsureMotionHighlights(void) {
 
 static const CGFloat kLGSpecularMinimumOpacity = 0.30;
 static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
+
+
+static id<MTLCommandQueue> sLGIOS12CommandQueue = nil;
+static id<MTLComputePipelineState> sLGIOS12ComputePipeline = nil;
+static id<MTLRenderPipelineState> sLGIOS12PresentPipeline = nil;
+static BOOL sLGIOS12MetalInitAttempted = NO;
+static BOOL sLGIOS12MetalInitSuccess = NO;
+
+static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
+    if (sLGIOS12MetalInitAttempted) return;
+    sLGIOS12MetalInitAttempted = YES;
+    if (!device) return;
+
+    NSError *error = nil;
+    MTLCompileOptions *options = [MTLCompileOptions new];
+    options.fastMathEnabled = YES;
+    id<MTLLibrary> library = [device newLibraryWithSource:kLGIOS12LiveMetalSource options:options error:&error];
+    if (!library) return;
+
+    id<MTLFunction> computeFunction = [library newFunctionWithName:@"liquidGlassIOS12"];
+    sLGIOS12ComputePipeline = computeFunction ? [device newComputePipelineStateWithFunction:computeFunction error:&error] : nil;
+
+    id<MTLFunction> vertex = [library newFunctionWithName:@"presentVertex"];
+    id<MTLFunction> fragment = [library newFunctionWithName:@"presentFragment"];
+    MTLRenderPipelineDescriptor *descriptor = [MTLRenderPipelineDescriptor new];
+    descriptor.vertexFunction = vertex;
+    descriptor.fragmentFunction = fragment;
+    descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+    descriptor.colorAttachments[0].blendingEnabled = YES;
+    descriptor.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+    descriptor.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+    descriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+    descriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+    sLGIOS12PresentPipeline = (vertex && fragment) ? [device newRenderPipelineStateWithDescriptor:descriptor error:&error] : nil;
+
+    sLGIOS12CommandQueue = [device newCommandQueue];
+
+    sLGIOS12MetalInitSuccess = sLGIOS12ComputePipeline && sLGIOS12PresentPipeline && sLGIOS12CommandQueue;
+}
 
 @implementation LGLiveBackdropView {
     NSString        *_lgGroupName;
@@ -1254,6 +1037,133 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     _filterAttached = NO;
     [self applyFilters];
     [self.layer setNeedsDisplay];
+}
+
+#pragma mark - LGIOS12LiveBackdropClient
+
+- (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
+    if (!texture || texture.device != _device) return;
+    _backdropTexture = texture;
+    [_metalView draw];
+}
+
+- (void)providerDidFailToUpdateBackdrop:(NSError *)error {
+    LGLog(@"LGLiveBackdropView failed to update backdrop: %@", error.localizedDescription);
+}
+
+#pragma mark - MTKViewDelegate
+
+- (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
+    _outputTexture = nil;
+}
+
+- (void)drawInMTKView:(MTKView *)view {
+    if (_metalInitializationFailed || !_backdropTexture || CGRectIsEmpty(self.bounds) || !self.window) return;
+
+    id<CAMetalDrawable> drawable = view.currentDrawable;
+    MTLRenderPassDescriptor *renderPass = view.currentRenderPassDescriptor;
+    if (!drawable || !renderPass) return;
+
+    NSUInteger width = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.width));
+    NSUInteger height = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.height));
+
+    if (!_outputTexture || _outputTexture.width != width || _outputTexture.height != height) {
+        MTLTextureDescriptor *outputDescriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:width height:height mipmapped:NO];
+        outputDescriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
+        _outputTexture = [_device newTextureWithDescriptor:outputDescriptor];
+    }
+    if (!_outputTexture) return;
+
+    CGRect screenRect = [self convertRect:self.bounds toView:nil];
+    CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
+
+    NSString *effectiveType = [self lgEffectiveFilterType];
+    const LGHostDefinition *hostDef = LGHostDefinitionForFilterType(effectiveType.UTF8String);
+    if (!hostDef) hostDef = &kLGHostRegistry[LGHostIdentifierDefault];
+    NSString *prefix = [NSString stringWithUTF8String:hostDef->preferencePrefix];
+
+    CGFloat blurRadius = LGNativeBlurRadiusForFilterType(effectiveType);
+
+    id tkValue = LGGlassPreferenceValue([prefix stringByAppendingString:@".GlassThickness"]);
+    float glassThickness = [tkValue respondsToSelector:@selector(doubleValue)] ? [tkValue doubleValue] : hostDef->glassThickness;
+
+    id rsValue = LGGlassPreferenceValue([prefix stringByAppendingString:@".RefractionScale"]);
+    float refractionScale = [rsValue respondsToSelector:@selector(doubleValue)] ? [rsValue doubleValue] : hostDef->refractionScale;
+
+    id riValue = LGGlassPreferenceValue([prefix stringByAppendingString:@".RefractiveIndex"]);
+    float refractiveIndex = [riValue respondsToSelector:@selector(doubleValue)] ? [riValue doubleValue] : hostDef->refractiveIndex;
+
+    float bezelWidth = 34.0f;
+    id bwValue = LGGlassPreferenceValue([prefix stringByAppendingString:@".BezelRatio"]);
+    if ([bwValue respondsToSelector:@selector(doubleValue)]) {
+        bezelWidth = MIN(width, height) * [bwValue doubleValue] / screenScale;
+    }
+
+    UIColor *legacyTint = LGLegacyTintColorForFilterType(effectiveType);
+    CGFloat r, g, b, a;
+    LGColorRGBA(legacyTint, &r, &g, &b, &a);
+
+    LGIOS12LiveUniforms uniforms = {
+        .outputResolution = { (float)width, (float)height },
+        .sourceResolution = { (float)_backdropTexture.width, (float)_backdropTexture.height },
+        .cardOrigin = { (float)(CGRectGetMinX(screenRect) * screenScale), (float)(CGRectGetMinY(screenRect) * screenScale) },
+        .radius = (float)(self.layer.cornerRadius * screenScale),
+        .bezelWidth = (float)(bezelWidth * screenScale),
+        .glassThickness = glassThickness,
+        .refractionScale = refractionScale,
+        .refractiveIndex = refractiveIndex,
+        .blurRadius = (float)(blurRadius * screenScale),
+        .specularOpacity = LGSpecularEnabledForFilterType(effectiveType) ? 0.72f : 0.0f,
+        .specularAngle = (float)sLGSpecularAngle,
+        .tintColor = { (float)r, (float)g, (float)b, (float)a }
+    };
+
+    id<MTLCommandBuffer> commandBuffer = [sLGIOS12CommandQueue commandBuffer];
+    if (!commandBuffer) return;
+
+    id<MTLComputeCommandEncoder> compute = [commandBuffer computeCommandEncoder];
+    if (!compute) return;
+
+    [compute setComputePipelineState:sLGIOS12ComputePipeline];
+    [compute setTexture:_backdropTexture atIndex:0];
+    [compute setTexture:_outputTexture atIndex:1];
+    [compute setBytes:&uniforms length:sizeof(uniforms) atIndex:0];
+
+    MTLSize threads = MTLSizeMake(8, 8, 1);
+    MTLSize groups = MTLSizeMake((width + 7) / 8, (height + 7) / 8, 1);
+    [compute dispatchThreadgroups:groups threadsPerThreadgroup:threads];
+    [compute endEncoding];
+
+    id<MTLRenderCommandEncoder> present = [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
+    if (!present) return;
+
+    [present setRenderPipelineState:sLGIOS12PresentPipeline];
+    [present setFragmentTexture:_outputTexture atIndex:0];
+    [present drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    [present endEncoding];
+
+    __weak typeof(self) weakSelf = self;
+    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+
+            if (completed.status == MTLCommandBufferStatusCompleted && completed.error == nil) {
+                if (!strongSelf->_hasRenderedFirstFrame) {
+                    strongSelf->_hasRenderedFirstFrame = YES;
+                    [strongSelf setNeedsLayout];
+                    if (strongSelf.lgInjectedMaterial) {
+                        LGUpdateMaterialReplacement(strongSelf.lgInjectedMaterial, strongSelf);
+                    }
+                }
+            } else {
+                LGLog(@"LGLiveBackdropView render failed: %@", completed.error.localizedDescription);
+            }
+        });
+    }];
+
+    [commandBuffer presentDrawable:drawable];
+    [commandBuffer commit];
 }
 
 @end
