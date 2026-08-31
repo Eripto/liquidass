@@ -22,6 +22,8 @@ NSString *LGFilterTypeForHostPrefix(NSString *prefix);
 
 @property (nonatomic, copy) NSNumber *lgSpecularEnabledOverride;
 
+@property (nonatomic, weak) UIView *lgInjectedMaterial;
+
 // On iOS 12 this becomes true only after UIVisualEffectView has created a
 // live backdrop with non-empty capture bounds.  Newer renderers retain their
 // existing eager lifecycle.
