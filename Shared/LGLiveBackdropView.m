@@ -13,6 +13,9 @@
 static const void *kLGOutsetKey = &kLGOutsetKey;
 static const void *kLGRadiusKey = &kLGRadiusKey;
 static const void *kLGSpecularEnabledOverrideKey = &kLGSpecularEnabledOverrideKey;
+static const void *kLGMaterialSuppressedKey = &kLGMaterialSuppressedKey;
+static const void *kLGMaterialOriginalHiddenKey = &kLGMaterialOriginalHiddenKey;
+static const void *kLGMaterialOriginalAlphaKey = &kLGMaterialOriginalAlphaKey;
 
 static NSDictionary<NSString *, id> *sLGGlassPreferences;
 
@@ -146,15 +149,40 @@ static CGFloat LGNativeBlurRadiusForFilterType(NSString *filterType) {
         ? MAX(0.0, [value doubleValue]) : host->blur;
 }
 
+static BOOL LGLegacyIOS12UsesDarkMaterial(NSString *filterType) {
+    switch (LGHostIdentifierForFilterType(filterType.UTF8String)) {
+        case LGHostIdentifierNotification:
+        case LGHostIdentifierPasscode:
+        case LGHostIdentifierQuickActions:
+            return YES;
+        default:
+            return NO;
+    }
+}
+
+static NSInteger LGLegacyIOS12BlurStyleForFilterType(NSString *filterType,
+                                                      CGFloat radius) {
+    if (radius <= 0.01) return NSNotFound;
+    // Blur "style" controls material color, not blur radius.  The previous
+    // radius buckets selected ExtraLight for notifications (default blur 3),
+    // which produced an opaque white-looking card.  Dark preserves the white
+    // lock-screen foreground; Regular preserves wallpaper color elsewhere.
+    return LGLegacyIOS12UsesDarkMaterial(filterType)
+        ? UIBlurEffectStyleDark : UIBlurEffectStyleRegular;
+}
+
 static UIColor *LGLegacyTintColorForFilterType(NSString *filterType) {
     const LGHostDefinition *host =
         LGHostDefinitionForFilterType(filterType.UTF8String);
     if (!host) host = &kLGHostRegistry[LGHostIdentifierDefault];
     NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
+    BOOL darkMaterial = LGLegacyIOS12UsesDarkMaterial(filterType);
     NSString *stored = LGGlassPreferenceValue(
-        [prefix stringByAppendingString:@".LightTintColor"]);
+        [prefix stringByAppendingString:darkMaterial
+            ? @".DarkTintColor" : @".LightTintColor"]);
     NSString *hex = [stored isKindOfClass:NSString.class] && stored.length
-        ? stored : [NSString stringWithUTF8String:host->lightTintHex];
+        ? stored : [NSString stringWithUTF8String:
+            darkMaterial ? host->darkTintHex : host->lightTintHex];
     NSString *clean = [[hex stringByReplacingOccurrencesOfString:@"#" withString:@""]
         uppercaseString];
     if (clean.length != 6 && clean.length != 8) return UIColor.clearColor;
@@ -162,10 +190,46 @@ static UIColor *LGLegacyTintColorForFilterType(NSString *filterType) {
     if (![[NSScanner scannerWithString:clean] scanHexLongLong:&rgba])
         return UIColor.clearColor;
     if (clean.length == 6) rgba = (rgba << 8) | 0xff;
-    return [UIColor colorWithRed:((rgba >> 24) & 0xff) / 255.0
-                           green:((rgba >> 16) & 0xff) / 255.0
-                            blue:((rgba >> 8) & 0xff) / 255.0
-                           alpha:(rgba & 0xff) / 255.0];
+    CGFloat red = ((rgba >> 24) & 0xff) / 255.0;
+    CGFloat green = ((rgba >> 16) & 0xff) / 255.0;
+    CGFloat blue = ((rgba >> 8) & 0xff) / 255.0;
+    CGFloat alpha = (rgba & 0xff) / 255.0;
+    // Public iOS 12 materials already supply their own tint/saturation pass.
+    // Keep the custom tint subtle so configured #FFFFFFCC values do not turn
+    // into a flat white overlay.  A small neutral tint keeps transparent
+    // notification configurations visibly materialized.
+    alpha = MIN(alpha, darkMaterial ? 0.16 : 0.12);
+    if (LGHostIdentifierForFilterType(filterType.UTF8String) ==
+            LGHostIdentifierNotification && alpha < 0.01) {
+        red = green = blue = 0.0;
+        alpha = 0.06;
+    }
+    return [UIColor colorWithRed:red green:green blue:blue alpha:alpha];
+}
+
+static UIView *LGFindVisualEffectBackdropView(UIView *view) {
+    if (!view) return nil;
+    NSString *className = NSStringFromClass(view.class);
+    if ([className containsString:@"Backdrop"] &&
+        ![view isKindOfClass:LGLiveBackdropView.class]) return view;
+    for (UIView *subview in view.subviews) {
+        UIView *backdrop = LGFindVisualEffectBackdropView(subview);
+        if (backdrop) return backdrop;
+    }
+    return nil;
+}
+
+static void LGColorRGBA(UIColor *color, CGFloat *red, CGFloat *green,
+                        CGFloat *blue, CGFloat *alpha) {
+    *red = *green = *blue = 0.0;
+    *alpha = 0.0;
+    UIColor *resolved = LGResolvedColorForTraitCollection(
+        color, UIScreen.mainScreen.traitCollection);
+    if ([resolved getRed:red green:green blue:blue alpha:alpha]) return;
+    CGFloat white = 0.0;
+    if ([resolved getWhite:&white alpha:alpha]) {
+        *red = *green = *blue = white;
+    }
 }
 
 static id LGCreateNativeGaussianFilter(Class filterCls, CGFloat radius) {
@@ -391,8 +455,13 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     CALayer         *_nativeBlurLayer;
     CALayer         *_legacyTintLayer;
     UIVisualEffectView *_legacyIOS12BlurView;
+    UIView           *_legacyIOS12TintView;
     CGFloat          _nativeBlurRadius;
     NSInteger        _legacyIOS12BlurStyle;
+    BOOL             _legacyIOS12RendererReady;
+    BOOL             _legacyIOS12LoggedReadyPass;
+    NSUInteger       _legacyIOS12CaptureAttempts;
+    NSString         *_legacyIOS12LastTintSignature;
     BOOL             _backdropConfigured;
     BOOL             _filterAttached;
     uint32_t         _lgId;
@@ -455,15 +524,20 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
         Class effectViewClass = NSClassFromString(@"UIVisualEffectView");
         SEL initializer = NSSelectorFromString(@"initWithEffect:");
         if (effectViewClass && [effectViewClass instancesRespondToSelector:initializer]) {
-            UIBlurEffect *effect = LGMaterialBlurEffectForTraitCollection(self.traitCollection);
-            _legacyIOS12BlurView = [[effectViewClass alloc] initWithEffect:effect];
+            _legacyIOS12BlurView = [[effectViewClass alloc] initWithEffect:nil];
             _legacyIOS12BlurView.frame = self.bounds;
             _legacyIOS12BlurView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
                                                     UIViewAutoresizingFlexibleHeight;
             _legacyIOS12BlurView.userInteractionEnabled = NO;
             _legacyIOS12BlurView.clipsToBounds = YES;
             [self insertSubview:_legacyIOS12BlurView atIndex:0];
-            LGDiagnosticLog(@"renderer.ios12.fallback.init process=%@ type=%@ class=%@",
+            UIView *contentView = _legacyIOS12BlurView.contentView;
+            _legacyIOS12TintView = [[UIView alloc] initWithFrame:contentView.bounds];
+            _legacyIOS12TintView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                                     UIViewAutoresizingFlexibleHeight;
+            _legacyIOS12TintView.userInteractionEnabled = NO;
+            [contentView addSubview:_legacyIOS12TintView];
+            LGDiagnosticLog(@"renderer.ios12.fallback.init process=%@ type=%@ class=%@ metalDevice=not-created shader=not-loaded pipeline=not-created reason=public-UIVisualEffectView",
                             LGMainBundleIdentifier(), _lgFilterType ?: @"default",
                             NSStringFromClass(effectViewClass));
         } else {
@@ -479,6 +553,15 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     [sLGMotionGlasses addObject:self];
     [self applyFilters];
     return self;
+}
+
+- (BOOL)lgRendererReady {
+    if (!LGIsIOS12()) return YES;
+    if (!_legacyIOS12BlurView || !_legacyIOS12BlurView.effect ||
+        !self.window || CGRectIsEmpty(self.bounds)) return NO;
+    UIView *backdrop = LGFindVisualEffectBackdropView(_legacyIOS12BlurView);
+    return backdrop && !CGRectIsEmpty(backdrop.bounds) && backdrop.alpha > 0.01 &&
+           !backdrop.hidden;
 }
 
 - (void)dealloc {
@@ -574,13 +657,17 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     if (_legacyIOS12BlurView) {
         [_legacyTintLayer removeFromSuperlayer];
         _legacyTintLayer = nil;
-        UIView *contentView = nil;
-        SEL contentViewSelector = NSSelectorFromString(@"contentView");
-        if ([_legacyIOS12BlurView respondsToSelector:contentViewSelector]) {
-            contentView = ((id (*)(id, SEL))objc_msgSend)(
-                _legacyIOS12BlurView, contentViewSelector);
+        _legacyIOS12TintView.backgroundColor = legacyTint;
+        CGFloat red, green, blue, alpha;
+        LGColorRGBA(legacyTint, &red, &green, &blue, &alpha);
+        NSString *signature = [NSString stringWithFormat:
+            @"%.3f/%.3f/%.3f/%.3f/%.3f", red, green, blue, alpha, self.alpha];
+        if (![_legacyIOS12LastTintSignature isEqualToString:signature]) {
+            _legacyIOS12LastTintSignature = signature;
+            LGDiagnosticLog(@"renderer.ios12.tint glass=%u type=%@ rgba={%.3f,%.3f,%.3f,%.3f} viewAlpha=%.3f compositing=UIKit-premultiplied",
+                            _lgId, _lgFilterType ?: @"default",
+                            red, green, blue, alpha, self.alpha);
         }
-        contentView.backgroundColor = legacyTint;
         return;
     }
     if (!_legacyTintLayer) {
@@ -609,6 +696,7 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     NSNumber *override = self.lgSpecularEnabledOverride;
     BOOL enabled = override ? override.boolValue
                             : LGSpecularEnabledForFilterType(_lgFilterType);
+    if (LGIsIOS12() && !self.lgRendererReady) enabled = NO;
     if (!enabled && !_specular) return;
 
     if (!_specular) {
@@ -633,7 +721,8 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
             // iOS 12's render server is not asked to resolve a named
             // compositing filter. A plain alpha gradient is less refractive
             // but uses only public CoreAnimation behavior.
-            _specularBoost.opacity = 0.42;
+            _specular.opacity = 0.34;
+            _specularBoost.opacity = 0.12;
         } else {
             _specularBoost.compositingFilter = @"overlayBlendMode";
         }
@@ -676,12 +765,8 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
     CALayer *layer = self.layer;
     if (LGIsIOS12()) {
         CGFloat configuredRadius = LGNativeBlurRadiusForFilterType(_lgFilterType);
-        NSInteger wantedStyle = NSNotFound;
-        if (configuredRadius > 0.01) {
-            wantedStyle = configuredRadius < 12.0 ? UIBlurEffectStyleExtraLight
-                        : configuredRadius < 30.0 ? UIBlurEffectStyleLight
-                                                   : UIBlurEffectStyleRegular;
-        }
+        NSInteger wantedStyle = LGLegacyIOS12BlurStyleForFilterType(
+            _lgFilterType, configuredRadius);
         if (_legacyIOS12BlurView && _legacyIOS12BlurStyle != wantedStyle) {
             UIBlurEffect *effect = wantedStyle == NSNotFound
                 ? nil : [UIBlurEffect effectWithStyle:(UIBlurEffectStyle)wantedStyle];
@@ -693,16 +778,42 @@ static const CGFloat kLGSpecularBrightBoostOpacity = 0.70;
             }
         }
         _legacyIOS12BlurView.frame = self.bounds;
+        _legacyIOS12BlurView.alpha = LGLegacyIOS12UsesDarkMaterial(_lgFilterType)
+            ? 0.86 : 0.92;
         _legacyIOS12BlurView.layer.cornerRadius = self.layer.cornerRadius;
         _legacyIOS12BlurView.clipsToBounds = YES;
+        [_legacyIOS12BlurView setNeedsLayout];
+        [_legacyIOS12BlurView layoutIfNeeded];
         [self updateLegacyIOS12Tint];
-        if (!_backdropConfigured) {
-            _backdropConfigured = YES;
-            LGDiagnosticLog(@"renderer.ios12.fallback.apply process=%@ type=%@ bounds=%@ blur=%.2f style=%ld",
-                            LGMainBundleIdentifier(), _lgFilterType ?: @"default",
-                            NSStringFromCGRect(self.bounds), configuredRadius,
-                            (long)wantedStyle);
+        UIView *backdrop = LGFindVisualEffectBackdropView(_legacyIOS12BlurView);
+        BOOL ready = self.lgRendererReady;
+        _legacyIOS12CaptureAttempts++;
+        if (ready != _legacyIOS12RendererReady ||
+            (!_legacyIOS12LoggedReadyPass && ready) ||
+            (_legacyIOS12CaptureAttempts <= 3 && self.window)) {
+            CGFloat screenScale = UIScreen.mainScreen.scale;
+            CGSize captureSize = backdrop ? backdrop.bounds.size : CGSizeZero;
+            LGDiagnosticLog(@"renderer.ios12.capture glass=%u type=%@ success=%d effect=%@ effectAlpha=%.3f backdropClass=%@ points={%.1f,%.1f} estimatedPixels={%.0f,%.0f} backdropTexture=UIKit-private window=%d finalAlpha=%.3f tintPremultiplication=UIKit-managed",
+                            _lgId, _lgFilterType ?: @"default", ready,
+                            _legacyIOS12BlurView.effect
+                                ? NSStringFromClass(_legacyIOS12BlurView.effect.class)
+                                : @"nil",
+                            _legacyIOS12BlurView.alpha,
+                            backdrop ? NSStringFromClass(backdrop.class) : @"missing",
+                            captureSize.width, captureSize.height,
+                            captureSize.width * screenScale,
+                            captureSize.height * screenScale,
+                            self.window != nil, self.alpha);
         }
+        _legacyIOS12RendererReady = ready;
+        _legacyIOS12TintView.hidden = !ready;
+        if (ready && !_legacyIOS12LoggedReadyPass) {
+            _legacyIOS12LoggedReadyPass = YES;
+            LGDiagnosticLog(@"renderer.ios12.renderpass glass=%u type=%@ execution=system-managed-ready blur=%.2f style=%ld saturation=UIVisualEffectView highlightLayers=2",
+                            _lgId, _lgFilterType ?: @"default",
+                            configuredRadius, (long)wantedStyle);
+        }
+        _backdropConfigured = ready;
         _filterAttached = NO;
         return;
     }
@@ -806,6 +917,56 @@ static CGRect LGOutsetFrame(CGRect mf, UIEdgeInsets outset) {
                       mf.size.height + outset.top  + outset.bottom);
 }
 
+static void LGUpdateMaterialReplacement(UIView *material,
+                                        LGLiveBackdropView *glass) {
+    if (!material || !glass) return;
+    BOOL rendererReady = glass.lgRendererReady;
+    BOOL wasSuppressed = [objc_getAssociatedObject(
+        material, kLGMaterialSuppressedKey) boolValue];
+
+    if (rendererReady) {
+        if (!wasSuppressed) {
+            objc_setAssociatedObject(material, kLGMaterialOriginalHiddenKey,
+                                     @(material.hidden),
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(material, kLGMaterialOriginalAlphaKey,
+                                     @(material.alpha),
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(material, kLGMaterialSuppressedKey, @YES,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        glass.hidden = NO;
+        material.hidden = YES;
+    } else {
+        // Keep the system material intact until the public iOS 12 backdrop is
+        // demonstrably live.  This prevents a transparent/tint-only card.
+        // Stay in the hierarchy so UIVisualEffectView can allocate and update
+        // its private backdrop.  Tint/highlight layers remain hidden until the
+        // readiness check succeeds, while the stock material stays visible.
+        glass.hidden = NO;
+        if (wasSuppressed) {
+            NSNumber *originalHidden = objc_getAssociatedObject(
+                material, kLGMaterialOriginalHiddenKey);
+            NSNumber *originalAlpha = objc_getAssociatedObject(
+                material, kLGMaterialOriginalAlphaKey);
+            objc_setAssociatedObject(material, kLGMaterialSuppressedKey, @NO,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            material.hidden = originalHidden.boolValue;
+            if (originalAlpha) material.alpha = originalAlpha.doubleValue;
+        }
+    }
+
+    if (rendererReady != wasSuppressed) {
+        CGFloat red, green, blue, alpha;
+        LGColorRGBA(material.backgroundColor, &red, &green, &blue, &alpha);
+        LGDiagnosticLog(@"renderer.material-handoff type=%@ ready=%d stockClass=%@ stockHidden=%d stockAlpha=%.3f stockBackgroundRGBA={%.3f,%.3f,%.3f,%.3f} glassHidden=%d glassAlpha=%.3f order=glass-above-stock",
+                        glass.lgFilterType ?: @"default", rendererReady,
+                        NSStringFromClass(material.class), material.hidden,
+                        material.alpha, red, green, blue, alpha,
+                        glass.hidden, glass.alpha);
+    }
+}
+
 void LGInjectGlassIntoMaterialGroupType(UIView *mat, const void *assocKey,
                                         UIEdgeInsets outset, CGFloat cornerRadius,
                                         NSString *groupName, NSString *filterType) {
@@ -818,10 +979,14 @@ void LGInjectGlassIntoMaterialGroupType(UIView *mat, const void *assocKey,
     if (!glass) {
         glass = [[LGLiveBackdropView alloc] initWithFrame:gf groupName:groupName filterType:filterType];
         __weak LGLiveBackdropView *weakGlass = glass;
+        __weak UIView *weakMaterial = mat;
         for (NSNumber *delay in @[ @1.5, @3.0, @5.0, @8.0, @12.0 ]) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
-                [weakGlass applyFilters];
+                UIView *strongMaterial = weakMaterial;
+                if (!strongMaterial || objc_getAssociatedObject(strongMaterial, assocKey) != weakGlass)
+                    return;
+                LGResyncGlassGeometry(strongMaterial, assocKey);
             });
         }
         [parent insertSubview:glass aboveSubview:mat];
@@ -841,7 +1006,8 @@ void LGInjectGlassIntoMaterialGroupType(UIView *mat, const void *assocKey,
     objc_setAssociatedObject(glass, kLGOutsetKey, [NSValue valueWithUIEdgeInsets:outset],
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(glass, kLGRadiusKey, @(cornerRadius), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!mat.hidden) mat.hidden = YES;
+    [glass applyFilters];
+    LGUpdateMaterialReplacement(mat, glass);
 }
 
 static void LGSyncGlassGeometry(UIView *mat, const void *assocKey,
@@ -871,18 +1037,34 @@ static void LGSyncGlassGeometry(UIView *mat, const void *assocKey,
         [glass updateSpecular];
         [glass applyFilters];
     }
-    if (!mat.hidden) mat.hidden = YES;
+    [glass applyFilters];
+    LGUpdateMaterialReplacement(mat, glass);
 }
 
 void LGRemoveGlassFromMaterial(UIView *mat, const void *assocKey) {
     LGLiveBackdropView *glass = objc_getAssociatedObject(mat, assocKey);
     if (!glass) return;
     objc_setAssociatedObject(mat, assocKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    mat.hidden = NO;
+    NSNumber *originalHidden = objc_getAssociatedObject(
+        mat, kLGMaterialOriginalHiddenKey);
+    NSNumber *originalAlpha = objc_getAssociatedObject(
+        mat, kLGMaterialOriginalAlphaKey);
+    objc_setAssociatedObject(mat, kLGMaterialSuppressedKey, @NO,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    mat.hidden = originalHidden ? originalHidden.boolValue : NO;
+    if (originalAlpha) mat.alpha = originalAlpha.doubleValue;
+    objc_setAssociatedObject(mat, kLGMaterialOriginalHiddenKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(mat, kLGMaterialOriginalAlphaKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
 
     [glass removeFromSuperview];
 }
 
 BOOL LGMaterialHasGlass(UIView *mat, const void *assocKey) {
-    return objc_getAssociatedObject(mat, assocKey) != nil;
+    LGLiveBackdropView *glass = objc_getAssociatedObject(mat, assocKey);
+    if (!glass) return NO;
+    if (!LGIsIOS12()) return YES;
+    return [objc_getAssociatedObject(mat, kLGMaterialSuppressedKey) boolValue] &&
+           glass.lgRendererReady;
 }

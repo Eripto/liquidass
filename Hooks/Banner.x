@@ -44,10 +44,15 @@ static BOOL LGIsTopBannerPresentation(UIView *view) {
 
 static BOOL LGIsLightLockscreenNotificationView(UIView *view) {
     if (!view || LGIsTopBannerPresentation(view)) return NO;
-    if (view.traitCollection.userInterfaceStyle != UIUserInterfaceStyleLight) return NO;
-    return hasAncestorOfClassName(view, @"NCNotificationShortLookView") ||
-           hasAncestorOfClassName(view, @"NCNotificationLongLookView") ||
-           hasAncestorOfClassName(view, @"PLPlatterView");
+    BOOL notification = hasAncestorOfClassName(view, @"NCNotificationShortLookView") ||
+                        hasAncestorOfClassName(view, @"NCNotificationLongLookView") ||
+                        hasAncestorOfClassName(view, @"PLPlatterView");
+    if (!notification) return NO;
+    // iOS 12 often reports an unspecified appearance even though the
+    // notification renderer uses a dark public blur fallback.  Keep the stock
+    // white notification foreground readable against that material.
+    return LGIsIOS12() ||
+           view.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
 }
 
 static UIColor *LGForcedPlatterTextColor(UIView *view) {

@@ -22,6 +22,11 @@ NSString *LGFilterTypeForHostPrefix(NSString *prefix);
 
 @property (nonatomic, copy) NSNumber *lgSpecularEnabledOverride;
 
+// On iOS 12 this becomes true only after UIVisualEffectView has created a
+// live backdrop with non-empty capture bounds.  Newer renderers retain their
+// existing eager lifecycle.
+@property (nonatomic, readonly) BOOL lgRendererReady;
+
 - (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)groupName;
 
 - (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)groupName
