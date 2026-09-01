@@ -20,6 +20,10 @@ static const void *kLGSpecularEnabledOverrideKey = &kLGSpecularEnabledOverrideKe
 static const void *kLGMaterialSuppressedKey = &kLGMaterialSuppressedKey;
 static const void *kLGMaterialOriginalHiddenKey = &kLGMaterialOriginalHiddenKey;
 static const void *kLGMaterialOriginalAlphaKey = &kLGMaterialOriginalAlphaKey;
+static const void *kLGMaterialSuppressedFilterTypeKey =
+    &kLGMaterialSuppressedFilterTypeKey;
+static const void *kLGMaterialLastBlockedSignatureKey =
+    &kLGMaterialLastBlockedSignatureKey;
 
 static BOOL LGIOS12LiveShouldLogSequence(uint64_t sequence) {
     return sequence <= 3 || (sequence % 30) == 0;
@@ -100,7 +104,11 @@ static void LGApplyMotionHighlightAngle(void);
 static void LGRefreshMotionHighlights(void);
 static void LGEnsureFilterRefreshObserver(void);
 static void LGUpdateMaterialReplacement(UIView *material,
-                                        LGLiveBackdropView *glass);
+                                        LGLiveBackdropView *glass,
+                                        NSString *reason);
+static BOOL LGRestoreMaterialReplacement(UIView *material,
+                                         LGLiveBackdropView *glass,
+                                         NSString *reason);
 
 
 static BOOL LGIsSpringBoardBundle(void) {
@@ -323,6 +331,7 @@ static CGFloat LGScaleForSize(CGSize s) {
 - (void)applySpecularAngle:(CGFloat)angle;
 - (void)reapplyFilterForParameterReload;
 - (void)updateIOS12ContinuousRefreshState;
+- (void)markIOS12MetalRendererUnhealthyForReason:(NSString *)reason;
 @end
 
 static void LGRefreshAllLiveGlasses(NSString *reason) {
@@ -345,6 +354,10 @@ static void LGRefreshAllLiveGlasses(NSString *reason) {
         @try {
             [glass reapplyFilterForParameterReload];
             [glass updateSpecular];
+            if (glass.lgInjectedMaterial) {
+                LGUpdateMaterialReplacement(glass.lgInjectedMaterial, glass,
+                                            @"preference-reload");
+            }
             LGDiagnosticLog(@"renderer.reload.filter.end reason=%@ index=%lu",
                             reason ?: @"unknown", (unsigned long)index);
         } @catch (NSException *exception) {
@@ -533,6 +546,7 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
     id<MTLTexture> _outputTexture;
     BOOL _metalInitializationFailed;
     BOOL _hasRenderedFirstFrame;
+    BOOL _metalRendererHealthy;
     uint64_t _ios12TextureDeliveryCount;
     uint64_t _ios12MetalRedrawCount;
 }
@@ -656,10 +670,19 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 - (BOOL)lgRendererReady {
     if (!LGIsIOS12()) return YES;
     if (_metalView && !_metalInitializationFailed) {
-        return _hasRenderedFirstFrame;
+        UIWindow *window = self.window;
+        return _hasRenderedFirstFrame && _metalRendererHealthy &&
+               _backdropTexture && _backdropTexture.device == _device &&
+               window && !window.hidden && window.alpha > 0.01 &&
+               _metalView.window == window && !_metalView.hidden &&
+               _metalView.alpha > 0.01 && !self.hidden && self.alpha > 0.01 &&
+               !CGRectIsEmpty(self.bounds) &&
+               !CGRectIsEmpty(_metalView.bounds);
     }
     if (!_legacyIOS12BlurView || !_legacyIOS12BlurView.effect ||
-        !self.window || CGRectIsEmpty(self.bounds)) return NO;
+        !self.window || self.window.hidden || self.window.alpha <= 0.01 ||
+        self.hidden || self.alpha <= 0.01 || CGRectIsEmpty(self.bounds))
+        return NO;
     UIView *backdrop = LGFindVisualEffectBackdropView(_legacyIOS12BlurView);
     if (backdrop) {
         return !CGRectIsEmpty(backdrop.bounds) && backdrop.alpha > 0.01 &&
@@ -675,6 +698,8 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 }
 
 - (void)dealloc {
+    LGRestoreMaterialReplacement(self.lgInjectedMaterial, self,
+                                 @"glass-dealloc");
     if (LGIsIOS12()) {
         [[LGIOS12LiveBackdropProvider sharedProvider]
             setClient:self requestsContinuousRefresh:NO];
@@ -687,16 +712,34 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
+    if (LGIsIOS12()) _metalRendererHealthy = NO;
     [self applyFilters];
     [self updateIOS12ContinuousRefreshState];
+    if (self.lgInjectedMaterial) {
+        LGUpdateMaterialReplacement(self.lgInjectedMaterial, self,
+                                    self.window ? @"glass-window-attached"
+                                                : @"glass-window-detached");
+    }
 }
 - (void)setHidden:(BOOL)hidden {
     [super setHidden:hidden];
+    if (LGIsIOS12() && hidden) _metalRendererHealthy = NO;
     [self updateIOS12ContinuousRefreshState];
+    if (self.lgInjectedMaterial) {
+        LGUpdateMaterialReplacement(self.lgInjectedMaterial, self,
+                                    hidden ? @"glass-hidden"
+                                           : @"glass-shown");
+    }
 }
 - (void)setAlpha:(CGFloat)alpha {
     [super setAlpha:alpha];
+    if (LGIsIOS12() && alpha <= 0.01) _metalRendererHealthy = NO;
     [self updateIOS12ContinuousRefreshState];
+    if (self.lgInjectedMaterial) {
+        LGUpdateMaterialReplacement(self.lgInjectedMaterial, self,
+                                    alpha <= 0.01 ? @"glass-alpha-inactive"
+                                                  : @"glass-alpha-active");
+    }
 }
 - (void)updateIOS12ContinuousRefreshState {
     if (!LGIsIOS12()) return;
@@ -706,6 +749,15 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
                    !window.hidden && window.alpha > 0.01;
     [[LGIOS12LiveBackdropProvider sharedProvider]
         setClient:self requestsContinuousRefresh:visible];
+}
+
+- (void)markIOS12MetalRendererUnhealthyForReason:(NSString *)reason {
+    if (!LGIsIOS12()) return;
+    _metalRendererHealthy = NO;
+    if (self.lgInjectedMaterial) {
+        LGUpdateMaterialReplacement(self.lgInjectedMaterial, self,
+                                    reason ?: @"renderer-unhealthy");
+    }
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
@@ -967,6 +1019,12 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
         }
         _backdropConfigured = ready;
         _filterAttached = NO;
+        if (self.lgInjectedMaterial) {
+            LGUpdateMaterialReplacement(
+                self.lgInjectedMaterial, self,
+                ready ? @"ios12-fallback-renderer-ready"
+                      : @"ios12-fallback-renderer-not-ready");
+        }
         return;
     }
     Class backdropCls = NSClassFromString(@"CABackdropLayer");
@@ -1065,6 +1123,8 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
     if (texture.device != _device) {
         LGDiagnosticLog(@"renderer.ios12.live texture-rejected reason=device-mismatch textureDevice=%@ rendererDevice=%@",
                         texture.device.name ?: @"nil", _device.name ?: @"nil");
+        [self markIOS12MetalRendererUnhealthyForReason:
+            @"backdrop-texture-device-mismatch"];
         return;
     }
     _backdropTexture = texture;
@@ -1081,20 +1141,33 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 
 - (void)providerDidFailToUpdateBackdrop:(NSError *)error {
     LGLog(@"LGLiveBackdropView failed to update backdrop: %@", error.localizedDescription);
+    [self markIOS12MetalRendererUnhealthyForReason:
+        @"backdrop-provider-failure"];
 }
 
 #pragma mark - MTKViewDelegate
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
     _outputTexture = nil;
+    [self markIOS12MetalRendererUnhealthyForReason:
+        @"metal-drawable-size-changed"];
 }
 
 - (void)drawInMTKView:(MTKView *)view {
-    if (_metalInitializationFailed || !_backdropTexture || CGRectIsEmpty(self.bounds) || !self.window) return;
+    if (_metalInitializationFailed || !_backdropTexture ||
+        CGRectIsEmpty(self.bounds) || !self.window) {
+        [self markIOS12MetalRendererUnhealthyForReason:
+            @"metal-draw-precondition-failed"];
+        return;
+    }
 
     id<CAMetalDrawable> drawable = view.currentDrawable;
     MTLRenderPassDescriptor *renderPass = view.currentRenderPassDescriptor;
-    if (!drawable || !renderPass) return;
+    if (!drawable || !renderPass) {
+        [self markIOS12MetalRendererUnhealthyForReason:
+            @"metal-drawable-unavailable"];
+        return;
+    }
 
     NSUInteger width = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.width));
     NSUInteger height = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.height));
@@ -1104,7 +1177,11 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
         outputDescriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
         _outputTexture = [_device newTextureWithDescriptor:outputDescriptor];
     }
-    if (!_outputTexture) return;
+    if (!_outputTexture) {
+        [self markIOS12MetalRendererUnhealthyForReason:
+            @"metal-output-texture-allocation-failed"];
+        return;
+    }
 
     CGRect screenRect = [self convertRect:self.bounds toView:nil];
     CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
@@ -1151,10 +1228,18 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
     };
 
     id<MTLCommandBuffer> commandBuffer = [sLGIOS12CommandQueue commandBuffer];
-    if (!commandBuffer) return;
+    if (!commandBuffer) {
+        [self markIOS12MetalRendererUnhealthyForReason:
+            @"metal-command-buffer-allocation-failed"];
+        return;
+    }
 
     id<MTLComputeCommandEncoder> compute = [commandBuffer computeCommandEncoder];
-    if (!compute) return;
+    if (!compute) {
+        [self markIOS12MetalRendererUnhealthyForReason:
+            @"metal-compute-encoder-allocation-failed"];
+        return;
+    }
 
     [compute setComputePipelineState:sLGIOS12ComputePipeline];
     [compute setTexture:_backdropTexture atIndex:0];
@@ -1167,7 +1252,11 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
     [compute endEncoding];
 
     id<MTLRenderCommandEncoder> present = [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
-    if (!present) return;
+    if (!present) {
+        [self markIOS12MetalRendererUnhealthyForReason:
+            @"metal-present-encoder-allocation-failed"];
+        return;
+    }
 
     [present setRenderPipelineState:sLGIOS12PresentPipeline];
     [present setFragmentTexture:_outputTexture atIndex:0];
@@ -1182,16 +1271,23 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) return;
 
-            if (completed.status == MTLCommandBufferStatusCompleted && completed.error == nil) {
+            BOOL frameHealthy =
+                completed.status == MTLCommandBufferStatusCompleted &&
+                completed.error == nil;
+            strongSelf->_metalRendererHealthy = frameHealthy;
+            if (frameHealthy) {
                 if (!strongSelf->_hasRenderedFirstFrame) {
                     strongSelf->_hasRenderedFirstFrame = YES;
                     [strongSelf setNeedsLayout];
-                    if (strongSelf.lgInjectedMaterial) {
-                        LGUpdateMaterialReplacement(strongSelf.lgInjectedMaterial, strongSelf);
-                    }
                 }
             } else {
                 LGLog(@"LGLiveBackdropView render failed: %@", completed.error.localizedDescription);
+            }
+            if (strongSelf.lgInjectedMaterial) {
+                LGUpdateMaterialReplacement(
+                    strongSelf.lgInjectedMaterial, strongSelf,
+                    frameHealthy ? @"metal-frame-completed"
+                                 : @"metal-frame-failed");
             }
             if (shouldLogRedraw) {
                 LGDiagnosticLog(@"renderer.ios12.live Metal-redraw=%llu status=%ld completed=%d error=%@ firstFrameReady=%d",
@@ -1225,59 +1321,201 @@ static CGRect LGOutsetFrame(CGRect mf, UIEdgeInsets outset) {
                       mf.size.height + outset.top  + outset.bottom);
 }
 
-static void LGUpdateMaterialReplacement(UIView *material,
-                                        LGLiveBackdropView *glass) {
-    if (!material || !glass) return;
-    BOOL rendererReady = glass.lgRendererReady;
-    BOOL wasSuppressed = [objc_getAssociatedObject(
-        material, kLGMaterialSuppressedKey) boolValue];
+static BOOL LGMaterialSurfaceEnabledForFilterType(NSString *filterType) {
+    // Phase 2 proves only the standalone overlay.  No material-replacement
+    // surface is authorized on iOS 12 until Phase 3 explicitly enables one.
+    if (LGIsIOS12()) return NO;
+    if (!filterType.length) return NO;
 
-    if (rendererReady) {
-        if (!wasSuppressed) {
-            objc_setAssociatedObject(material, kLGMaterialOriginalHiddenKey,
-                                     @(material.hidden),
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            objc_setAssociatedObject(material, kLGMaterialOriginalAlphaKey,
-                                     @(material.alpha),
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            objc_setAssociatedObject(material, kLGMaterialSuppressedKey, @YES,
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        glass.hidden = NO;
-        material.hidden = YES;
-    } else {
-        // Keep the system material intact until the public iOS 12 backdrop is
-        // demonstrably live.  This prevents a transparent/tint-only card.
-        // Stay in the hierarchy so UIVisualEffectView can allocate and update
-        // its private backdrop.  Tint/highlight layers remain hidden until the
-        // readiness check succeeds, while the stock material stays visible.
-        glass.hidden = NO;
-        if (wasSuppressed) {
-            NSNumber *originalHidden = objc_getAssociatedObject(
-                material, kLGMaterialOriginalHiddenKey);
-            NSNumber *originalAlpha = objc_getAssociatedObject(
-                material, kLGMaterialOriginalAlphaKey);
-            objc_setAssociatedObject(material, kLGMaterialSuppressedKey, @NO,
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            material.hidden = originalHidden.boolValue;
-            if (originalAlpha) material.alpha = originalAlpha.doubleValue;
+    const LGHostDefinition *host =
+        LGHostDefinitionForFilterType(filterType.UTF8String);
+    if (!host) return NO;
+
+    id global = LGGlassPreferenceValue(@"Global.Enabled");
+    if ([global isKindOfClass:NSNumber.class] && ![global boolValue]) return NO;
+
+    NSString *prefix = [NSString stringWithUTF8String:host->preferencePrefix];
+    id enabled = LGGlassPreferenceValue(
+        [prefix stringByAppendingString:@".Enabled"]);
+    if (!enabled) {
+        static NSDictionary<NSString *, NSString *> *legacyPrefixes;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            legacyPrefixes = @{
+                @"OpenFolder":   @"FolderOpen",
+                @"AppLibSearch": @"AppLibrary.Search",
+                @"Passcode":     @"Lockscreen.Passcode",
+                @"Clock":        @"Lockscreen.Clock",
+                @"QuickActions": @"LockscreenQuickActions",
+            };
+        });
+        NSString *legacyPrefix = legacyPrefixes[prefix];
+        if (legacyPrefix) {
+            enabled = LGGlassPreferenceValue(
+                [legacyPrefix stringByAppendingString:@".Enabled"]);
         }
     }
+    return ![enabled isKindOfClass:NSNumber.class] || [enabled boolValue];
+}
 
-    if (rendererReady != wasSuppressed) {
-        CGFloat red, green, blue, alpha;
-        LGColorRGBA(material.backgroundColor, &red, &green, &blue, &alpha);
-        LGDiagnosticLog(@"renderer.material-handoff type=%@ ready=%d stockClass=%@ stockHidden=%d stockAlpha=%.3f stockBackgroundRGBA={%.3f,%.3f,%.3f,%.3f} glassHidden=%d glassAlpha=%.3f order=glass-above-stock",
-                        glass.lgFilterType ?: @"default", rendererReady,
-                        NSStringFromClass(material.class), material.hidden,
-                        material.alpha, red, green, blue, alpha,
-                        glass.hidden, glass.alpha);
+static NSString *LGMaterialReplacementIneligibilityReason(
+    UIView *material, LGLiveBackdropView *glass, BOOL wasSuppressed) {
+    if (!material) return @"missing-stock-material";
+    if (!glass) return @"missing-glass-replacement";
+    if (!LGMaterialSurfaceEnabledForFilterType(glass.lgFilterType)) {
+        return LGIsIOS12() ? @"ios12-phase2-material-quarantine"
+                           : @"surface-family-disabled";
+    }
+    if (glass.lgInjectedMaterial != material)
+        return @"material-glass-correspondence-mismatch";
+    UIView *parent = material.superview;
+    if (!parent || glass.superview != parent)
+        return @"replacement-hierarchy-mismatch";
+    UIWindow *window = material.window;
+    if (!window || glass.window != window)
+        return @"replacement-window-mismatch";
+    if (window.hidden || window.alpha <= 0.01)
+        return @"target-window-not-visible";
+    if (glass.hidden || glass.alpha <= 0.01 || CGRectIsEmpty(glass.bounds))
+        return @"replacement-view-not-visible";
+    NSUInteger materialIndex = [parent.subviews indexOfObjectIdenticalTo:material];
+    NSUInteger glassIndex = [parent.subviews indexOfObjectIdenticalTo:glass];
+    if (materialIndex == NSNotFound || glassIndex == NSNotFound ||
+        glassIndex <= materialIndex) {
+        return @"replacement-not-above-stock-material";
+    }
+    if (!glass.lgRendererReady)
+        return @"renderer-not-currently-healthy";
+    if (!wasSuppressed && (material.hidden || material.alpha <= 0.01))
+        return @"stock-material-not-currently-visible";
+    return nil;
+}
+
+static NSString *LGMaterialTransitionFilterType(UIView *material,
+                                                LGLiveBackdropView *glass) {
+    NSString *filterType = glass.lgFilterType;
+    if (!filterType.length) {
+        filterType = objc_getAssociatedObject(
+            material, kLGMaterialSuppressedFilterTypeKey);
+    }
+    return filterType.length ? filterType : @"unknown";
+}
+
+static void LGLogBlockedMaterialReplacement(UIView *material,
+                                            LGLiveBackdropView *glass,
+                                            NSString *reason,
+                                            NSString *requestReason) {
+    if (!material || !reason.length) return;
+    NSString *signature = [NSString stringWithFormat:@"%@|%@|%@",
+        LGMaterialTransitionFilterType(material, glass), reason,
+        requestReason ?: @"unknown"];
+    NSString *previous = objc_getAssociatedObject(
+        material, kLGMaterialLastBlockedSignatureKey);
+    if ([previous isEqualToString:signature]) return;
+    objc_setAssociatedObject(material, kLGMaterialLastBlockedSignatureKey,
+                             signature, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    LGDiagnosticLog(@"renderer.material.transition action=blocked stockClass=%@ surface=%@ stockHidden=%d stockAlpha=%.3f rendererHealthy=%d suppressionReason=%@ requestReason=%@ phase2UnexpectedSuppressionPrevented=%d",
+                    NSStringFromClass(material.class),
+                    LGMaterialTransitionFilterType(material, glass),
+                    material.hidden, material.alpha, glass.lgRendererReady,
+                    reason, requestReason ?: @"unknown", LGIsIOS12());
+}
+
+static BOOL LGRestoreMaterialReplacement(UIView *material,
+                                         LGLiveBackdropView *glass,
+                                         NSString *reason) {
+    if (!material || ![objc_getAssociatedObject(
+            material, kLGMaterialSuppressedKey) boolValue]) return NO;
+
+    NSNumber *originalHidden = objc_getAssociatedObject(
+        material, kLGMaterialOriginalHiddenKey);
+    NSNumber *originalAlpha = objc_getAssociatedObject(
+        material, kLGMaterialOriginalAlphaKey);
+    NSString *filterType = LGMaterialTransitionFilterType(material, glass);
+
+    // Clear suppression first so an MTMaterialView setHidden: hook cannot
+    // force the material hidden again during restoration.
+    objc_setAssociatedObject(material, kLGMaterialSuppressedKey, @NO,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (originalHidden) material.hidden = originalHidden.boolValue;
+    if (originalAlpha) material.alpha = originalAlpha.doubleValue;
+
+    LGDiagnosticLog(@"renderer.material.transition action=restore stockClass=%@ surface=%@ restoredHidden=%d restoredAlpha=%.3f rendererHealthy=%d restorationReason=%@",
+                    NSStringFromClass(material.class), filterType,
+                    material.hidden, material.alpha, glass.lgRendererReady,
+                    reason ?: @"unspecified");
+
+    objc_setAssociatedObject(material, kLGMaterialOriginalHiddenKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(material, kLGMaterialOriginalAlphaKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(material, kLGMaterialSuppressedFilterTypeKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    objc_setAssociatedObject(material, kLGMaterialLastBlockedSignatureKey, nil,
+                             OBJC_ASSOCIATION_ASSIGN);
+    return YES;
+}
+
+static void LGUpdateMaterialReplacement(UIView *material,
+                                        LGLiveBackdropView *glass,
+                                        NSString *reason) {
+    if (!material) return;
+    BOOL wasSuppressed = [objc_getAssociatedObject(
+        material, kLGMaterialSuppressedKey) boolValue];
+    NSString *ineligibility = LGMaterialReplacementIneligibilityReason(
+        material, glass, wasSuppressed);
+
+    if (ineligibility) {
+        if (wasSuppressed) {
+            NSString *restorationReason = [NSString stringWithFormat:@"%@:%@",
+                reason ?: @"eligibility-change", ineligibility];
+            LGRestoreMaterialReplacement(material, glass, restorationReason);
+        } else {
+            LGLogBlockedMaterialReplacement(material, glass, ineligibility,
+                                            reason);
+        }
+        return;
+    }
+
+    if (!wasSuppressed) {
+        NSNumber *originalHidden = @(material.hidden);
+        NSNumber *originalAlpha = @(material.alpha);
+        objc_setAssociatedObject(material, kLGMaterialOriginalHiddenKey,
+                                 originalHidden,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(material, kLGMaterialOriginalAlphaKey,
+                                 originalAlpha,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(material, kLGMaterialSuppressedFilterTypeKey,
+                                 [glass.lgFilterType copy],
+                                 OBJC_ASSOCIATION_COPY_NONATOMIC);
+        objc_setAssociatedObject(material, kLGMaterialSuppressedKey, @YES,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(material, kLGMaterialLastBlockedSignatureKey,
+                                 nil, OBJC_ASSOCIATION_ASSIGN);
+        material.hidden = YES;
+        LGDiagnosticLog(@"renderer.material.transition action=suppress stockClass=%@ surface=%@ originalHidden=%d originalAlpha=%.3f rendererHealthy=%d suppressionReason=%@",
+                        NSStringFromClass(material.class),
+                        glass.lgFilterType ?: @"unknown",
+                        originalHidden.boolValue, originalAlpha.doubleValue,
+                        glass.lgRendererReady, reason ?: @"eligible-replacement");
+    } else if (!material.hidden) {
+        material.hidden = YES;
     }
 }
 
 void LGInjectGlassIntoMaterialGroupType(UIView *mat, const void *assocKey,
                                         UIEdgeInsets outset, CGFloat cornerRadius,
                                         NSString *groupName, NSString *filterType) {
+    if (!mat || !assocKey) return;
+    if (LGIsIOS12()) {
+        LGLiveBackdropView *existing = objc_getAssociatedObject(mat, assocKey);
+        LGRemoveGlassFromMaterial(mat, assocKey);
+        LGLogBlockedMaterialReplacement(
+            mat, existing, @"ios12-phase2-material-quarantine",
+            @"material-injection-attempt");
+        return;
+    }
     UIView *parent = mat.superview;
     if (!parent) return;
 
@@ -1316,13 +1554,17 @@ void LGInjectGlassIntoMaterialGroupType(UIView *mat, const void *assocKey,
     objc_setAssociatedObject(glass, kLGRadiusKey, @(cornerRadius), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [glass applyFilters];
     glass.lgInjectedMaterial = mat;
-    LGUpdateMaterialReplacement(mat, glass);
+    LGUpdateMaterialReplacement(mat, glass, @"material-injection");
 }
 
 static void LGSyncGlassGeometry(UIView *mat, const void *assocKey,
                                 UIEdgeInsets outset, CGFloat cornerRadius);
 
 void LGResyncGlassGeometry(UIView *mat, const void *assocKey) {
+    if (LGIsIOS12()) {
+        LGRemoveGlassFromMaterial(mat, assocKey);
+        return;
+    }
     LGLiveBackdropView *glass = objc_getAssociatedObject(mat, assocKey);
     if (!glass) return;
     NSValue *ov  = objc_getAssociatedObject(glass, kLGOutsetKey);
@@ -1348,33 +1590,26 @@ static void LGSyncGlassGeometry(UIView *mat, const void *assocKey,
     }
     [glass applyFilters];
     glass.lgInjectedMaterial = mat;
-    LGUpdateMaterialReplacement(mat, glass);
+    LGUpdateMaterialReplacement(mat, glass, @"geometry-resync");
 }
 
 void LGRemoveGlassFromMaterial(UIView *mat, const void *assocKey) {
+    if (!mat || !assocKey) return;
     LGLiveBackdropView *glass = objc_getAssociatedObject(mat, assocKey);
-    if (!glass) return;
+    LGRestoreMaterialReplacement(mat, glass, @"glass-removal");
     objc_setAssociatedObject(mat, assocKey, nil, OBJC_ASSOCIATION_ASSIGN);
-    NSNumber *originalHidden = objc_getAssociatedObject(
-        mat, kLGMaterialOriginalHiddenKey);
-    NSNumber *originalAlpha = objc_getAssociatedObject(
-        mat, kLGMaterialOriginalAlphaKey);
-    objc_setAssociatedObject(mat, kLGMaterialSuppressedKey, @NO,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    mat.hidden = originalHidden ? originalHidden.boolValue : NO;
-    if (originalAlpha) mat.alpha = originalAlpha.doubleValue;
-    objc_setAssociatedObject(mat, kLGMaterialOriginalHiddenKey, nil,
+    objc_setAssociatedObject(mat, kLGMaterialLastBlockedSignatureKey, nil,
                              OBJC_ASSOCIATION_ASSIGN);
-    objc_setAssociatedObject(mat, kLGMaterialOriginalAlphaKey, nil,
-                             OBJC_ASSOCIATION_ASSIGN);
-
+    if (!glass) return;
+    glass.lgInjectedMaterial = nil;
     [glass removeFromSuperview];
 }
 
 BOOL LGMaterialHasGlass(UIView *mat, const void *assocKey) {
     LGLiveBackdropView *glass = objc_getAssociatedObject(mat, assocKey);
     if (!glass) return NO;
-    if (!LGIsIOS12()) return YES;
-    return [objc_getAssociatedObject(mat, kLGMaterialSuppressedKey) boolValue] &&
-           glass.lgRendererReady;
+    BOOL suppressed = [objc_getAssociatedObject(
+        mat, kLGMaterialSuppressedKey) boolValue];
+    return suppressed && !LGMaterialReplacementIneligibilityReason(
+        mat, glass, YES);
 }

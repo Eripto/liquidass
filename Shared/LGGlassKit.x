@@ -74,10 +74,18 @@ BOOL lgHostEnabled(NSString *prefix) {
 @end
 @implementation LGGlassRec @end
 
+@interface LGSuppressedStockState : NSObject
+@property (nonatomic, copy) NSString *prefix;
+@property (nonatomic) BOOL originalHidden;
+@property (nonatomic) CGFloat originalAlpha;
+@end
+@implementation LGSuppressedStockState @end
+
 void *kGlassKey = &kGlassKey;
 
 static NSMapTable<UIView *, LGGlassRec *> *sGlassRecs;
-static NSMapTable<UIView *, NSString *> *sSuppressed;
+static NSMapTable<UIView *, LGSuppressedStockState *> *sSuppressed;
+static NSHashTable<UIView *> *sIOS12BlockedSuppressionViews;
 static NSMutableArray<void (^)(void)> *sReloadHandlers;
 static NSMutableArray<NSString *> *sReloadHandlerNames;
 
@@ -127,6 +135,7 @@ static BOOL LGIOS12HasReadyTrackedReplacement(UIView *stockView,
     for (UIView *candidate in sGlassRecs.keyEnumerator.allObjects) {
         LGGlassRec *record = [sGlassRecs objectForKey:candidate];
         if (!record || ![record.prefix isEqualToString:prefix]) continue;
+        if (record.material != stockView) continue;
         if (!candidate.superview || candidate.window != stockView.window ||
             candidate.hidden || candidate.alpha <= 0.01 ||
             CGRectIsEmpty(candidate.bounds)) continue;
@@ -137,20 +146,66 @@ static BOOL LGIOS12HasReadyTrackedReplacement(UIView *stockView,
     return NO;
 }
 
+static void lgRestoreSuppressedStockView(UIView *view,
+                                         LGSuppressedStockState *state,
+                                         NSString *reason) {
+    if (!view || !state) return;
+    [sSuppressed removeObjectForKey:view];
+    view.hidden = state.originalHidden;
+    view.alpha = state.originalAlpha;
+    LGDiagnosticLog(@"renderer.material.transition action=restore-generic stockClass=%@ surface=%@ restoredHidden=%d restoredAlpha=%.3f restorationReason=%@",
+                    NSStringFromClass(view.class), state.prefix ?: @"unknown",
+                    view.hidden, view.alpha, reason ?: @"unspecified");
+}
+
 void lgSuppressStock(UIView *v, NSString *prefix, BOOL setHidden) {
     if (!v || !prefix.length) return;
-    if (setHidden && LGIsIOS12() &&
-        !LGIOS12HasReadyTrackedReplacement(v, prefix)) {
-        // Widget/passcode hooks historically hid their stock surface before
-        // their replacement was attached. Preserve it until a visible,
-        // renderer-ready replacement in the same window is tracked.
-        setHidden = NO;
-        LGDiagnosticLog(@"suppression.ios12.blocked prefix=%@ stock=%@ reason=no-ready-replacement hidden=%d alpha=%.3f",
-                        prefix, NSStringFromClass(v.class), v.hidden, v.alpha);
-    }
-    if (setHidden) v.hidden = YES;
     if (!sSuppressed) sSuppressed = [NSMapTable weakToStrongObjectsMapTable];
-    [sSuppressed setObject:prefix forKey:v];
+
+    LGSuppressedStockState *existing = [sSuppressed objectForKey:v];
+    if (LGIsIOS12()) {
+        // Phase 2 authorizes only the standalone overlay. Even a tracked,
+        // renderer-ready material replacement is deliberately insufficient
+        // until a later phase explicitly enables that exact surface family.
+        BOOL exactReadyReplacement =
+            LGIOS12HasReadyTrackedReplacement(v, prefix);
+        if (!sIOS12BlockedSuppressionViews) {
+            sIOS12BlockedSuppressionViews = [NSHashTable weakObjectsHashTable];
+        }
+        if (![sIOS12BlockedSuppressionViews containsObject:v]) {
+            [sIOS12BlockedSuppressionViews addObject:v];
+            LGDiagnosticLog(@"renderer.material.transition action=blocked-generic stockClass=%@ surface=%@ stockHidden=%d stockAlpha=%.3f exactReplacementReady=%d suppressionReason=ios12-phase2-material-quarantine",
+                            NSStringFromClass(v.class), prefix, v.hidden,
+                            v.alpha, exactReadyReplacement);
+        }
+        if (existing) {
+            lgRestoreSuppressedStockView(v, existing,
+                                         @"ios12-phase2-material-quarantine");
+        }
+        return;
+    }
+
+    if (!lgHostEnabled(prefix)) {
+        if (existing) {
+            lgRestoreSuppressedStockView(v, existing,
+                                         @"surface-family-disabled");
+        }
+        return;
+    }
+
+    if (!existing) {
+        existing = [LGSuppressedStockState new];
+        existing.prefix = prefix;
+        existing.originalHidden = v.hidden;
+        existing.originalAlpha = v.alpha;
+        [sSuppressed setObject:existing forKey:v];
+        if (setHidden) v.hidden = YES;
+        LGDiagnosticLog(@"renderer.material.transition action=suppress-generic stockClass=%@ surface=%@ originalHidden=%d originalAlpha=%.3f rendererState=tracked suppressionReason=explicit-host-request",
+                        NSStringFromClass(v.class), prefix,
+                        existing.originalHidden, existing.originalAlpha);
+    } else if (setHidden && !v.hidden) {
+        v.hidden = YES;
+    }
 }
 
 #pragma mark - registered material lifecycle
@@ -230,6 +285,7 @@ void LGRegisterMaterialHost(NSString *prefix,
 }
 
 static void lgRouteMaterialHost(UIView *material) {
+    if (LGIsIOS12()) return;
     // A public UIVisualEffectView is the iOS 12 fallback renderer. Never
     // interpret any of its private implementation views as a host requiring
     // another LiquidAss glass, which would recursively nest renderers.
@@ -265,27 +321,28 @@ static void lgReconcileInjectionsForDisable(void) {
         }
     }
     for (UIView *v in sSuppressed.keyEnumerator.allObjects) {
-        NSString *p = [sSuppressed objectForKey:v];
-        if (p && !lgHostEnabled(p)) { v.hidden = NO; [sSuppressed removeObjectForKey:v]; }
+        LGSuppressedStockState *state = [sSuppressed objectForKey:v];
+        if (state && !lgHostEnabled(state.prefix)) {
+            lgRestoreSuppressedStockView(v, state, @"preference-disable");
+        }
     }
 }
 
-static void lgRouteIOS12MaterialHostsInView(UIView *view, Class materialClass,
-                                            NSUInteger *visited,
-                                            NSUInteger *materialCount) {
+static void lgDiagnoseIOS12MaterialHostsInView(UIView *view, Class materialClass,
+                                               NSUInteger *visited,
+                                               NSUInteger *materialCount) {
     if (!view || [view isKindOfClass:[LGLiveBackdropView class]]) return;
     if (visited) (*visited)++;
     if (materialClass && [view isKindOfClass:materialClass]) {
         if (materialCount) (*materialCount)++;
-        lgRouteMaterialHost(view);
     }
     for (UIView *subview in [view.subviews copy]) {
-        lgRouteIOS12MaterialHostsInView(subview, materialClass, visited,
-                                       materialCount);
+        lgDiagnoseIOS12MaterialHostsInView(subview, materialClass, visited,
+                                          materialCount);
     }
 }
 
-static void lgActivateIOS12FallbackForExistingHosts(void) {
+static void lgDiagnoseIOS12ExistingMaterialHosts(void) {
     if (!LGIsIOS12()) return;
     Class materialClass = NSClassFromString(@"MTMaterialView");
     Class applicationClass = NSClassFromString(@"UIApplication");
@@ -308,13 +365,13 @@ static void lgActivateIOS12FallbackForExistingHosts(void) {
         application, windowsSelector);
     NSUInteger visited = 0;
     NSUInteger materialCount = 0;
-    LGDiagnosticLog(@"springboard.reload.ios12.scan.begin windows=%lu materialClass=%@",
+    LGDiagnosticLog(@"springboard.reload.ios12.scan.begin windows=%lu materialClass=%@ mutation=NO purpose=diagnostics-only",
                     (unsigned long)windows.count, NSStringFromClass(materialClass));
     for (UIWindow *window in [windows copy]) {
-        lgRouteIOS12MaterialHostsInView(window, materialClass, &visited,
-                                       &materialCount);
+        lgDiagnoseIOS12MaterialHostsInView(window, materialClass, &visited,
+                                          &materialCount);
     }
-    LGDiagnosticLog(@"springboard.reload.ios12.scan.end views=%lu materials=%lu",
+    LGDiagnosticLog(@"springboard.reload.ios12.scan.end views=%lu materials=%lu mutation=NO",
                     (unsigned long)visited, (unsigned long)materialCount);
 }
 
@@ -330,7 +387,7 @@ static void lgEnablePrefsReloadCallback(CFNotificationCenterRef c, void *o, CFSt
                         (unsigned long)sReloadHandlers.count);
         lgReconcileInjectionsForDisable();
         LGDiagnosticLog(@"springboard.reload.reconcile.end");
-        lgActivateIOS12FallbackForExistingHosts();
+        lgDiagnoseIOS12ExistingMaterialHosts();
         LGLog(@"prefs Reload reconciled material hosts; extraHandlers=%lu",
               (unsigned long)sReloadHandlers.count);
         NSUInteger index = 0;

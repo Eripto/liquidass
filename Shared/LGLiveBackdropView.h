@@ -24,9 +24,10 @@ NSString *LGFilterTypeForHostPrefix(NSString *prefix);
 
 @property (nonatomic, weak) UIView *lgInjectedMaterial;
 
-// On iOS 12 this becomes true only after UIVisualEffectView has created a
-// live backdrop with non-empty capture bounds.  Newer renderers retain their
-// existing eager lifecycle.
+// On iOS 12 this is a current liveness result, not a sticky initialization
+// flag.  The Metal path requires a successfully completed frame, a live
+// matching device/texture, and an attached visible hierarchy.  Newer
+// renderers retain their existing eager lifecycle.
 @property (nonatomic, readonly) BOOL lgRendererReady;
 
 - (instancetype)initWithFrame:(CGRect)frame groupName:(NSString *)groupName;
