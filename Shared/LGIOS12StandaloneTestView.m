@@ -96,6 +96,7 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     NSMutableDictionary<NSString *, NSNumber *> *_earlyReturnCounts;
     uint64_t _textureDeliveryCount;
     uint64_t _metalRedrawCount;
+    NSTimeInterval _backdropTextureReceivedAt; // for texture-age-at-render logging
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -263,6 +264,7 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
         return;
     }
     _backdropTexture = texture;
+    _backdropTextureReceivedAt = CACurrentMediaTime();
     _rendererReady = _computePipeline && _presentPipeline && _commandQueue && _backdropTexture != nil;
     if (_rendererReady && self.hidden) {
         self.hidden = NO;
@@ -467,10 +469,13 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     }];
     [commandBuffer commit];
     if (shouldLogRedraw) {
-        LGIOS12Log(@"Metal redraw=%llu compute dispatch encoded groups={%lu,%lu} threads={8,8} cardOrigin={%.0f,%.0f}",
+        NSTimeInterval textureAgeMs = _backdropTextureReceivedAt > 0.0
+            ? (CACurrentMediaTime() - _backdropTextureReceivedAt) * 1000.0 : -1.0;
+        LGIOS12Log(@"Metal redraw=%llu compute dispatch encoded groups={%lu,%lu} threads={8,8} "
+                   "cardOrigin={%.0f,%.0f} backdropTextureAge=%.1fms",
                    (unsigned long long)redraw,
                    (unsigned long)groups.width, (unsigned long)groups.height,
-                   uniforms.cardOrigin.x, uniforms.cardOrigin.y);
+                   uniforms.cardOrigin.x, uniforms.cardOrigin.y, textureAgeMs);
     }
 }
 

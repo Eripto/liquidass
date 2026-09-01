@@ -4,6 +4,7 @@
 #import "LGSharedSupport.h"
 #import <mach/mach_time.h>
 #import <dlfcn.h>
+#import <float.h>
 
 static void LGIOS12ProviderLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 static void LGIOS12ProviderLog(NSString *format, ...) {
@@ -233,6 +234,7 @@ typedef struct {
     uint64_t _wallpaperCacheHitCount;
     NSString *_wallpaperCacheLastUnavailableReason;
     NSString *_cachedWallpaperDecoder;
+    NSTimeInterval _lastWallpaperMetadataCheckTime;
 
     // Performance diagnostics
     uint64_t _totalCaptureTime;
@@ -240,6 +242,48 @@ typedef struct {
     uint64_t _captureCount;
     uint64_t _captureTickCount;
     uint64_t _textureDeliveryCount;
+
+    // --- Reusable CPU capture buffer. One persistent CGContext, reused
+    // every capture instead of UIGraphicsBeginImageContextWithOptions's
+    // per-frame alloc/free. CGBitmapContextCreateImage's copy-on-write
+    // guarantee (Apple-documented) means a CGImageRef snapshot taken from
+    // this context stays correct even if the main thread immediately
+    // reuses the same buffer for the next capture -- so no manual
+    // double-buffering is needed on the CPU side, only on the GPU/texture
+    // side below, where Metal's replaceRegion: has no such protection.
+    CGContextRef _captureContext;
+    size_t       _captureBufferPixelWidth;
+    size_t       _captureBufferPixelHeight;
+    size_t       _captureBufferBytesPerRow;
+
+    // --- Reusable, double-buffered Metal textures. Clients only ever see
+    // _currentBackdropTexture, swapped to the freshly-written slot only
+    // after replaceRegion: finishes, so nothing can read a texture
+    // mid-write. ---
+    id<MTLTexture> _textureSlots[2];
+    NSUInteger      _publishedTextureSlotIndex;
+    BOOL            _publishedTextureSlotValid;
+
+    // --- Background upload pipeline. At most one job executing and one
+    // pending; a newer pending job replaces (drops) an older one that
+    // hasn't started yet -- newest-frame-wins, no unbounded queue. ---
+    dispatch_queue_t _uploadQueue;
+    BOOL              _uploadBusy;
+    CGImageRef        _pendingUploadImage;      // +1, released on replace/consume
+    NSString         *_pendingUploadSourceDesc;
+    uint32_t          _pendingUploadSequence;
+    uint64_t          _pendingUploadCaptureStartTicks;
+    uint64_t          _pendingUploadHierarchyTicks;
+    uint32_t          _captureSequence;
+    uint32_t          _lastPublishedSequence;
+    uint64_t          _droppedStaleCount;
+    uint64_t          _droppedSupersededCount;
+
+    // --- Extended timing / delivery-rate diagnostics (rolling, aggregated
+    // every 60 deliveries -- never logged per-frame) ---
+    NSTimeInterval _lastDeliveryWallClock;
+    double    _rollingDeliveryIntervalSumMs;
+    uint64_t  _rollingDeliveryIntervalCount;
 }
 
 + (instancetype)sharedProvider {
@@ -249,6 +293,13 @@ typedef struct {
         shared = [[LGIOS12LiveBackdropProvider alloc] init];
     });
     return shared;
+}
+
+// This is a dispatch_once singleton in practice, so -dealloc never runs --
+// included anyway for correctness rather than relying on that.
+- (void)dealloc {
+    if (_captureContext) CGContextRelease(_captureContext);
+    if (_pendingUploadImage) CGImageRelease(_pendingUploadImage);
 }
 
 - (instancetype)init {
@@ -266,6 +317,8 @@ typedef struct {
         _excludedGlassViews = [NSHashTable weakObjectsHashTable];
 
         _targetRefreshInterval = 1.0 / 24.0; // Start at 24 FPS
+        _uploadQueue = dispatch_queue_create("dylv.liquidass.ios12.upload",
+                                              DISPATCH_QUEUE_SERIAL);
 
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(applicationDidEnterBackground:)
@@ -467,6 +520,7 @@ typedef struct {
     if (_isCapturing || !_device || _applicationInBackground) return;
     _isCapturing = YES;
     uint64_t tick = ++_captureTickCount;
+    uint32_t sequence = ++_captureSequence;
 
     uint64_t captureStart = mach_absolute_time();
     UIWindow *hostWindow = [self springBoardHostWindow];
@@ -487,8 +541,8 @@ typedef struct {
     uint64_t captureEnd = mach_absolute_time();
 
     if (LGIOS12ProviderShouldLogSequence(tick)) {
-        LGIOS12ProviderLog(@"capture tick=%llu hostWindow=%@ windowsRendered=%lu excludedGlass=%lu sameWindowExcluded=%lu standaloneSeparateOverlay=%d exclusionStrategy=%@ success=%d activeClients=%lu",
-                           (unsigned long long)tick,
+        LGIOS12ProviderLog(@"capture tick=%llu sequence=%u hostWindow=%@ windowsRendered=%lu excludedGlass=%lu sameWindowExcluded=%lu standaloneSeparateOverlay=%d exclusionStrategy=%@ success=%d activeClients=%lu",
+                           (unsigned long long)tick, sequence,
                            NSStringFromClass(hostWindow.class),
                            (unsigned long)stats.windowsRendered,
                            (unsigned long)stats.excludedGlassCount,
@@ -507,80 +561,244 @@ typedef struct {
         return;
     }
 
-    // Upload texture
-    uint64_t uploadStart = mach_absolute_time();
+    // Hand off to the background upload queue and release _isCapturing
+    // *here*, not after the upload finishes -- this is the actual
+    // throughput win: the display link's next tick can start capturing
+    // the following frame while this one's Metal upload runs on
+    // _uploadQueue. The CPU capture buffer is safe to reuse immediately
+    // regardless (see captureSpringBoardBackdrop:'s copy-on-write note).
+    CGImageRef cgImageRef = CGImageRetain(snapshot.CGImage);
+    uint64_t hierarchyTicks = captureEnd - captureStart;
+    _isCapturing = NO;
 
-    NSDictionary *options = @{
-        MTKTextureLoaderOptionSRGB: @NO,
-        MTKTextureLoaderOptionOrigin: MTKTextureLoaderOriginTopLeft,
-    };
+    BOOL startNow = NO;
+    @synchronized (self) {
+        if (_uploadBusy) {
+            if (_pendingUploadImage) {
+                _droppedSupersededCount++;
+                CGImageRelease(_pendingUploadImage);
+            }
+            _pendingUploadImage = cgImageRef; // ownership transferred
+            _pendingUploadSourceDesc = sourceDesc;
+            _pendingUploadSequence = sequence;
+            _pendingUploadCaptureStartTicks = captureStart;
+            _pendingUploadHierarchyTicks = hierarchyTicks;
+        } else {
+            _uploadBusy = YES;
+            startNow = YES;
+        }
+    }
+    if (startNow) {
+        [self dispatchUploadJobWithImage:cgImageRef
+                               sourceDesc:sourceDesc
+                                 sequence:sequence
+                        captureStartTicks:captureStart
+                           hierarchyTicks:hierarchyTicks];
+    }
+}
 
-    NSError *error = nil;
-    id<MTLTexture> texture = [_textureLoader newTextureWithCGImage:snapshot.CGImage
-                                                           options:options
-                                                             error:&error];
+// Runs on _uploadQueue (background, serial). Extracts raw pixel bytes and
+// writes them into whichever of the two reusable texture slots is NOT the
+// currently-published one via replaceRegion: -- never a brand-new texture
+// object, never the slot a client/GPU might currently be reading.
+- (void)dispatchUploadJobWithImage:(CGImageRef)cgImageRef // +1, consumed here
+                         sourceDesc:(NSString *)sourceDesc
+                           sequence:(uint32_t)sequence
+                  captureStartTicks:(uint64_t)captureStartTicks
+                     hierarchyTicks:(uint64_t)hierarchyTicks {
+    dispatch_async(_uploadQueue, ^{
+        uint64_t uploadStart = mach_absolute_time();
+        id<MTLTexture> texture = [self lgUploadTextureFromCGImage:cgImageRef];
+        uint64_t uploadTicks = mach_absolute_time() - uploadStart;
+        CGImageRelease(cgImageRef);
 
-    uint64_t uploadEnd = mach_absolute_time();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self completeUploadJobWithTexture:texture
+                                     sourceDesc:sourceDesc
+                                       sequence:sequence
+                              captureStartTicks:captureStartTicks
+                                 hierarchyTicks:hierarchyTicks
+                                    uploadTicks:uploadTicks];
+        });
+    });
+}
 
-    if (!texture) {
-        [self finishCaptureWithError:error ?: [NSError errorWithDomain:@"LGIOS12"
-            code:3 userInfo:@{NSLocalizedDescriptionKey: @"Texture upload failed"}]];
-        return;
+// Runs on _uploadQueue. Pure CPU/Metal work, no UIKit -- safe off-main.
+- (id<MTLTexture>)lgUploadTextureFromCGImage:(CGImageRef)cgImageRef {
+    if (!cgImageRef || !_device) return nil;
+    size_t width = CGImageGetWidth(cgImageRef);
+    size_t height = CGImageGetHeight(cgImageRef);
+    if (width == 0 || height == 0) return nil;
+
+    NSUInteger publishedSlot = NSUIntegerMax;
+    @synchronized (self) {
+        if (_publishedTextureSlotValid) publishedSlot = _publishedTextureSlotIndex;
+    }
+    NSUInteger targetSlot = (publishedSlot == 0) ? 1 : 0;
+
+    id<MTLTexture> texture = _textureSlots[targetSlot];
+    if (!texture || texture.width != width || texture.height != height) {
+        MTLTextureDescriptor *desc = [MTLTextureDescriptor
+            texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                          width:width height:height mipmapped:NO];
+        desc.usage = MTLTextureUsageShaderRead;
+        desc.storageMode = MTLStorageModeShared;
+        texture = [_device newTextureWithDescriptor:desc];
+        _textureSlots[targetSlot] = texture;
+        if (!texture) return nil;
+        LGIOS12ProviderLog(@"texture-slot allocated slot=%lu pixels=%zux%zu",
+                           (unsigned long)targetSlot, width, height);
     }
 
-    _currentBackdropTexture = texture;
-    _currentSourceDescription = sourceDesc;
+    // Our capture context is kCGImageAlphaPremultipliedFirst with host byte
+    // order, i.e. BGRA on this (little-endian) hardware -- exactly what
+    // MTLPixelFormatBGRA8Unorm expects, so this is a straight byte copy
+    // with no channel reordering. CGDataProviderCopyData does allocate one
+    // copy of the pixel buffer; a true zero-copy path would need a
+    // self-owned capture buffer instead of letting CGBitmapContext own it,
+    // which would give up the copy-on-write safety captureSpringBoardBackdrop:
+    // relies on -- this is the deliberate tradeoff, documented rather than
+    // silently accepted.
+    CGDataProviderRef dataProvider = CGImageGetDataProvider(cgImageRef);
+    CFDataRef data = dataProvider ? CGDataProviderCopyData(dataProvider) : NULL;
+    if (!data) return nil;
+    const uint8_t *bytes = CFDataGetBytePtr(data);
+    size_t bytesPerRow = CGImageGetBytesPerRow(cgImageRef);
+    MTLRegion region = MTLRegionMake2D(0, 0, width, height);
+    [texture replaceRegion:region mipmapLevel:0 withBytes:bytes bytesPerRow:bytesPerRow];
+    CFRelease(data);
+    return texture;
+}
 
-    // Diagnostics
-    _captureCount++;
-    _totalCaptureTime += (captureEnd - captureStart);
-    _totalUploadTime += (uploadEnd - uploadStart);
+// Runs on the main queue (dispatched from dispatchUploadJobWithImage:).
+- (void)completeUploadJobWithTexture:(id<MTLTexture>)texture
+                           sourceDesc:(NSString *)sourceDesc
+                             sequence:(uint32_t)sequence
+                    captureStartTicks:(uint64_t)captureStartTicks
+                       hierarchyTicks:(uint64_t)hierarchyTicks
+                          uploadTicks:(uint64_t)uploadTicks {
+    if (sequence < _lastPublishedSequence) {
+        // Shouldn't happen given the single-pending-slot coalescing in
+        // performCaptureAndUpload (there is structurally at most one job
+        // ahead of any other), but this is the explicit newest-wins
+        // guarantee the doc asked for, kept as real insurance rather than
+        // an assumption.
+        _droppedStaleCount++;
+        LGIOS12ProviderLog(@"upload dropped=stale sequence=%u lastPublished=%u",
+                           sequence, _lastPublishedSequence);
+    } else if (!texture) {
+        [self finishCaptureWithError:[NSError errorWithDomain:@"LGIOS12" code:3
+            userInfo:@{NSLocalizedDescriptionKey: @"Texture upload failed"}]];
+    } else {
+        @synchronized (self) {
+            for (NSUInteger i = 0; i < 2; i++) {
+                if (_textureSlots[i] == texture) {
+                    _publishedTextureSlotIndex = i;
+                    _publishedTextureSlotValid = YES;
+                    break;
+                }
+            }
+        }
+        _lastPublishedSequence = sequence;
+        _currentBackdropTexture = texture;
+        _currentSourceDescription = sourceDesc;
 
-    if (_captureCount % 60 == 0) {
-        mach_timebase_info_data_t tb;
-        mach_timebase_info(&tb);
-        double captureMs = (double)(_totalCaptureTime / _captureCount) * tb.numer / tb.denom / 1000000.0;
-        double uploadMs = (double)(_totalUploadTime / _captureCount) * tb.numer / tb.denom / 1000000.0;
-        LGIOS12ProviderLog(@"Performance avg (60 captures): capture=%.2fms upload=%.2fms", captureMs, uploadMs);
+        _captureCount++;
+        _totalCaptureTime += hierarchyTicks;
+        _totalUploadTime += uploadTicks;
 
-        // Adaptive throttling logic
-        double totalMs = captureMs + uploadMs;
-        if (totalMs > 50.0) {
-            // Increase interval under load, but keep the standalone capture
-            // budget in the requested 15-30 FPS range.
-            _targetRefreshInterval = MIN(1.0 / 15.0,
-                                         _targetRefreshInterval * 1.25);
-            LGIOS12ProviderLog(@"Throttling refresh rate to %.1f FPS due to load", 1.0 / _targetRefreshInterval);
-        } else if (totalMs < 28.0 &&
-                   _targetRefreshInterval > (1.0 / 30.0)) {
-            // Raise capture cadence when the previous interval has headroom.
-            _targetRefreshInterval = MAX(1.0 / 30.0,
-                                         _targetRefreshInterval * 0.85);
-            LGIOS12ProviderLog(@"Increasing refresh rate to %.1f FPS", 1.0 / _targetRefreshInterval);
+        if (_captureCount % 60 == 0) {
+            mach_timebase_info_data_t tb;
+            mach_timebase_info(&tb);
+            double captureMs = (double)(_totalCaptureTime / _captureCount) * tb.numer / tb.denom / 1000000.0;
+            double uploadMs = (double)(_totalUploadTime / _captureCount) * tb.numer / tb.denom / 1000000.0;
+            double deliveredFPS = _rollingDeliveryIntervalCount > 0
+                ? 1000.0 / (_rollingDeliveryIntervalSumMs / _rollingDeliveryIntervalCount) : 0.0;
+            LGIOS12ProviderLog(@"Performance avg (60 captures): hierarchyCapture=%.2fms upload=%.2fms "
+                               "deliveredFPS(actual)=%.1f droppedStale=%llu droppedSuperseded=%llu",
+                               captureMs, uploadMs, deliveredFPS,
+                               (unsigned long long)_droppedStaleCount,
+                               (unsigned long long)_droppedSupersededCount);
+
+            // Adaptive throttling: explicit 30/24/20/15 tiers against the
+            // ~33.3ms budget for 30 FPS, per the requested target model,
+            // rather than a continuous multiplicative fudge.
+            static const double kTierIntervals[] = {1.0/30.0, 1.0/24.0, 1.0/20.0, 1.0/15.0};
+            double totalMs = captureMs + uploadMs;
+            NSInteger currentTier = 0;
+            double bestDelta = DBL_MAX;
+            for (NSInteger i = 0; i < 4; i++) {
+                double delta = fabs(_targetRefreshInterval - kTierIntervals[i]);
+                if (delta < bestDelta) { bestDelta = delta; currentTier = i; }
+            }
+            if (totalMs > (1000.0 * kTierIntervals[currentTier]) && currentTier < 3) {
+                _targetRefreshInterval = kTierIntervals[currentTier + 1];
+                LGIOS12ProviderLog(@"Throttling refresh rate to %.1f FPS (measured %.2fms > %.2fms budget)",
+                                   1.0 / _targetRefreshInterval, totalMs, 1000.0 * kTierIntervals[currentTier]);
+            } else if (currentTier > 0 &&
+                       totalMs < (1000.0 * kTierIntervals[currentTier - 1] * 0.85)) {
+                _targetRefreshInterval = kTierIntervals[currentTier - 1];
+                LGIOS12ProviderLog(@"Increasing refresh rate to %.1f FPS (measured %.2fms has headroom)",
+                                   1.0 / _targetRefreshInterval, totalMs);
+            }
+
+            _totalCaptureTime = 0;
+            _totalUploadTime = 0;
+            _captureCount = 0;
+            _rollingDeliveryIntervalSumMs = 0;
+            _rollingDeliveryIntervalCount = 0;
         }
 
-        _totalCaptureTime = 0;
-        _totalUploadTime = 0;
-        _captureCount = 0;
+        NSTimeInterval now = CACurrentMediaTime();
+        if (_lastDeliveryWallClock > 0.0) {
+            _rollingDeliveryIntervalSumMs += (now - _lastDeliveryWallClock) * 1000.0;
+            _rollingDeliveryIntervalCount++;
+        }
+        _lastDeliveryWallClock = now;
+
+        NSArray<id<LGIOS12LiveBackdropClient>> *clients = _clients.allObjects;
+        uint64_t delivery = ++_textureDeliveryCount;
+        if (LGIOS12ProviderShouldLogSequence(delivery)) {
+            LGIOS12ProviderLog(@"texture delivery=%llu sequence=%u source=%@ dimensions=%lux%lu "
+                               "clients=%lu activeClients=%lu device=%@ textureSlot=%lu",
+                               (unsigned long long)delivery, sequence,
+                               sourceDesc ?: @"unknown",
+                               (unsigned long)texture.width, (unsigned long)texture.height,
+                               (unsigned long)clients.count,
+                               (unsigned long)[self activeClientCount],
+                               texture.device.name ?: @"unknown",
+                               (unsigned long)_publishedTextureSlotIndex);
+        }
+        for (id<LGIOS12LiveBackdropClient> client in clients) {
+            [client providerDidUpdateBackdropTexture:texture source:sourceDesc];
+        }
     }
 
-    NSArray<id<LGIOS12LiveBackdropClient>> *clients = _clients.allObjects;
-    uint64_t delivery = ++_textureDeliveryCount;
-    if (LGIOS12ProviderShouldLogSequence(delivery)) {
-        LGIOS12ProviderLog(@"texture delivery=%llu source=%@ dimensions=%lux%lu clients=%lu activeClients=%lu device=%@",
-                           (unsigned long long)delivery,
-                           sourceDesc ?: @"unknown",
-                           (unsigned long)texture.width,
-                           (unsigned long)texture.height,
-                           (unsigned long)clients.count,
-                           (unsigned long)[self activeClientCount],
-                           texture.device.name ?: @"unknown");
+    // Drain a coalesced pending job (newest-wins queueing), or go idle.
+    CGImageRef nextImage = NULL;
+    NSString *nextSourceDesc = nil;
+    uint32_t nextSequence = 0;
+    uint64_t nextCaptureStart = 0, nextHierarchyTicks = 0;
+    @synchronized (self) {
+        if (_pendingUploadImage) {
+            nextImage = _pendingUploadImage;
+            nextSourceDesc = _pendingUploadSourceDesc;
+            nextSequence = _pendingUploadSequence;
+            nextCaptureStart = _pendingUploadCaptureStartTicks;
+            nextHierarchyTicks = _pendingUploadHierarchyTicks;
+            _pendingUploadImage = NULL;
+            _pendingUploadSourceDesc = nil;
+        } else {
+            _uploadBusy = NO;
+        }
     }
-    for (id<LGIOS12LiveBackdropClient> client in clients) {
-        [client providerDidUpdateBackdropTexture:texture source:sourceDesc];
+    if (nextImage) {
+        [self dispatchUploadJobWithImage:nextImage
+                               sourceDesc:nextSourceDesc
+                                 sequence:nextSequence
+                        captureStartTicks:nextCaptureStart
+                           hierarchyTicks:nextHierarchyTicks];
     }
-
-    _isCapturing = NO;
 }
 
 - (void)finishCaptureWithError:(NSError *)error {
@@ -612,6 +830,56 @@ typedef struct {
         fallback = keyWindow;
     }
     return fallback;
+}
+
+// Reusable, persistent bitmap context replacing per-call
+// UIGraphicsBeginImageContextWithOptions/EndImageContext (which allocates
+// and frees a full-screen backing buffer on every single capture -- real
+// cost at 24-30 Hz). Only reallocated when the pixel size actually changes
+// (rotation, screen change). CGBitmapContextCreateImage's documented
+// copy-on-write behavior means a CGImageRef snapshot taken from this
+// context stays correct even after we immediately reuse it for the next
+// capture, so this is safe without any additional locking.
+- (CGContextRef)ensureCaptureContextForPointSize:(CGSize)pointSize
+                                            scale:(CGFloat)scale {
+    size_t pixelWidth = (size_t)llround(pointSize.width * scale);
+    size_t pixelHeight = (size_t)llround(pointSize.height * scale);
+    if (pixelWidth == 0 || pixelHeight == 0) return NULL;
+
+    if (_captureContext && pixelWidth == _captureBufferPixelWidth &&
+        pixelHeight == _captureBufferPixelHeight) {
+        return _captureContext;
+    }
+
+    if (_captureContext) {
+        CGContextRelease(_captureContext);
+        _captureContext = NULL;
+    }
+
+    size_t bytesPerRow = pixelWidth * 4;
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    // NULL data: CGBitmapContextCreate allocates and owns the backing
+    // store itself, which is exactly what we want to reuse across calls --
+    // no manual malloc/free bookkeeping on our end either.
+    _captureContext = CGBitmapContextCreate(
+        NULL, pixelWidth, pixelHeight, 8, bytesPerRow, colorSpace,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    CGColorSpaceRelease(colorSpace);
+
+    if (_captureContext) {
+        CGContextScaleCTM(_captureContext, scale, scale);
+        _captureBufferPixelWidth = pixelWidth;
+        _captureBufferPixelHeight = pixelHeight;
+        _captureBufferBytesPerRow = bytesPerRow;
+        LGIOS12ProviderLog(@"capture-buffer allocated pixels=%zux%zu scale=%.1f "
+                           "reason=%@", pixelWidth, pixelHeight, scale,
+                           _captureBufferPixelWidth ? @"size-changed" : @"first-use");
+    } else {
+        LGIOS12ProviderLog(@"capture-buffer allocation FAILED pixels=%zux%zu", pixelWidth, pixelHeight);
+        _captureBufferPixelWidth = 0;
+        _captureBufferPixelHeight = 0;
+    }
+    return _captureContext;
 }
 
 - (NSArray<UIWindow *> *)visibleSourceWindowsSortedByLevel {
@@ -839,6 +1107,25 @@ static UIImage *LGIOS12DecodeCPBitmapWithSystemDecoder(NSData *data) {
 }
 
 - (UIImage *)cachedDecodedWallpaperAtPath:(NSString *)path {
+    // Throttle the stat() itself, not just the decode: at 24-30 capture/sec
+    // this was checking file metadata on every single frame. The wallpaper
+    // changing mid-second is not a real scenario worth paying for -- only
+    // actually check metadata at most once per second, reusing whatever we
+    // last had in between.
+    NSTimeInterval now = CACurrentMediaTime();
+    if (_wallpaperCacheAttemptedForMetadata &&
+        (now - _lastWallpaperMetadataCheckTime) < 1.0) {
+        uint64_t hit = ++_wallpaperCacheHitCount;
+        if (LGIOS12ProviderShouldLogSequence(hit)) {
+            LGIOS12ProviderLog(@"wallpaper cache=hit(throttled-stat) count=%llu decoded=%d "
+                               "secondsSinceLastStat=%.2f",
+                               (unsigned long long)hit, _cachedWallpaperImage != nil,
+                               now - _lastWallpaperMetadataCheckTime);
+        }
+        return _cachedWallpaperImage;
+    }
+    _lastWallpaperMetadataCheckTime = now;
+
     NSError *attributesError = nil;
     NSDictionary<NSFileAttributeKey, id> *attributes =
         [[NSFileManager defaultManager] attributesOfItemAtPath:path
@@ -995,8 +1282,17 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         for (CALayer *layer in sameWindowLayers) layer.hidden = YES;
     }
 
-    UIGraphicsBeginImageContextWithOptions(screenBounds.size, YES, screenScale);
-    CGContextRef context = UIGraphicsGetCurrentContext();
+    CGContextRef context = [self ensureCaptureContextForPointSize:screenBounds.size
+                                                              scale:screenScale];
+    if (context) {
+        // Reused from a prior capture -- must clear before drawing, or
+        // regions no longer covered by any content this frame (e.g. a
+        // dismissed widget) would show stale pixels from last time. The
+        // context's CTM is pre-scaled (see ensureCaptureContextForPointSize:),
+        // so this rect is in points, matching every other draw call below.
+        CGContextClearRect(context, screenBounds);
+        UIGraphicsPushContext(context);
+    }
     UIImage *snapshot = nil;
     BOOL drewWallpaperWindow = NO;
     BOOL drewCPBitmap = NO;
@@ -1048,10 +1344,20 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
 
         if (drewWallpaperWindow || drewCPBitmap || drewForeground ||
             usedWholeHostFallback) {
-            snapshot = UIGraphicsGetImageFromCurrentImageContext();
+            // CGBitmapContextCreateImage's copy-on-write guarantee means
+            // this snapshot stays correct even once we clear/redraw
+            // _captureContext for the next capture -- no need to wait for
+            // whatever consumes this image before reusing the buffer.
+            CGImageRef cgImage = CGBitmapContextCreateImage(context);
+            if (cgImage) {
+                snapshot = [UIImage imageWithCGImage:cgImage
+                                                scale:screenScale
+                                          orientation:UIImageOrientationUp];
+                CGImageRelease(cgImage);
+            }
         }
+        UIGraphicsPopContext();
     }
-    UIGraphicsEndImageContext();
 
     if (captureStats.usedModelLayerExclusion) {
         for (NSUInteger index = 0; index < sameWindowLayers.count; index++) {
