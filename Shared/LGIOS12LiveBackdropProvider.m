@@ -19,6 +19,19 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
 #endif
 }
 
+// Controlled-test source modes (PRIORITY 1 isolation). Compile-time only --
+// no preference UI, per the task constraints. Leave at Composite for normal
+// builds; flip to WallpaperOnly/ForegroundOnly to prove which stage an
+// artifact originates from.
+typedef NS_ENUM(NSUInteger, LGIOS12SourceMode) {
+    LGIOS12SourceModeComposite = 0,
+    LGIOS12SourceModeWallpaperOnly,
+    LGIOS12SourceModeForegroundOnly,
+};
+#ifndef LGIOS12_SOURCE_MODE
+#define LGIOS12_SOURCE_MODE LGIOS12SourceModeComposite
+#endif
+
 static BOOL LGIOS12ProviderShouldLogSequence(uint64_t sequence) {
     return sequence <= 3 || (sequence % 30) == 0;
 }
@@ -154,6 +167,48 @@ static BOOL LGIOS12ViewIsInsideAnyView(UIView *view,
     return NO;
 }
 
+// Known-stable SpringBoard foreground container class name tokens, most
+// preferred first. These are the containers that hold the icon pages (and
+// survive a page scroll unchanged), as opposed to the per-page or per-icon
+// views whose membership churns mid-transition. Matched by class-name token
+// through guarded runtime inspection -- no hardcoded private struct layouts,
+// no assumed availability. If none of these exist on a given iOS 12 build we
+// fall through to the previous dynamic search, so this can only improve on
+// the old behavior, never fail closed.
+static NSArray<NSString *> *LGIOS12StableForegroundContainerTokens(void) {
+    static NSArray<NSString *> *tokens = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        tokens = @[
+            @"SBIconContentView",   // holds all icon list views + page control
+            @"SBRootFolderView",    // root folder's view, parent of the above
+            @"SBIconController",    // (view of) the icon controller
+            @"SBHomeScreenView",
+        ];
+    });
+    return tokens;
+}
+
+// Depth-first search for the highest-priority stable container that (a)
+// exists, (b) is visible, (c) has a transparent base so the wallpaper we
+// drew underneath still shows through, and (d) actually contains icons.
+static UIView *LGIOS12FindStableForegroundContainer(UIView *root,
+                                                     NSString *token,
+                                                     NSUInteger depth) {
+    if (!root || depth == 0 || !LGIOS12ViewIsVisibleForCapture(root)) return nil;
+    if (LGIOS12ClassNameContainsToken(root, token) &&
+        LGIOS12ViewHasTransparentBase(root) &&
+        LGIOS12ViewContainsVisibleIcon(root) &&
+        !LGIOS12HierarchyContainsClassToken(root, @"Wallpaper", 3)) {
+        return root;
+    }
+    for (UIView *subview in root.subviews) {
+        UIView *found = LGIOS12FindStableForegroundContainer(subview, token, depth - 1);
+        if (found) return found;
+    }
+    return nil;
+}
+
 static void LGIOS12CollectPageControls(UIView *view,
                                        NSArray<UIView *> *existing,
                                        NSMutableArray<UIView *> *results) {
@@ -167,6 +222,20 @@ static void LGIOS12CollectPageControls(UIView *view,
         LGIOS12CollectPageControls(subview, existing, results);
 }
 
+// Renders a foreground view into the capture context at its true screen
+// position.
+//
+// Uses the *presentation* layer when one exists. -renderInContext: on a
+// model layer draws final/committed values, so during a page-turn snap
+// animation the captured icons would jump ahead of where they actually
+// appear on screen. presentationLayer reflects the currently displayed
+// in-flight state, which is what the backdrop must match. Falls back to the
+// model layer when no presentation layer exists (i.e. nothing animating),
+// where the two are equivalent anyway.
+//
+// Geometry is still taken from the model view (convertRect:toView:nil) --
+// see the note in renderStableForegroundContainer: about why that is
+// correct for a finger-tracked scroll.
 static BOOL LGIOS12RenderViewAtScreenPosition(UIView *view,
                                                CGContextRef context) {
     if (!LGIOS12ViewIsVisibleForCapture(view) || !context) return NO;
@@ -180,11 +249,32 @@ static BOOL LGIOS12RenderViewAtScreenPosition(UIView *view,
     CGContextScaleCTM(context, scaleX, scaleY);
     CGContextTranslateCTM(context, -CGRectGetMinX(view.bounds),
                           -CGRectGetMinY(view.bounds));
-    [view.layer renderInContext:context];
+    CALayer *renderLayer = view.layer.presentationLayer ?: view.layer;
+    [renderLayer renderInContext:context];
     CGContextRestoreGState(context);
     return YES;
 }
 
+// DEVICE-EVIDENCE FIX (2026-09-01 video, ~10.2-11.5s):
+//
+// This previously called -drawViewHierarchyInRect:afterScreenUpdates:NO on
+// LIVE SpringBoard windows at 24-30 Hz. That is UIKit's *snapshotting* API:
+// unlike -renderInContext:, it is not a read-only draw -- it routes through
+// UIKit's snapshot machinery, which interacts with the live render tree. On
+// an actively animating hierarchy (a Home Screen page scroll) at that call
+// rate it corrupts what is actually on screen: icon content blanks out and
+// only container/mask geometry survives, which is exactly the grid of large
+// rounded-rectangle outlines visible in the device video.
+//
+// The decisive evidence that this is real-screen corruption rather than a
+// bad source texture: in the video the ghost rectangles cover the whole
+// display, far outside the glass card's bounds. The provider source texture
+// is only ever sampled *inside* the glass, so a source-texture artifact is
+// structurally incapable of drawing outside it.
+//
+// -renderInContext: cannot cause this: it draws the layer tree into our own
+// bitmap context and has no path back into the live render server. So the
+// capture path now uses it exclusively.
 static BOOL LGIOS12RenderWindowAtScreenPosition(UIWindow *window,
                                                  CGContextRef context,
                                                  CGRect screenBounds) {
@@ -193,14 +283,9 @@ static BOOL LGIOS12RenderWindowAtScreenPosition(UIWindow *window,
     CGRect frame = CGRectIsEmpty(window.frame) ? screenBounds : window.frame;
     CGContextSaveGState(context);
     CGContextTranslateCTM(context, CGRectGetMinX(frame), CGRectGetMinY(frame));
-    BOOL drew = [window drawViewHierarchyInRect:window.bounds
-                              afterScreenUpdates:NO];
-    if (!drew) {
-        [window.layer renderInContext:context];
-        drew = YES;
-    }
+    [window.layer renderInContext:context];
     CGContextRestoreGState(context);
-    return drew;
+    return YES;
 }
 
 typedef struct {
@@ -284,6 +369,12 @@ typedef struct {
     NSTimeInterval _lastDeliveryWallClock;
     double    _rollingDeliveryIntervalSumMs;
     uint64_t  _rollingDeliveryIntervalCount;
+
+    // Stable foreground container cache (PRIORITY 1). __weak so a torn-down
+    // SpringBoard hierarchy simply re-resolves instead of dangling.
+    __weak UIView *_cachedForegroundContainer;
+    NSString *_lastForegroundDescription;
+    uint64_t  _foregroundSourceChangeCount;
 }
 
 + (instancetype)sharedProvider {
@@ -931,6 +1022,51 @@ typedef struct {
 - (NSArray<UIView *> *)foregroundViewsForHostWindow:(UIWindow *)hostWindow
                                          description:(NSString **)description {
     UIView *root = hostWindow.rootViewController.view ?: hostWindow;
+
+    // PRIORITY 1 FIX: prefer one stable container over per-frame rederivation.
+    //
+    // The old path rebuilt the foreground set every single capture from
+    // whatever SBIconViews happened to be visible, then walked up to their
+    // lowest common ancestor. During a page scroll the visible icon set
+    // changes between captures (page A leaving, page B entering), so the LCA
+    // jumps between a single page's list view and the multi-page container --
+    // and when it landed on something opaque or wallpaper-adjacent, the whole
+    // foreground was dropped and the capture fell through to the whole-host
+    // fallback. That fallback is what corrupted the live screen (see the
+    // comment on LGIOS12RenderWindowAtScreenPosition).
+    //
+    // A cached stable container is immune to that churn: page scrolling moves
+    // content *within* it, so it stays valid across the entire transition and
+    // the foreground source never changes mid-scroll.
+    if (_cachedForegroundContainer && _cachedForegroundContainer.window == hostWindow &&
+        LGIOS12ViewIsVisibleForCapture(_cachedForegroundContainer) &&
+        LGIOS12ViewContainsVisibleIcon(_cachedForegroundContainer)) {
+        if (description) {
+            *description = [NSString stringWithFormat:@"stable-container(cached):%@",
+                NSStringFromClass(_cachedForegroundContainer.class)];
+        }
+        return @[_cachedForegroundContainer];
+    }
+
+    for (NSString *token in LGIOS12StableForegroundContainerTokens()) {
+        UIView *container = LGIOS12FindStableForegroundContainer(root, token, 14);
+        if (container) {
+            _cachedForegroundContainer = container;
+            LGIOS12ProviderLog(@"foreground source=stable-container class=%@ token=%@ "
+                               "bounds={%.0f,%.0f} transparentBase=%d",
+                               NSStringFromClass(container.class), token,
+                               container.bounds.size.width, container.bounds.size.height,
+                               LGIOS12ViewHasTransparentBase(container));
+            if (description) {
+                *description = [NSString stringWithFormat:@"stable-container:%@",
+                    NSStringFromClass(container.class)];
+            }
+            return @[container];
+        }
+    }
+
+    // Fallback: previous dynamic behavior, unchanged. Only reached if none of
+    // the stable container classes exist on this build.
     NSMutableArray<UIView *> *icons = [NSMutableArray array];
     LGIOS12CollectVisibleIconViews(root, icons);
     if (!icons.count) {
@@ -957,7 +1093,7 @@ typedef struct {
         [classes addObject:NSStringFromClass(view.class)];
     if (description) {
         *description = [NSString stringWithFormat:
-            @"icons=%lu common=%@ commonOpaque=%d commonBackgroundAlpha=%.3f sources=[%@]",
+            @"dynamic-fallback icons=%lu common=%@ commonOpaque=%d commonBackgroundAlpha=%.3f sources=[%@]",
             (unsigned long)icons.count, NSStringFromClass(common.class),
             common.opaque, LGIOS12ViewBackgroundAlpha(common),
             [classes componentsJoinedByString:@","]];
@@ -1306,7 +1442,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         [[UIColor blackColor] setFill];
         UIRectFill(screenBounds);
 
-        if (wallpaperWindow) {
+        if (wallpaperWindow && LGIOS12_SOURCE_MODE != LGIOS12SourceModeForegroundOnly) {
             drewWallpaperWindow = LGIOS12RenderWindowAtScreenPosition(
                 wallpaperWindow, context, screenBounds);
             if (drewWallpaperWindow) {
@@ -1314,27 +1450,38 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                     NSStringFromClass(wallpaperWindow.class)];
             }
         }
-        if (!drewWallpaperWindow && wallpaper) {
+        if (!drewWallpaperWindow && wallpaper &&
+            LGIOS12_SOURCE_MODE != LGIOS12SourceModeForegroundOnly) {
             LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
             drewCPBitmap = YES;
             wallpaperSource = [NSString stringWithFormat:@"cpbitmap:%@",
                 _cachedWallpaperDecoder ?: @"unknown-decoder"];
         }
 
-        for (UIView *foregroundView in foregroundViews) {
-            if (LGIOS12RenderViewAtScreenPosition(foregroundView, context)) {
-                drewForeground = YES;
-                foregroundRenderCount++;
+        if (LGIOS12_SOURCE_MODE != LGIOS12SourceModeWallpaperOnly) {
+            for (UIView *foregroundView in foregroundViews) {
+                if (LGIOS12RenderViewAtScreenPosition(foregroundView, context)) {
+                    drewForeground = YES;
+                    foregroundRenderCount++;
+                }
             }
         }
         if (drewForeground) {
             foregroundSource = [NSString stringWithFormat:
                 @"transparent-icon-hierarchy:%@",
                 foregroundDescription ?: @"unknown"];
+        } else if (LGIOS12_SOURCE_MODE == LGIOS12SourceModeWallpaperOnly) {
+            foregroundSource = @"skipped:wallpaper-only-diagnostic-mode";
         } else {
-            // Preserve the prior capture as a guarded last resort.  This path
-            // can still occlude a wallpaper base, so diagnostics identify it
-            // explicitly instead of pretending the composite succeeded.
+            // Last resort. NOTE: this no longer uses
+            // -drawViewHierarchyInRect: (see the comment on
+            // LGIOS12RenderWindowAtScreenPosition -- that call is what
+            // corrupted the live screen during page scroll in the device
+            // video). It is now a read-only -renderInContext: of the host
+            // window, which cannot disturb SpringBoard. It can still occlude
+            // the wallpaper base if the host window is opaque, so it stays
+            // explicitly identified in diagnostics rather than silently
+            // passing as a successful composite.
             usedWholeHostFallback = LGIOS12RenderWindowAtScreenPosition(
                 hostWindow, context, screenBounds);
             foregroundSource = usedWholeHostFallback
@@ -1375,14 +1522,52 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             @"wallpaper=%@+foreground=%@+composition=wallpaper-then-transparent-foreground",
             wallpaperSource, foregroundSource];
     }
+    // Foreground-source instability diagnostics. Logged on *change* rather
+    // than on a fixed cadence, because a change mid-page-scroll is precisely
+    // the failure signature we are hunting: if the source flips while
+    // scrolling, the stable-container cache is not holding and the old
+    // per-frame rederivation is still in play.
+    if (![_lastForegroundDescription isEqualToString:foregroundSource]) {
+        uint64_t changeCount = ++_foregroundSourceChangeCount;
+        NSMutableArray<NSString *> *sourceDetails = [NSMutableArray array];
+        for (UIView *view in foregroundViews) {
+            CGRect screenRect = [view convertRect:view.bounds toView:nil];
+            [sourceDetails addObject:[NSString stringWithFormat:
+                @"{%@ bounds={%.0f,%.0f} screen={%.0f,%.0f,%.0f,%.0f} super=%@ hasPresentation=%d}",
+                NSStringFromClass(view.class),
+                view.bounds.size.width, view.bounds.size.height,
+                screenRect.origin.x, screenRect.origin.y,
+                screenRect.size.width, screenRect.size.height,
+                NSStringFromClass(view.superview.class) ?: @"none",
+                view.layer.presentationLayer != nil]];
+        }
+        NSMutableArray<UIView *> *visibleIcons = [NSMutableArray array];
+        LGIOS12CollectVisibleIconViews(hostWindow.rootViewController.view ?: hostWindow,
+                                        visibleIcons);
+        LGIOS12ProviderLog(@"foreground SOURCE-CHANGED change=%llu previous=%@ current=%@ "
+                           "detail=%@ viewCount=%lu visibleSBIconViews=%lu "
+                           "captureMethod=%@ sources=[%@]",
+                           (unsigned long long)changeCount,
+                           _lastForegroundDescription ?: @"none", foregroundSource,
+                           foregroundDescription ?: @"none",
+                           (unsigned long)foregroundViews.count,
+                           (unsigned long)visibleIcons.count,
+                           usedWholeHostFallback
+                               ? @"renderInContext:host-window-fallback"
+                               : @"renderInContext:presentationLayer-per-view",
+                           [sourceDetails componentsJoinedByString:@","]);
+        _lastForegroundDescription = foregroundSource;
+    }
+
     if (LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
-        LGIOS12ProviderLog(@"wallpaper composition finalSource=%@ wallpaperWindowCandidate=%@ wallpaperWindowRendered=%d cpbitmapDecoded=%d cpbitmapRendered=%d foregroundSource=%@ foregroundViewsRendered=%lu wholeHostFallback=%d hostOpaque=%d finalPath=%@",
+        LGIOS12ProviderLog(@"wallpaper composition finalSource=%@ wallpaperWindowCandidate=%@ wallpaperWindowRendered=%d cpbitmapDecoded=%d cpbitmapRendered=%d foregroundSource=%@ foregroundViewsRendered=%lu wholeHostFallback=%d hostOpaque=%d sourceMode=%lu finalPath=%@",
                            wallpaperSource,
                            NSStringFromClass(wallpaperWindow.class),
                            drewWallpaperWindow, wallpaper != nil, drewCPBitmap,
                            foregroundSource,
                            (unsigned long)foregroundRenderCount,
                            usedWholeHostFallback, hostWindow.opaque,
+                           (unsigned long)LGIOS12_SOURCE_MODE,
                            usedWholeHostFallback
                                ? @"wallpaper+opaque-host-fallback"
                                : @"wallpaper+transparent-icon-foreground");
