@@ -19,18 +19,45 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
 #endif
 }
 
-// Controlled-test source modes (PRIORITY 1 isolation). Compile-time only --
-// no preference UI, per the task constraints. Leave at Composite for normal
-// builds; flip to WallpaperOnly/ForegroundOnly to prove which stage an
-// artifact originates from.
-typedef NS_ENUM(NSUInteger, LGIOS12SourceMode) {
-    LGIOS12SourceModeComposite = 0,
-    LGIOS12SourceModeWallpaperOnly,
-    LGIOS12SourceModeForegroundOnly,
-};
-#ifndef LGIOS12_SOURCE_MODE
-#define LGIOS12_SOURCE_MODE LGIOS12SourceModeComposite
-#endif
+// ---------------------------------------------------------------------------
+// DIAGNOSTIC MODES
+//
+// Selected at runtime (no rebuild) by writing an integer to:
+//   /var/mobile/Library/Preferences/dylv.liquidass.ios12diag.plist
+//   key: DiagMode  (NSNumber integer)
+// then respringing. Read once per SpringBoard launch and cached.
+//
+//   0 NORMAL           Liquid Glass shader, full composite capture (default)
+//   1 RAW_BACKDROP     (A) raw source crop in the card, no glass shader
+//   2 WALLPAPER_ONLY   (B) provider composes wallpaper only, raw display
+//   3 FOREGROUND_ONLY  (C) provider composes foreground only, raw display
+//   4 COMPOSITE_RAW    (D) full composite, raw display (equivalent to 1;
+//                          kept as a separate id to match the test plan)
+//   5 FREEZE_PROVIDER  (E) capture exactly ONE frame then stop capturing
+//                          forever; Metal redraw + dragging stay live
+//   6 PROVIDER_OFF     (F) standalone glass/provider never starts at all;
+//                          every other LiquidAss hook untouched
+// ---------------------------------------------------------------------------
+NSInteger LGIOS12CurrentDiagMode(void) {
+    static NSInteger mode = 0;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString *path = @"/var/mobile/Library/Preferences/dylv.liquidass.ios12diag.plist";
+        NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+        id value = dict[@"DiagMode"];
+        if ([value respondsToSelector:@selector(integerValue)]) {
+            mode = [value integerValue];
+        }
+        LGLog(@"renderer.ios12.provider DIAG-MODE selected=%ld source=%@",
+              (long)mode, dict ? path : @"default(no-plist)");
+    });
+    return mode;
+}
+
+BOOL LGIOS12DiagRawDisplay(void) {
+    NSInteger m = LGIOS12CurrentDiagMode();
+    return m >= 1 && m <= 4;
+}
 
 static BOOL LGIOS12ProviderShouldLogSequence(uint64_t sequence) {
     return sequence <= 3 || (sequence % 30) == 0;
@@ -225,17 +252,28 @@ static void LGIOS12CollectPageControls(UIView *view,
 // Renders a foreground view into the capture context at its true screen
 // position.
 //
-// Uses the *presentation* layer when one exists. -renderInContext: on a
-// model layer draws final/committed values, so during a page-turn snap
-// animation the captured icons would jump ahead of where they actually
-// appear on screen. presentationLayer reflects the currently displayed
-// in-flight state, which is what the backdrop must match. Falls back to the
-// model layer when no presentation layer exists (i.e. nothing animating),
-// where the two are equivalent anyway.
-//
-// Geometry is still taken from the model view (convertRect:toView:nil) --
-// see the note in renderStableForegroundContainer: about why that is
-// correct for a finger-tracked scroll.
+// PRESENTATION LAYER: reverted to the model layer by default. The previous
+// build used `layer.presentationLayer ?: layer` on the hypothesis that it
+// would capture in-flight animated positions. That was never verified on
+// device, and there is real reason to doubt it: presentationLayer returns a
+// copy whose sublayer/mask/scroll-offset fidelity under -renderInContext: is
+// not guaranteed, so it could silently drop icon sublayers -- which would
+// look exactly like the reported symptom. Until a device test proves it
+// helps, the model layer (the long-standing behavior) is the default.
+// Set DiagPresentationLayer=true in the diag plist to A/B it.
+static BOOL LGIOS12UsePresentationLayer(void) {
+    static BOOL use = NO;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:
+            @"/var/mobile/Library/Preferences/dylv.liquidass.ios12diag.plist"];
+        use = [dict[@"DiagPresentationLayer"] boolValue];
+        LGLog(@"renderer.ios12.provider DIAG presentationLayer=%@ (default NO)",
+              use ? @"YES" : @"NO");
+    });
+    return use;
+}
+
 static BOOL LGIOS12RenderViewAtScreenPosition(UIView *view,
                                                CGContextRef context) {
     if (!LGIOS12ViewIsVisibleForCapture(view) || !context) return NO;
@@ -249,7 +287,10 @@ static BOOL LGIOS12RenderViewAtScreenPosition(UIView *view,
     CGContextScaleCTM(context, scaleX, scaleY);
     CGContextTranslateCTM(context, -CGRectGetMinX(view.bounds),
                           -CGRectGetMinY(view.bounds));
-    CALayer *renderLayer = view.layer.presentationLayer ?: view.layer;
+    CALayer *renderLayer = view.layer;
+    if (LGIOS12UsePresentationLayer() && view.layer.presentationLayer) {
+        renderLayer = view.layer.presentationLayer;
+    }
     [renderLayer renderInContext:context];
     CGContextRestoreGState(context);
     return YES;
@@ -375,6 +416,7 @@ typedef struct {
     __weak UIView *_cachedForegroundContainer;
     NSString *_lastForegroundDescription;
     uint64_t  _foregroundSourceChangeCount;
+    BOOL      _freezeNoticeLogged;
 }
 
 + (instancetype)sharedProvider {
@@ -609,6 +651,23 @@ typedef struct {
 
 - (void)performCaptureAndUpload {
     if (_isCapturing || !_device || _applicationInBackground) return;
+
+    // MODE E (FREEZE_PROVIDER) / MODE F (PROVIDER_OFF): capture exactly one
+    // frame, then never capture again. Metal redraw and glass dragging keep
+    // running off the frozen texture. This is the decisive A/B: if the
+    // whole-screen ghost rectangles still appear while swiping pages with
+    // capture permanently stopped, repeated capture cannot be producing them.
+    NSInteger diagMode = LGIOS12CurrentDiagMode();
+    if (diagMode == 5 && _captureTickCount >= 1) {
+        if (!_freezeNoticeLogged) {
+            _freezeNoticeLogged = YES;
+            LGIOS12ProviderLog(@"DIAG MODE 5 FREEZE_PROVIDER: one frame captured, "
+                               "all further SpringBoard capture is now permanently "
+                               "stopped. Metal redraw/dragging remain active.");
+        }
+        return;
+    }
+
     _isCapturing = YES;
     uint64_t tick = ++_captureTickCount;
     uint32_t sequence = ++_captureSequence;
@@ -757,6 +816,23 @@ typedef struct {
     size_t bytesPerRow = CGImageGetBytesPerRow(cgImageRef);
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     [texture replaceRegion:region mipmapLevel:0 withBytes:bytes bytesPerRow:bytesPerRow];
+
+    // ORIENTATION CHAIN, upload stage. Part B replaced MTKTextureLoader
+    // (which honored MTKTextureLoaderOptionOrigin=TopLeft) with this raw
+    // replaceRegion: path. replaceRegion: performs NO reorientation at all --
+    // byte row 0 becomes texture row 0. A CGImage's bytes start at its top
+    // row, so this is top-left origin and introduces no flip of its own. Any
+    // vertical inversion therefore comes from the capture CTM upstream, not
+    // from here. Logged once so this is verifiable on device rather than
+    // assumed.
+    static dispatch_once_t orientationOnce;
+    dispatch_once(&orientationOnce, ^{
+        LGIOS12ProviderLog(@"ORIENTATION upload path=replaceRegion(no-reorientation) "
+                           "origin=top-left(byte-row-0=texture-row-0) "
+                           "textureDims=%zux%zu bytesPerRow=%zu "
+                           "note=MTKTextureLoaderOptionOrigin no longer applies",
+                           width, height, bytesPerRow);
+    });
     CFRelease(data);
     return texture;
 }
@@ -958,13 +1034,27 @@ typedef struct {
     CGColorSpaceRelease(colorSpace);
 
     if (_captureContext) {
-        CGContextScaleCTM(_captureContext, scale, scale);
+        // ORIENTATION FIX (regression introduced by me in 7bf02a7, Part B).
+        //
+        // Part B replaced UIGraphicsBeginImageContextWithOptions with this
+        // hand-rolled CGBitmapContext to avoid a per-frame alloc. But
+        // UIGraphicsBeginImageContextWithOptions does not just allocate --
+        // it also installs a flip CTM (translate(0,height) + scale(1,-1)),
+        // because CoreGraphics bitmap contexts have their origin at the
+        // BOTTOM-left while UIKit/CALayer drawing assumes TOP-left. The Part B
+        // replacement applied only the scale and omitted that flip, so every
+        // UIKit/-renderInContext: draw since then has gone in vertically
+        // mirrored. That is the reported upside-down wallpaper, and it enters
+        // the pipeline here -- at composition, before upload and before any
+        // shader. Restoring the flip makes this context behave exactly like
+        // the UIGraphics one it replaced.
+        CGContextTranslateCTM(_captureContext, 0, pixelHeight);
+        CGContextScaleCTM(_captureContext, scale, -scale);
         _captureBufferPixelWidth = pixelWidth;
         _captureBufferPixelHeight = pixelHeight;
         _captureBufferBytesPerRow = bytesPerRow;
         LGIOS12ProviderLog(@"capture-buffer allocated pixels=%zux%zu scale=%.1f "
-                           "reason=%@", pixelWidth, pixelHeight, scale,
-                           _captureBufferPixelWidth ? @"size-changed" : @"first-use");
+                           "ctm=top-left-origin(flipped)", pixelWidth, pixelHeight, scale);
     } else {
         LGIOS12ProviderLog(@"capture-buffer allocation FAILED pixels=%zux%zu", pixelWidth, pixelHeight);
         _captureBufferPixelWidth = 0;
@@ -1052,11 +1142,31 @@ typedef struct {
         UIView *container = LGIOS12FindStableForegroundContainer(root, token, 14);
         if (container) {
             _cachedForegroundContainer = container;
-            LGIOS12ProviderLog(@"foreground source=stable-container class=%@ token=%@ "
-                               "bounds={%.0f,%.0f} transparentBase=%d",
-                               NSStringFromClass(container.class), token,
+            // Full runtime identity of the object actually selected -- not an
+            // assumption that the token matched something useful. If this
+            // never appears in the device log, NO stable container was found
+            // and the dynamic fallback below is what actually ran.
+            NSMutableArray<NSString *> *superChain = [NSMutableArray array];
+            UIView *walk = container.superview;
+            for (NSUInteger i = 0; i < 6 && walk; i++) {
+                [superChain addObject:NSStringFromClass(walk.class)];
+                walk = walk.superview;
+            }
+            LGIOS12ProviderLog(@"foreground STABLE-CONTAINER-SELECTED token=%@ class=%@ "
+                               "ptr=%p superclass=%@ isUIView=%d frame={%.0f,%.0f,%.0f,%.0f} "
+                               "bounds={%.0f,%.0f} window=%@ opaque=%d backgroundAlpha=%.3f "
+                               "subviews=%lu superChain=[%@]",
+                               token, NSStringFromClass(container.class), container,
+                               NSStringFromClass(container.superclass),
+                               [container isKindOfClass:UIView.class],
+                               container.frame.origin.x, container.frame.origin.y,
+                               container.frame.size.width, container.frame.size.height,
                                container.bounds.size.width, container.bounds.size.height,
-                               LGIOS12ViewHasTransparentBase(container));
+                               NSStringFromClass(container.window.class) ?: @"none",
+                               container.opaque,
+                               LGIOS12ViewBackgroundAlpha(container),
+                               (unsigned long)container.subviews.count,
+                               [superChain componentsJoinedByString:@"<-"]);
             if (description) {
                 *description = [NSString stringWithFormat:@"stable-container:%@",
                     NSStringFromClass(container.class)];
@@ -1442,7 +1552,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         [[UIColor blackColor] setFill];
         UIRectFill(screenBounds);
 
-        if (wallpaperWindow && LGIOS12_SOURCE_MODE != LGIOS12SourceModeForegroundOnly) {
+        if (wallpaperWindow && LGIOS12CurrentDiagMode() != 3) {
             drewWallpaperWindow = LGIOS12RenderWindowAtScreenPosition(
                 wallpaperWindow, context, screenBounds);
             if (drewWallpaperWindow) {
@@ -1451,14 +1561,14 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             }
         }
         if (!drewWallpaperWindow && wallpaper &&
-            LGIOS12_SOURCE_MODE != LGIOS12SourceModeForegroundOnly) {
+            LGIOS12CurrentDiagMode() != 3) {
             LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
             drewCPBitmap = YES;
             wallpaperSource = [NSString stringWithFormat:@"cpbitmap:%@",
                 _cachedWallpaperDecoder ?: @"unknown-decoder"];
         }
 
-        if (LGIOS12_SOURCE_MODE != LGIOS12SourceModeWallpaperOnly) {
+        if (LGIOS12CurrentDiagMode() != 2) {
             for (UIView *foregroundView in foregroundViews) {
                 if (LGIOS12RenderViewAtScreenPosition(foregroundView, context)) {
                     drewForeground = YES;
@@ -1470,7 +1580,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             foregroundSource = [NSString stringWithFormat:
                 @"transparent-icon-hierarchy:%@",
                 foregroundDescription ?: @"unknown"];
-        } else if (LGIOS12_SOURCE_MODE == LGIOS12SourceModeWallpaperOnly) {
+        } else if (LGIOS12CurrentDiagMode() == 2) {
             foregroundSource = @"skipped:wallpaper-only-diagnostic-mode";
         } else {
             // Last resort. NOTE: this no longer uses
@@ -1567,7 +1677,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                            foregroundSource,
                            (unsigned long)foregroundRenderCount,
                            usedWholeHostFallback, hostWindow.opaque,
-                           (unsigned long)LGIOS12_SOURCE_MODE,
+                           (unsigned long)LGIOS12CurrentDiagMode(),
                            usedWholeHostFallback
                                ? @"wallpaper+opaque-host-fallback"
                                : @"wallpaper+transparent-icon-foreground");

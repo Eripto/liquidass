@@ -25,3 +25,12 @@
 - (void)unregisterGlassViewForExclusion:(UIView *)glassView;
 
 @end
+
+// Diagnostic mode selection -- see the block comment in
+// LGIOS12LiveBackdropProvider.m for the full mode table and the plist path.
+// 0=NORMAL 1=RAW_BACKDROP 2=WALLPAPER_ONLY 3=FOREGROUND_ONLY
+// 4=COMPOSITE_RAW 5=FREEZE_PROVIDER 6=PROVIDER_OFF
+extern NSInteger LGIOS12CurrentDiagMode(void);
+// YES for modes 1-4: bypass the Liquid Glass shader and show the raw source
+// crop, so spatial/orientation errors can be seen before any glass math.
+extern BOOL LGIOS12DiagRawDisplay(void);

@@ -125,10 +125,15 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     if (!library) return self;
 
     id<MTLFunction> computeFunction =
-        [library newFunctionWithName:@"liquidGlassIOS12"];
+        [library newFunctionWithName:
+            LGIOS12DiagRawDisplay() ? @"rawBackdropIOS12" : @"liquidGlassIOS12"];
     _computePipeline = computeFunction
         ? [_device newComputePipelineStateWithFunction:computeFunction error:&error]
         : nil;
+    LGIOS12Log(@"DIAG kernel selected=%@ mode=%ld pipeline=%d",
+               LGIOS12DiagRawDisplay() ? @"rawBackdropIOS12(no-glass-shader)"
+                                        : @"liquidGlassIOS12(normal)",
+               (long)LGIOS12CurrentDiagMode(), _computePipeline != nil);
     _metalView = [[MTKView alloc] initWithFrame:self.bounds device:_device];
     _metalView.autoresizingMask = UIViewAutoresizingFlexibleWidth |
                                   UIViewAutoresizingFlexibleHeight;
@@ -550,6 +555,21 @@ LGIOS12EnsureStandaloneOverlayWindow(UIWindow *hostWindow) {
 }
 static void LGIOS12InstallOrUpdateTestSurface(void) {
     if (!LGIsIOS12() || !LGIsSpringBoardProcess()) return;
+
+    // MODE F (PROVIDER_OFF) control build: the standalone glass and its
+    // provider never start. Every other LiquidAss hook is untouched. If the
+    // whole-screen ghost rectangles still appear while swiping pages in this
+    // mode, they are pre-existing LiquidAss behavior and have nothing to do
+    // with the live-backdrop provider.
+    if (LGIOS12CurrentDiagMode() == 6) {
+        LGIOS12Log(@"DIAG MODE 6 PROVIDER_OFF: standalone glass/provider disabled. "
+                   "All other LiquidAss hooks unchanged. Swipe pages now -- if the "
+                   "rounded-rectangle corruption still occurs, the provider is not "
+                   "the cause.");
+        LGIOS12RemoveTestSurface();
+        return;
+    }
+
     LGReloadPreferences();
     BOOL enabled = LG_prefBool(@"Global.Enabled", NO);
     LGIOS12Log(@"LiquidAss: enabled=%@, liquidGlass=%@, iOS12 renderer selected backend=legacy-snapshot-metal",
