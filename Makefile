@@ -13,6 +13,14 @@ ifeq ($(strip $(TARGET_CODESIGN_FLAGS)),)
 TARGET_CODESIGN_FLAGS := -S
 endif
 export TARGET_CODESIGN TARGET_CODESIGN_FLAGS
+# Same non-Darwin-host reasoning as TARGET_CODESIGN above: a Linux build
+# host's default `ld` is GNU ld, which cannot link the Mach-O output Theos
+# produces here ("unrecognised emulation mode: llvm"). Only force the LLVM
+# Mach-O linker when we are not already on a Darwin host, so this has no
+# effect on an actual macOS/Xcode toolchain build.
+ifneq ($(shell uname -s),Darwin)
+export ADDITIONAL_LDFLAGS += -fuse-ld=lld
+endif
 # Several post-iOS-12 declarations are intentionally invoked through guarded
 # paths or supplied by LGCompatibility's add-if-missing runtime shims.
 export ADDITIONAL_CFLAGS += -Wno-unguarded-availability-new

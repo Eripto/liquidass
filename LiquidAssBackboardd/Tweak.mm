@@ -42,6 +42,7 @@ static void lglog(const char *fmt, ...) {
 #import <simd/simd.h>
 #import <mach-o/dyld.h>
 #import <mach/mach.h>
+#include <mach/mach_time.h>
 #import <os/lock.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
