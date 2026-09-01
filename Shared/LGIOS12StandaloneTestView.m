@@ -40,103 +40,6 @@ static void LGIOS12Log(NSString *format, ...) {
     LGDiagnosticLog(@"%@ %@", kLGIOS12DiagnosticsPrefix, message);
 }
 
-static NSString *LGIOS12HomeWallpaperPath(void) {
-    return @"/var/mobile/Library/SpringBoard/HomeBackground.cpbitmap";
-}
-
-static UIImage *LGIOS12DecodeCPBitmap(NSString *path) {
-    NSData *data = [NSData dataWithContentsOfFile:path];
-    if (![data isKindOfClass:NSData.class] || data.length < 24) return nil;
-
-    const uint8_t *bytes = data.bytes;
-    const NSUInteger length = data.length;
-    static const size_t trailerCandidates[] = { 20, 24, 28, 32 };
-    static const size_t alignmentCandidates[] = { 16, 8, 4 };
-    size_t width = 0, height = 0, linePixels = 0;
-    size_t selectedTrailer = 0, selectedAlignment = 0;
-
-    for (size_t ti = 0; ti < sizeof(trailerCandidates) / sizeof(trailerCandidates[0]); ti++) {
-        size_t trailer = trailerCandidates[ti];
-        if (length <= trailer) continue;
-        uint32_t widthLE = 0, heightLE = 0;
-        memcpy(&widthLE, bytes + length - trailer, sizeof(widthLE));
-        memcpy(&heightLE, bytes + length - trailer + sizeof(widthLE),
-               sizeof(heightLE));
-        size_t candidateWidth = CFSwapInt32LittleToHost(widthLE);
-        size_t candidateHeight = CFSwapInt32LittleToHost(heightLE);
-        if (!candidateWidth || !candidateHeight ||
-            candidateWidth > 10000 || candidateHeight > 10000) continue;
-
-        for (size_t ai = 0; ai < sizeof(alignmentCandidates) / sizeof(alignmentCandidates[0]); ai++) {
-            size_t alignment = alignmentCandidates[ai];
-            size_t candidateLinePixels =
-                ((candidateWidth + alignment - 1) / alignment) * alignment;
-            size_t required = candidateLinePixels * candidateHeight * 4;
-            if (required <= length - trailer) {
-                width = candidateWidth;
-                height = candidateHeight;
-                linePixels = candidateLinePixels;
-                selectedTrailer = trailer;
-                selectedAlignment = alignment;
-                break;
-            }
-        }
-        if (width && height) break;
-    }
-    if (!width || !height || !linePixels) {
-        LGIOS12Log(@"backdrop cpbitmap decode failed path=%@ reason=no-valid-layout",
-                   path);
-        return nil;
-    }
-
-    NSMutableData *rgba = [NSMutableData dataWithLength:width * height * 4];
-    uint8_t *destination = rgba.mutableBytes;
-    for (size_t y = 0; y < height; y++) {
-        const uint8_t *sourceRow = bytes + y * linePixels * 4;
-        uint8_t *destinationRow = destination + y * width * 4;
-        for (size_t x = 0; x < width; x++) {
-            const uint8_t *sourcePixel = sourceRow + x * 4;
-            uint8_t *destinationPixel = destinationRow + x * 4;
-            destinationPixel[0] = sourcePixel[2];
-            destinationPixel[1] = sourcePixel[1];
-            destinationPixel[2] = sourcePixel[0];
-            destinationPixel[3] = sourcePixel[3];
-        }
-    }
-
-    CGDataProviderRef provider =
-        CGDataProviderCreateWithCFData((__bridge CFDataRef)rgba);
-    if (!provider) return nil;
-    CGImageRef imageRef = CGImageCreate(width, height, 8, 32, width * 4,
-                                        LGSharedRGBColorSpace(),
-                                        kCGBitmapByteOrderDefault |
-                                            kCGImageAlphaLast,
-                                        provider, NULL, NO,
-                                        kCGRenderingIntentDefault);
-    CGDataProviderRelease(provider);
-    if (!imageRef) return nil;
-    CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
-    UIImage *image = [UIImage imageWithCGImage:imageRef
-                                         scale:screenScale
-                                   orientation:UIImageOrientationUp];
-    CGImageRelease(imageRef);
-    LGIOS12Log(@"backdrop cpbitmap decoded pixels=%zux%zu trailer=%zu alignment=%zu",
-               width, height, selectedTrailer, selectedAlignment);
-    return image;
-}
-
-static void LGIOS12DrawAspectFillImage(UIImage *image, CGRect bounds) {
-    if (!image || CGRectIsEmpty(bounds) ||
-        image.size.width <= 0.0 || image.size.height <= 0.0) return;
-    CGFloat scale = MAX(CGRectGetWidth(bounds) / image.size.width,
-                        CGRectGetHeight(bounds) / image.size.height);
-    CGSize size = CGSizeMake(image.size.width * scale, image.size.height * scale);
-    CGRect destination = CGRectMake(CGRectGetMidX(bounds) - size.width * 0.5,
-                                    CGRectGetMidY(bounds) - size.height * 0.5,
-                                    size.width, size.height);
-    [image drawInRect:destination];
-}
-
 static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     UIApplication *application = UIApplication.sharedApplication;
     NSArray<UIWindow *> *windows = [application.windows copy];
@@ -152,76 +55,6 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     return fallback ?: application.keyWindow;
 #pragma clang diagnostic pop
-}
-
-static __weak UIView *sLGIOS12TestViewForCapture;
-
-static UIImage *LGIOS12CaptureSpringBoardBackdrop(UIWindow *hostWindow,
-                                                   NSString **sourceDescription) {
-    if (!hostWindow) return nil;
-    CGRect screenBounds = UIScreen.mainScreen.bounds;
-    CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
-    UIView *testView = sLGIOS12TestViewForCapture;
-    BOOL wasHidden = testView.hidden;
-    testView.hidden = YES;
-
-    UIImage *wallpaper = LGIOS12DecodeCPBitmap(LGIOS12HomeWallpaperPath());
-    UIGraphicsBeginImageContextWithOptions(screenBounds.size, YES, screenScale);
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    [[UIColor blackColor] setFill];
-    UIRectFill(screenBounds);
-    BOOL drewWallpaper = wallpaper != nil;
-    if (wallpaper) LGIOS12DrawAspectFillImage(wallpaper, screenBounds);
-
-    NSArray<UIWindow *> *windows = [[UIApplication sharedApplication].windows
-        sortedArrayUsingComparator:^NSComparisonResult(UIWindow *left,
-                                                         UIWindow *right) {
-            if (left.windowLevel < right.windowLevel) return NSOrderedAscending;
-            if (left.windowLevel > right.windowLevel) return NSOrderedDescending;
-            return NSOrderedSame;
-        }];
-    NSUInteger drawnWindows = 0;
-    for (UIWindow *window in windows) {
-        if (window.hidden || window.alpha <= 0.01 ||
-            window.windowLevel > hostWindow.windowLevel + 0.01) continue;
-        NSString *className = NSStringFromClass(window.class);
-        if ([className containsString:@"Keyboard"] ||
-            [className containsString:@"TextEffects"]) continue;
-
-        CGRect frame = window.frame;
-        if (CGRectIsEmpty(frame)) frame = screenBounds;
-        CGContextSaveGState(context);
-        CGContextTranslateCTM(context, CGRectGetMinX(frame), CGRectGetMinY(frame));
-        BOOL drewHierarchy = [window drawViewHierarchyInRect:window.bounds
-                                          afterScreenUpdates:NO];
-        if (!drewHierarchy) [window.layer renderInContext:context];
-        CGContextRestoreGState(context);
-        drawnWindows++;
-        if (window == hostWindow) break;
-    }
-
-    UIImage *snapshot = (drewWallpaper || drawnWindows)
-        ? UIGraphicsGetImageFromCurrentImageContext() : nil;
-    UIGraphicsEndImageContext();
-    testView.hidden = wasHidden;
-
-    CGImageRef imageRef = snapshot.CGImage;
-    if (!imageRef || !CGImageGetWidth(imageRef) || !CGImageGetHeight(imageRef)) {
-        LGIOS12Log(@"backdrop capture success=0 wallpaper=%d windows=%lu",
-                   drewWallpaper, (unsigned long)drawnWindows);
-        return nil;
-    }
-    if (sourceDescription) {
-        *sourceDescription = [NSString stringWithFormat:@"%@+%lu-window%@",
-            drewWallpaper ? @"cpbitmap" : @"window-hierarchy",
-            (unsigned long)drawnWindows, drawnWindows == 1 ? @"" : @"s"];
-    }
-    LGIOS12Log(@"backdrop capture success=1 source=%@ points={%.0f,%.0f} pixels={%zu,%zu} scale=%.2f",
-               sourceDescription ? *sourceDescription : @"unknown",
-               snapshot.size.width, snapshot.size.height,
-               CGImageGetWidth(imageRef), CGImageGetHeight(imageRef),
-               snapshot.scale);
-    return snapshot;
 }
 
 static NSString * const kLGIOS12MetalSource = @
@@ -304,10 +137,12 @@ static NSString * const kLGIOS12MetalSource = @
 "  constexpr sampler s(filter::linear,address::clamp_to_edge); return image.sample(s,in.uv);\n"
 "}\n";
 
-@interface LGIOS12FloatingGlassTestView : UIView <MTKViewDelegate>
+#import "LGIOS12LiveBackdropProvider.h"
+
+@interface LGIOS12FloatingGlassTestView : UIView <MTKViewDelegate, LGIOS12LiveBackdropClient>
 @property (nonatomic, readonly) BOOL rendererReady;
-- (instancetype)initWithFrame:(CGRect)frame backdropImage:(UIImage *)image;
-- (void)refreshBackdropImage:(UIImage *)image source:(NSString *)source;
+@property (nonatomic, readonly) BOOL metalInitialized;
+- (instancetype)initWithFrame:(CGRect)frame;
 @end
 
 @implementation LGIOS12FloatingGlassTestView {
@@ -326,7 +161,7 @@ static NSString * const kLGIOS12MetalSource = @
     BOOL _rendererReady;
 }
 
-- (instancetype)initWithFrame:(CGRect)frame backdropImage:(UIImage *)image {
+- (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (!self) return nil;
     self.backgroundColor = UIColor.clearColor;
@@ -337,7 +172,7 @@ static NSString * const kLGIOS12MetalSource = @
     self.layer.shadowRadius = 16.0;
     self.layer.shadowOffset = CGSizeMake(0.0, 8.0);
 
-    _device = MTLCreateSystemDefaultDevice();
+    _device = [LGIOS12LiveBackdropProvider sharedProvider].device;
     LGIOS12Log(@"Metal device creation success=%d device=%@",
                _device != nil, _device.name ?: @"nil");
     if (!_device) return self;
@@ -412,31 +247,33 @@ static NSString * const kLGIOS12MetalSource = @
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
         initWithTarget:self action:@selector(handlePan:)];
     [self addGestureRecognizer:pan];
-    [self refreshBackdropImage:image source:@"initial-capture"];
-    _rendererReady = _backdropTexture != nil;
+    [[LGIOS12LiveBackdropProvider sharedProvider] registerClient:self];
+    [[LGIOS12LiveBackdropProvider sharedProvider] registerGlassViewForExclusion:self];
+    self.hidden = YES;
     return self;
 }
 
-- (BOOL)rendererReady { return _rendererReady; }
 
-- (void)refreshBackdropImage:(UIImage *)image source:(NSString *)source {
-    if (!_device || !image.CGImage) return;
-    NSError *error = nil;
-    MTKTextureLoader *loader = [[MTKTextureLoader alloc]
-        initWithDevice:_device];
-    NSDictionary *options = @{
-        MTKTextureLoaderOptionSRGB: @NO,
-        MTKTextureLoaderOptionOrigin: MTKTextureLoaderOriginTopLeft,
-    };
-    id<MTLTexture> texture = [loader newTextureWithCGImage:image.CGImage
-                                                   options:options error:&error];
-    if (!texture) {
-        LGIOS12Log(@"MTLTexture acquired success=0 source=%@ error=%@",
-                   source, error.localizedDescription ?: @"unknown");
+- (BOOL)rendererReady { return _rendererReady; }
+- (BOOL)metalInitialized { return _computePipeline && _presentPipeline && _commandQueue; }
+- (void)dealloc {
+    [[LGIOS12LiveBackdropProvider sharedProvider] unregisterClient:self];
+    [[LGIOS12LiveBackdropProvider sharedProvider] unregisterGlassViewForExclusion:self];
+}
+
+
+
+- (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
+    if (!texture) return;
+    if (texture.device != _device) {
+        LGIOS12Log(@"MTLTexture rejected: device mismatch (texture device=%@, renderer device=%@)", texture.device.name ?: @"nil", _device.name ?: @"nil");
         return;
     }
     _backdropTexture = texture;
-    _rendererReady = _computePipeline && _presentPipeline && _commandQueue;
+    _rendererReady = _computePipeline && _presentPipeline && _commandQueue && _backdropTexture != nil;
+    if (_rendererReady && self.hidden) {
+        self.hidden = NO;
+    }
     LGIOS12Log(@"MTLTexture acquired success=1 source=%@ dimensions=%lux%lu format=%lu usage=%lu",
                source, (unsigned long)texture.width,
                (unsigned long)texture.height,
@@ -445,6 +282,11 @@ static NSString * const kLGIOS12MetalSource = @
     [_metalView draw];
 }
 
+- (void)providerDidFailToUpdateBackdrop:(NSError *)error {
+    LGIOS12Log(@"MTLTexture acquired success=0 error=%@", error.localizedDescription ?: @"unknown");
+}
+
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     _metalView.frame = self.bounds;
@@ -452,11 +294,13 @@ static NSString * const kLGIOS12MetalSource = @
     [_metalView draw];
 }
 
+
 - (void)handlePan:(UIPanGestureRecognizer *)recognizer {
     CGPoint point = [recognizer locationInView:self.superview];
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         _panOffset = CGPointMake(point.x - self.center.x,
                                  point.y - self.center.y);
+        [[LGIOS12LiveBackdropProvider sharedProvider] setNeedsActiveRefresh:YES];
     } else if (recognizer.state == UIGestureRecognizerStateChanged) {
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
@@ -464,8 +308,14 @@ static NSString * const kLGIOS12MetalSource = @
                                   point.y - _panOffset.y);
         [CATransaction commit];
         [_metalView draw];
+    } else if (recognizer.state == UIGestureRecognizerStateEnded ||
+               recognizer.state == UIGestureRecognizerStateCancelled ||
+               recognizer.state == UIGestureRecognizerStateFailed) {
+        [[LGIOS12LiveBackdropProvider sharedProvider] setNeedsActiveRefresh:NO];
+        [[LGIOS12LiveBackdropProvider sharedProvider] requestRefresh];
     }
 }
+
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
     _outputTexture = nil;
@@ -610,14 +460,16 @@ static void LGIOS12LogLiveCAFilterStages(void) {
     LGIOS12Log(@"custom CAFilter render callback executed status=NO backend=legacy-snapshot");
 }
 
+
 static void LGIOS12RemoveTestSurface(void) {
     if (!sLGIOS12TestView) return;
     LGIOS12Log(@"remove test surface view=%@ superview=%@",
                sLGIOS12TestView, sLGIOS12TestView.superview);
     [sLGIOS12TestView removeFromSuperview];
-    sLGIOS12TestViewForCapture = nil;
     sLGIOS12TestView = nil;
 }
+
+
 
 static void LGIOS12InstallOrUpdateTestSurface(void) {
     if (!LGIsIOS12() || !LGIsSpringBoardProcess()) return;
@@ -637,17 +489,8 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
                hostWindow.hidden, hostWindow.alpha);
     if (!hostWindow) return;
 
-    NSString *captureSource = nil;
-    UIImage *backdrop = LGIOS12CaptureSpringBoardBackdrop(hostWindow,
-                                                          &captureSource);
-    if (!backdrop) {
-        LGIOS12Log(@"standalone install aborted reason=backdrop-capture-failed stockUI=untouched");
-        return;
-    }
-
     if (sLGIOS12TestView) {
-        [sLGIOS12TestView refreshBackdropImage:backdrop
-                                         source:captureSource ?: @"refresh"];
+        [[LGIOS12LiveBackdropProvider sharedProvider] requestRefresh];
         return;
     }
 
@@ -658,12 +501,12 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
                               CGRectGetHeight(hostWindow.bounds) * 0.28,
                               side, side);
     LGIOS12FloatingGlassTestView *test =
-        [[LGIOS12FloatingGlassTestView alloc] initWithFrame:frame
-                                             backdropImage:backdrop];
-    LGIOS12Log(@"LiquidGlassView allocation class=%@ success=%d frame=%@ rendererReady=%d",
+        [[LGIOS12FloatingGlassTestView alloc] initWithFrame:frame];
+
+    LGIOS12Log(@"LiquidGlassView allocation class=%@ success=%d frame=%@ metalInitialized=%d",
                NSStringFromClass(test.class), test != nil,
-               NSStringFromCGRect(frame), test.rendererReady);
-    if (!test || !test.rendererReady) {
+               NSStringFromCGRect(frame), test.metalInitialized);
+    if (!test || !test.metalInitialized) {
         LGIOS12Log(@"standalone install aborted reason=renderer-init-failed stockUI=untouched");
         return;
     }
@@ -671,7 +514,6 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
     test.layer.zPosition = 10000.0;
     [hostWindow addSubview:test];
     sLGIOS12TestView = test;
-    sLGIOS12TestViewForCapture = test;
     LGIOS12Log(@"addSubview complete view=%@ superview=%@ window=%@ hidden=%d alpha=%.3f frame=%@ z=%.1f",
                test, NSStringFromClass(test.superview.class),
                NSStringFromClass(test.window.class), test.hidden, test.alpha,
@@ -679,6 +521,7 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
     [test setNeedsLayout];
     [test layoutIfNeeded];
 }
+
 
 static void LGIOS12TestPrefsReloaded(CFNotificationCenterRef center,
                                      void *observer, CFStringRef name,
