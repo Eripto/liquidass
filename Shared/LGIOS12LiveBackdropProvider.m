@@ -116,11 +116,9 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
         if (active) {
             if (!self->_displayLink && self->_clients.count > 0) {
                 self->_displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkFired:)];
-                if ([self->_displayLink respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
-                    self->_displayLink.preferredFramesPerSecond = 10;
-                } else {
-                    self->_displayLink.frameInterval = 6; // 60/6 = 10 fps
-                }
+                // preferredFramesPerSecond is available throughout the
+                // project's iOS 12+ deployment range.
+                self->_displayLink.preferredFramesPerSecond = 10;
                 [self->_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
                 LGIOS12ProviderLog(@"Active refresh loop started (target: %.1f FPS)", 1.0 / self->_targetRefreshInterval);
             }
@@ -303,7 +301,6 @@ static NSString *LGIOS12HomeWallpaperPathProvider(void) {
     static const size_t trailerCandidates[] = { 20, 24, 28, 32 };
     static const size_t alignmentCandidates[] = { 16, 8, 4 };
     size_t width = 0, height = 0, linePixels = 0;
-    size_t selectedTrailer = 0, selectedAlignment = 0;
 
     for (size_t ti = 0; ti < sizeof(trailerCandidates) / sizeof(trailerCandidates[0]); ti++) {
         size_t trailer = trailerCandidates[ti];
@@ -326,8 +323,6 @@ static NSString *LGIOS12HomeWallpaperPathProvider(void) {
                 width = candidateWidth;
                 height = candidateHeight;
                 linePixels = candidateLinePixels;
-                selectedTrailer = trailer;
-                selectedAlignment = alignment;
                 break;
             }
         }

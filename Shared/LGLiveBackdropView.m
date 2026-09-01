@@ -95,7 +95,8 @@ static CFStringRef const kLGMotionPrefsReloadNotification = CFSTR("dylv.liquidas
 static void LGApplyMotionHighlightAngle(void);
 static void LGRefreshMotionHighlights(void);
 static void LGEnsureFilterRefreshObserver(void);
-void LGUpdateMaterialReplacement(UIView *material, LGLiveBackdropView *glass);
+static void LGUpdateMaterialReplacement(UIView *material,
+                                        LGLiveBackdropView *glass);
 
 
 static BOOL LGIsSpringBoardBundle(void) {
