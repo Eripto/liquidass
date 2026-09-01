@@ -50,6 +50,15 @@ typedef struct {
     NSTimeInterval _targetRefreshInterval;
 
     BOOL _isCapturing;
+    BOOL _refreshPending;
+    BOOL _refreshDirty;
+
+    UIImage *_cachedWallpaperImage;
+    NSDate *_cachedWallpaperModificationDate;
+    NSNumber *_cachedWallpaperFileSize;
+    BOOL _wallpaperCacheAttemptedForMetadata;
+    uint64_t _wallpaperCacheHitCount;
+    NSString *_wallpaperCacheLastUnavailableReason;
 
     // Performance diagnostics
     uint64_t _totalCaptureTime;
@@ -100,6 +109,16 @@ typedef struct {
     return _activeClients.allObjects.count;
 }
 
+- (void)pruneWeakClientStateForReason:(NSString *)reason {
+    // allObjects returns only live weak entries and compacts zeroed slots.
+    // This lets delayed cleanup react to a vanished client without retaining
+    // or dereferencing the object that was executing dealloc.
+    (void)_clients.allObjects;
+    (void)_activeClients.allObjects;
+    (void)_excludedGlassViews.allObjects;
+    [self updateRefreshLoopForReason:reason ?: @"weak-client-prune"];
+}
+
 - (void)updateRefreshLoopForReason:(NSString *)reason {
     NSUInteger activeCount = [self activeClientCount];
     NSUInteger registeredCount = _clients.allObjects.count;
@@ -144,17 +163,32 @@ typedef struct {
 
 - (void)unregisterClient:(id<LGIOS12LiveBackdropClient>)client {
     if (!client) return;
-    LGIOS12ProviderRunOnMain(^{
-        BOOL wasActive = [self->_activeClients containsObject:client];
-        [self->_activeClients removeObject:client];
-        [self->_clients removeObject:client];
+    void (^removeLiveClient)(id<LGIOS12LiveBackdropClient>) =
+        ^(id<LGIOS12LiveBackdropClient> liveClient) {
+        BOOL wasActive = [self->_activeClients containsObject:liveClient];
+        [self->_activeClients removeObject:liveClient];
+        [self->_clients removeObject:liveClient];
         if (wasActive) {
             LGIOS12ProviderLog(@"active-client event=unregister class=%@ active=%lu registered=%lu",
-                               NSStringFromClass([client class]),
+                               NSStringFromClass([liveClient class]),
                                (unsigned long)[self activeClientCount],
                                (unsigned long)self->_clients.allObjects.count);
         }
         [self updateRefreshLoopForReason:@"client-unregistered"];
+    };
+    if (NSThread.isMainThread) {
+        removeLiveClient(client);
+        return;
+    }
+
+    // A weak capture is essential here: unregister may be requested while a
+    // client is tearing down.  If it dies before the main-queue block runs,
+    // prune the provider's weak tables without touching a dangling pointer.
+    __weak id<LGIOS12LiveBackdropClient> weakClient = client;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        id<LGIOS12LiveBackdropClient> liveClient = weakClient;
+        if (liveClient) removeLiveClient(liveClient);
+        else [self pruneWeakClientStateForReason:@"client-deallocated-before-unregister"];
     });
 }
 
@@ -193,8 +227,15 @@ typedef struct {
 
 - (void)unregisterGlassViewForExclusion:(UIView *)glassView {
     if (!glassView) return;
-    LGIOS12ProviderRunOnMain(^{
-        [self->_excludedGlassViews removeObject:glassView];
+    if (NSThread.isMainThread) {
+        [_excludedGlassViews removeObject:glassView];
+        return;
+    }
+    __weak UIView *weakGlassView = glassView;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIView *liveGlassView = weakGlassView;
+        if (liveGlassView) [self->_excludedGlassViews removeObject:liveGlassView];
+        else [self pruneWeakClientStateForReason:@"excluded-view-deallocated-before-unregister"];
     });
 }
 
@@ -224,7 +265,26 @@ typedef struct {
 }
 
 - (void)requestRefresh {
-    LGIOS12ProviderRunOnMain(^{
+    @synchronized (self) {
+        _refreshDirty = YES;
+        if (_refreshPending) return;
+        _refreshPending = YES;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BOOL shouldCapture = NO;
+        BOOL captureBusy = self->_isCapturing;
+        @synchronized (self) {
+            self->_refreshPending = NO;
+            shouldCapture = self->_refreshDirty;
+            if (shouldCapture && !captureBusy) self->_refreshDirty = NO;
+        }
+        if (!shouldCapture) return;
+        if (captureBusy) {
+            // Preserve a request made re-entrantly during texture delivery.
+            // A single follow-up block will run after the synchronous capture.
+            [self requestRefresh];
+            return;
+        }
         [self performCaptureAndUpload];
     });
 }
@@ -455,6 +515,79 @@ static NSString *LGIOS12HomeWallpaperPathProvider(void) {
     return image;
 }
 
+- (UIImage *)cachedDecodedWallpaperAtPath:(NSString *)path {
+    NSError *attributesError = nil;
+    NSDictionary<NSFileAttributeKey, id> *attributes =
+        [[NSFileManager defaultManager] attributesOfItemAtPath:path
+                                                         error:&attributesError];
+    NSDate *modificationDate = attributes[NSFileModificationDate];
+    NSNumber *fileSize = attributes[NSFileSize];
+    if (!modificationDate || !fileSize) {
+        NSString *reason = attributesError
+            ? [NSString stringWithFormat:@"metadata-unavailable:%ld",
+                (long)attributesError.code]
+            : @"metadata-incomplete";
+        if (_wallpaperCacheAttemptedForMetadata || _cachedWallpaperImage) {
+            LGIOS12ProviderLog(@"wallpaper cache=invalidate reason=%@ previousModified=%@ previousSize=%@",
+                               reason,
+                               _cachedWallpaperModificationDate ?: @"none",
+                               _cachedWallpaperFileSize ?: @"none");
+        }
+        _cachedWallpaperImage = nil;
+        _cachedWallpaperModificationDate = nil;
+        _cachedWallpaperFileSize = nil;
+        _wallpaperCacheAttemptedForMetadata = NO;
+        if (![_wallpaperCacheLastUnavailableReason isEqualToString:reason]) {
+            _wallpaperCacheLastUnavailableReason = reason;
+            LGIOS12ProviderLog(@"wallpaper cache=miss/redecode success=0 reason=%@ path=%@ fallback=host-window-or-black",
+                               reason, path);
+        }
+        return nil;
+    }
+
+    _wallpaperCacheLastUnavailableReason = nil;
+    BOOL metadataMatches = _wallpaperCacheAttemptedForMetadata &&
+        [_cachedWallpaperModificationDate isEqualToDate:modificationDate] &&
+        [_cachedWallpaperFileSize isEqualToNumber:fileSize];
+    if (metadataMatches) {
+        uint64_t hit = ++_wallpaperCacheHitCount;
+        if (LGIOS12ProviderShouldLogSequence(hit)) {
+            LGIOS12ProviderLog(@"wallpaper cache=hit count=%llu decoded=%d modified=%@ size=%@",
+                               (unsigned long long)hit,
+                               _cachedWallpaperImage != nil,
+                               modificationDate, fileSize);
+        }
+        return _cachedWallpaperImage;
+    }
+
+    NSString *reason = @"cold-cache";
+    if (_wallpaperCacheAttemptedForMetadata) {
+        if (![_cachedWallpaperModificationDate isEqualToDate:modificationDate])
+            reason = @"file-modification-date-changed";
+        else if (![_cachedWallpaperFileSize isEqualToNumber:fileSize])
+            reason = @"file-size-changed";
+        else
+            reason = @"metadata-changed";
+        LGIOS12ProviderLog(@"wallpaper cache=invalidate reason=%@ previousModified=%@ currentModified=%@ previousSize=%@ currentSize=%@",
+                           reason,
+                           _cachedWallpaperModificationDate ?: @"none",
+                           modificationDate,
+                           _cachedWallpaperFileSize ?: @"none",
+                           fileSize);
+    }
+
+    UIImage *decoded = [self decodeCPBitmap:path];
+    _cachedWallpaperImage = decoded;
+    _cachedWallpaperModificationDate = modificationDate;
+    _cachedWallpaperFileSize = fileSize;
+    _wallpaperCacheAttemptedForMetadata = YES;
+    _wallpaperCacheHitCount = 0;
+    LGIOS12ProviderLog(@"wallpaper cache=miss/redecode success=%d reason=%@ modified=%@ size=%@ dimensions={%.0f,%.0f}",
+                       decoded != nil, reason, modificationDate, fileSize,
+                       decoded.size.width, decoded.size.height);
+    return decoded;
+}
+
 static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     if (!image || CGRectIsEmpty(bounds) ||
         image.size.width <= 0.0 || image.size.height <= 0.0) return;
@@ -476,7 +609,8 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     CGRect screenBounds = UIScreen.mainScreen.bounds;
     CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
 
-    UIImage *wallpaper = [self decodeCPBitmap:LGIOS12HomeWallpaperPathProvider()];
+    UIImage *wallpaper = [self cachedDecodedWallpaperAtPath:
+        LGIOS12HomeWallpaperPathProvider()];
 
     LGIOS12CaptureStats captureStats = { 0 };
     captureStats.excludedGlassCount = excludedViews.count;

@@ -92,6 +92,7 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     BOOL _loggedRenderCallback;
     BOOL _loggedUniforms;
     BOOL _rendererReady;
+    NSMutableDictionary<NSString *, NSNumber *> *_earlyReturnCounts;
     uint64_t _textureDeliveryCount;
     uint64_t _metalRedrawCount;
 }
@@ -191,11 +192,16 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 
 - (BOOL)rendererReady { return _rendererReady; }
 - (BOOL)metalInitialized { return _computePipeline && _presentPipeline && _commandQueue; }
-- (void)dealloc {
-    [[LGIOS12LiveBackdropProvider sharedProvider]
-        setClient:self requestsContinuousRefresh:NO];
-    [[LGIOS12LiveBackdropProvider sharedProvider] unregisterClient:self];
-    [[LGIOS12LiveBackdropProvider sharedProvider] unregisterGlassViewForExclusion:self];
+
+- (void)willMoveToWindow:(UIWindow *)newWindow {
+    if (!newWindow) {
+        LGIOS12LiveBackdropProvider *provider =
+            [LGIOS12LiveBackdropProvider sharedProvider];
+        [provider setClient:self requestsContinuousRefresh:NO];
+        [provider unregisterGlassViewForExclusion:self];
+        [provider unregisterClient:self];
+    }
+    [super willMoveToWindow:newWindow];
 }
 
 - (void)updateContinuousRefreshState {
@@ -207,6 +213,12 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
+    if (self.window) {
+        LGIOS12LiveBackdropProvider *provider =
+            [LGIOS12LiveBackdropProvider sharedProvider];
+        [provider registerClient:self];
+        [provider registerGlassViewForExclusion:self];
+    }
     [self updateContinuousRefreshState];
 }
 
@@ -218,6 +230,18 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 - (void)setAlpha:(CGFloat)alpha {
     [super setAlpha:alpha];
     [self updateContinuousRefreshState];
+}
+
+- (void)logMetalEarlyReturn:(NSString *)reason {
+    if (!reason.length) return;
+    if (!_earlyReturnCounts) _earlyReturnCounts = [NSMutableDictionary dictionary];
+    uint64_t count = [_earlyReturnCounts[reason] unsignedLongLongValue] + 1;
+    _earlyReturnCounts[reason] = @(count);
+    if (LGIOS12ShouldLogSequence(count)) {
+        LGIOS12Log(@"render early-return reason=%@ count=%llu rendererReady=%d attached=%d hidden=%d alpha=%.3f",
+                   reason, (unsigned long long)count, _rendererReady,
+                   self.window != nil, self.hidden, self.alpha);
+    }
 }
 
 
@@ -284,7 +308,18 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 }
 
 - (void)drawInMTKView:(MTKView *)view {
-    if (!_rendererReady || !_backdropTexture || CGRectIsEmpty(self.bounds)) return;
+    if (!_rendererReady) {
+        [self logMetalEarlyReturn:@"renderer-not-ready"];
+        return;
+    }
+    if (!_backdropTexture) {
+        [self logMetalEarlyReturn:@"backdrop-texture-missing"];
+        return;
+    }
+    if (CGRectIsEmpty(self.bounds)) {
+        [self logMetalEarlyReturn:@"metal-view-bounds-empty"];
+        return;
+    }
     if (!_loggedRenderCallback) {
         _loggedRenderCallback = YES;
         LGIOS12Log(@"custom render callback executed backend=legacy callback=drawInMTKView");
@@ -293,8 +328,8 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     id<CAMetalDrawable> drawable = view.currentDrawable;
     MTLRenderPassDescriptor *renderPass = view.currentRenderPassDescriptor;
     if (!drawable || !renderPass) {
-        LGIOS12Log(@"render pass aborted drawable=%d descriptor=%d",
-                   drawable != nil, renderPass != nil);
+        if (!drawable) [self logMetalEarlyReturn:@"no-current-drawable"];
+        if (!renderPass) [self logMetalEarlyReturn:@"no-render-pass-descriptor"];
         return;
     }
     NSUInteger width = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.width));
@@ -311,7 +346,10 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
                    _outputTexture != nil, (unsigned long)width,
                    (unsigned long)height);
     }
-    if (!_outputTexture) return;
+    if (!_outputTexture) {
+        [self logMetalEarlyReturn:@"output-texture-allocation-failed"];
+        return;
+    }
 
     CGRect screenRect = [self convertRect:self.bounds toView:nil];
     CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
@@ -348,13 +386,13 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     if (!commandBuffer) {
-        LGIOS12Log(@"render pass aborted reason=command-buffer-allocation-failed");
+        [self logMetalEarlyReturn:@"command-buffer-allocation-failed"];
         return;
     }
     id<MTLComputeCommandEncoder> compute =
         [commandBuffer computeCommandEncoder];
     if (!compute) {
-        LGIOS12Log(@"render pass aborted reason=compute-encoder-allocation-failed");
+        [self logMetalEarlyReturn:@"compute-encoder-allocation-failed"];
         return;
     }
     [compute setComputePipelineState:_computePipeline];
@@ -369,7 +407,7 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     id<MTLRenderCommandEncoder> present =
         [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
     if (!present) {
-        LGIOS12Log(@"render pass aborted reason=present-encoder-allocation-failed");
+        [self logMetalEarlyReturn:@"render-encoder-allocation-failed"];
         return;
     }
     [present setRenderPipelineState:_presentPipeline];
@@ -434,8 +472,11 @@ static void LGIOS12RemoveTestSurface(void) {
         LGIOS12Log(@"remove test surface view=%@ superview=%@ overlay=%@",
                    sLGIOS12TestView, sLGIOS12TestView.superview,
                    sLGIOS12OverlayWindow);
-        [[LGIOS12LiveBackdropProvider sharedProvider]
-            setClient:sLGIOS12TestView requestsContinuousRefresh:NO];
+        LGIOS12LiveBackdropProvider *provider =
+            [LGIOS12LiveBackdropProvider sharedProvider];
+        [provider setClient:sLGIOS12TestView requestsContinuousRefresh:NO];
+        [provider unregisterGlassViewForExclusion:sLGIOS12TestView];
+        [provider unregisterClient:sLGIOS12TestView];
         sLGIOS12TestView.hidden = YES;
         [sLGIOS12TestView removeFromSuperview];
         sLGIOS12TestView = nil;

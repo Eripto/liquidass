@@ -29,6 +29,9 @@ static BOOL LGIOS12LiveShouldLogSequence(uint64_t sequence) {
     return sequence <= 3 || (sequence % 30) == 0;
 }
 
+static const NSUInteger kLGIOS12RendererFailureThreshold = 3;
+static const CFTimeInterval kLGIOS12RendererStallTimeout = 2.0;
+
 static NSDictionary<NSString *, id> *sLGGlassPreferences;
 
 static NSString *LGGlassPreferencesPath(void) {
@@ -331,7 +334,12 @@ static CGFloat LGScaleForSize(CGSize s) {
 - (void)applySpecularAngle:(CGFloat)angle;
 - (void)reapplyFilterForParameterReload;
 - (void)updateIOS12ContinuousRefreshState;
-- (void)markIOS12MetalRendererUnhealthyForReason:(NSString *)reason;
+- (void)transitionIOS12MetalRendererReady:(BOOL)ready
+                                   reason:(NSString *)reason;
+- (void)recordIOS12MetalRenderFailure:(NSString *)reason
+                            immediate:(BOOL)immediate;
+- (void)recordIOS12MetalRenderSuccess:(NSString *)reason;
+- (void)logIOS12MetalEarlyReturn:(NSString *)reason;
 @end
 
 static void LGRefreshAllLiveGlasses(NSString *reason) {
@@ -547,6 +555,11 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
     BOOL _metalInitializationFailed;
     BOOL _hasRenderedFirstFrame;
     BOOL _metalRendererHealthy;
+    CFTimeInterval _lastSuccessfulFrameTime;
+    NSUInteger _consecutiveRenderFailures;
+    NSTimer *_ios12LivenessTimer;
+    BOOL _ios12ApplicationInBackground;
+    NSMutableDictionary<NSString *, NSNumber *> *_ios12EarlyReturnCounts;
     uint64_t _ios12TextureDeliveryCount;
     uint64_t _ios12MetalRedrawCount;
 }
@@ -657,6 +670,12 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
         } else {
             _metalInitializationFailed = YES;
         }
+        [[NSNotificationCenter defaultCenter]
+            addObserver:self selector:@selector(lgIOS12ApplicationDidEnterBackground:)
+                   name:UIApplicationDidEnterBackgroundNotification object:nil];
+        [[NSNotificationCenter defaultCenter]
+            addObserver:self selector:@selector(lgIOS12ApplicationWillEnterForeground:)
+                   name:UIApplicationWillEnterForegroundNotification object:nil];
     }
 
     LGEnsureFilterRefreshObserver();
@@ -670,8 +689,25 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 - (BOOL)lgRendererReady {
     if (!LGIsIOS12()) return YES;
     if (_metalView && !_metalInitializationFailed) {
+        CFTimeInterval now = CACurrentMediaTime();
+        BOOL successIsFresh = _lastSuccessfulFrameTime > 0.0 &&
+            (now - _lastSuccessfulFrameTime) <=
+                kLGIOS12RendererStallTimeout;
+        if (_metalRendererHealthy && !successIsFresh) {
+            if (NSThread.isMainThread) {
+                [self transitionIOS12MetalRendererReady:NO
+                                                 reason:@"metal-success-stalled"];
+            } else {
+                __weak typeof(self) weakSelf = self;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [weakSelf transitionIOS12MetalRendererReady:NO
+                                                          reason:@"metal-success-stalled"];
+                });
+            }
+        }
         UIWindow *window = self.window;
         return _hasRenderedFirstFrame && _metalRendererHealthy &&
+               successIsFresh && !_ios12ApplicationInBackground &&
                _backdropTexture && _backdropTexture.device == _device &&
                window && !window.hidden && window.alpha > 0.01 &&
                _metalView.window == window && !_metalView.hidden &&
@@ -698,21 +734,39 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 }
 
 - (void)dealloc {
+    [_ios12LivenessTimer invalidate];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     LGRestoreMaterialReplacement(self.lgInjectedMaterial, self,
                                  @"glass-dealloc");
-    if (LGIsIOS12()) {
-        [[LGIOS12LiveBackdropProvider sharedProvider]
-            setClient:self requestsContinuousRefresh:NO];
-        [[LGIOS12LiveBackdropProvider sharedProvider] unregisterClient:self];
-        [[LGIOS12LiveBackdropProvider sharedProvider] unregisterGlassViewForExclusion:self];
-    }
+    // Provider tables are weak.  Explicit provider teardown happens while the
+    // view is still alive in willMoveToWindow:nil; dealloc must not enqueue a
+    // block that retains or later dereferences this object.
     [sLGAllGlasses removeObject:self];
     [sLGMotionGlasses removeObject:self];
 }
 
+- (void)willMoveToWindow:(UIWindow *)newWindow {
+    if (LGIsIOS12() && !newWindow) {
+        [self transitionIOS12MetalRendererReady:NO reason:@"glass-window-detached"];
+        LGIOS12LiveBackdropProvider *provider =
+            [LGIOS12LiveBackdropProvider sharedProvider];
+        [provider setClient:self requestsContinuousRefresh:NO];
+        [provider unregisterGlassViewForExclusion:self];
+        [provider unregisterClient:self];
+    }
+    [super willMoveToWindow:newWindow];
+}
+
 - (void)didMoveToWindow {
     [super didMoveToWindow];
-    if (LGIsIOS12()) _metalRendererHealthy = NO;
+    if (LGIsIOS12() && self.window) {
+        [self transitionIOS12MetalRendererReady:NO
+                                         reason:@"glass-window-attached-awaiting-frame"];
+        LGIOS12LiveBackdropProvider *provider =
+            [LGIOS12LiveBackdropProvider sharedProvider];
+        [provider registerClient:self];
+        [provider registerGlassViewForExclusion:self];
+    }
     [self applyFilters];
     [self updateIOS12ContinuousRefreshState];
     if (self.lgInjectedMaterial) {
@@ -723,7 +777,9 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 }
 - (void)setHidden:(BOOL)hidden {
     [super setHidden:hidden];
-    if (LGIsIOS12() && hidden) _metalRendererHealthy = NO;
+    if (LGIsIOS12() && hidden) {
+        [self transitionIOS12MetalRendererReady:NO reason:@"glass-hidden"];
+    }
     [self updateIOS12ContinuousRefreshState];
     if (self.lgInjectedMaterial) {
         LGUpdateMaterialReplacement(self.lgInjectedMaterial, self,
@@ -733,7 +789,9 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 }
 - (void)setAlpha:(CGFloat)alpha {
     [super setAlpha:alpha];
-    if (LGIsIOS12() && alpha <= 0.01) _metalRendererHealthy = NO;
+    if (LGIsIOS12() && alpha <= 0.01) {
+        [self transitionIOS12MetalRendererReady:NO reason:@"glass-alpha-inactive"];
+    }
     [self updateIOS12ContinuousRefreshState];
     if (self.lgInjectedMaterial) {
         LGUpdateMaterialReplacement(self.lgInjectedMaterial, self,
@@ -746,18 +804,145 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
     UIWindow *window = self.window;
     BOOL visible = _metalView && !_metalInitializationFailed && window &&
                    !self.hidden && self.alpha > 0.01 &&
-                   !window.hidden && window.alpha > 0.01;
+                   !window.hidden && window.alpha > 0.01 &&
+                   !_ios12ApplicationInBackground;
     [[LGIOS12LiveBackdropProvider sharedProvider]
         setClient:self requestsContinuousRefresh:visible];
+
+    if (visible && !_ios12LivenessTimer) {
+        __weak typeof(self) weakSelf = self;
+        _ios12LivenessTimer = [NSTimer timerWithTimeInterval:0.5
+            repeats:YES block:^(__unused NSTimer *timer) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                UIWindow *strongWindow = strongSelf.window;
+                BOOL stillVisible = strongWindow && !strongSelf.hidden &&
+                    strongSelf.alpha > 0.01 && !strongWindow.hidden &&
+                    strongWindow.alpha > 0.01 &&
+                    !strongSelf->_ios12ApplicationInBackground;
+                if (!stillVisible) {
+                    [strongSelf transitionIOS12MetalRendererReady:NO
+                                                           reason:@"renderer-visibility-lost"];
+                    [strongSelf updateIOS12ContinuousRefreshState];
+                    return;
+                }
+                if (strongSelf->_metalRendererHealthy &&
+                    strongSelf->_lastSuccessfulFrameTime > 0.0 &&
+                    CACurrentMediaTime() - strongSelf->_lastSuccessfulFrameTime >
+                        kLGIOS12RendererStallTimeout) {
+                    [strongSelf transitionIOS12MetalRendererReady:NO
+                                                           reason:@"metal-success-stalled"];
+                }
+            }];
+        [[NSRunLoop mainRunLoop] addTimer:_ios12LivenessTimer
+                                  forMode:NSRunLoopCommonModes];
+    } else if (!visible && _ios12LivenessTimer) {
+        [_ios12LivenessTimer invalidate];
+        _ios12LivenessTimer = nil;
+    }
 }
 
-- (void)markIOS12MetalRendererUnhealthyForReason:(NSString *)reason {
+- (void)transitionIOS12MetalRendererReady:(BOOL)ready
+                                   reason:(NSString *)reason {
     if (!LGIsIOS12()) return;
-    _metalRendererHealthy = NO;
-    if (self.lgInjectedMaterial) {
-        LGUpdateMaterialReplacement(self.lgInjectedMaterial, self,
-                                    reason ?: @"renderer-unhealthy");
+    if (!NSThread.isMainThread) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf transitionIOS12MetalRendererReady:ready reason:reason];
+        });
+        return;
     }
+    BOOL wasReady = _metalRendererHealthy;
+    _metalRendererHealthy = ready;
+    if (wasReady != ready) {
+        CFTimeInterval age = _lastSuccessfulFrameTime > 0.0
+            ? MAX(0.0, CACurrentMediaTime() - _lastSuccessfulFrameTime) : -1.0;
+        LGDiagnosticLog(@"renderer.ios12.live readiness transition=%@ reason=%@ hasEverCompleted=%d lastSuccessAge=%.3f consecutiveFailures=%lu attached=%d background=%d",
+                        ready ? @"not-ready->ready" : @"ready->not-ready",
+                        reason ?: @"unspecified", _hasRenderedFirstFrame,
+                        age, (unsigned long)_consecutiveRenderFailures,
+                        self.window != nil, _ios12ApplicationInBackground);
+    }
+    if (wasReady != ready && self.lgInjectedMaterial) {
+        LGUpdateMaterialReplacement(self.lgInjectedMaterial, self,
+                                    reason ?: (ready ? @"renderer-ready"
+                                                     : @"renderer-unhealthy"));
+    }
+}
+
+- (void)recordIOS12MetalRenderFailure:(NSString *)reason
+                            immediate:(BOOL)immediate {
+    if (!LGIsIOS12()) return;
+    if (!NSThread.isMainThread) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf recordIOS12MetalRenderFailure:reason immediate:immediate];
+        });
+        return;
+    }
+    _consecutiveRenderFailures++;
+    if (immediate ||
+        _consecutiveRenderFailures >= kLGIOS12RendererFailureThreshold) {
+        [self transitionIOS12MetalRendererReady:NO reason:reason];
+    }
+}
+
+- (void)recordIOS12MetalRenderSuccess:(NSString *)reason {
+    if (!LGIsIOS12()) return;
+    if (!NSThread.isMainThread) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf recordIOS12MetalRenderSuccess:reason];
+        });
+        return;
+    }
+    BOOL firstSuccessfulFrame = !_hasRenderedFirstFrame;
+    _hasRenderedFirstFrame = YES;
+    _lastSuccessfulFrameTime = CACurrentMediaTime();
+    _consecutiveRenderFailures = 0;
+    UIWindow *window = self.window;
+    BOOL frameIsPresentable = window && !window.hidden &&
+        window.alpha > 0.01 && !_ios12ApplicationInBackground &&
+        !self.hidden && self.alpha > 0.01 &&
+        _metalView.window == window && !CGRectIsEmpty(self.bounds) &&
+        !CGRectIsEmpty(_metalView.bounds);
+    [self transitionIOS12MetalRendererReady:frameIsPresentable
+        reason:frameIsPresentable
+            ? (reason ?: @"metal-frame-completed")
+            : @"completed-frame-not-presentable"];
+    if (firstSuccessfulFrame) [self setNeedsLayout];
+}
+
+- (void)logIOS12MetalEarlyReturn:(NSString *)reason {
+    if (!reason.length) return;
+    if (!_ios12EarlyReturnCounts) _ios12EarlyReturnCounts = [NSMutableDictionary dictionary];
+    uint64_t count = [_ios12EarlyReturnCounts[reason] unsignedLongLongValue] + 1;
+    _ios12EarlyReturnCounts[reason] = @(count);
+    if (LGIOS12LiveShouldLogSequence(count)) {
+        LGDiagnosticLog(@"renderer.ios12.live early-return reason=%@ count=%llu ready=%d hasEverCompleted=%d consecutiveFailures=%lu attached=%d hidden=%d alpha=%.3f",
+                        reason, (unsigned long long)count,
+                        _metalRendererHealthy, _hasRenderedFirstFrame,
+                        (unsigned long)_consecutiveRenderFailures,
+                        self.window != nil, self.hidden, self.alpha);
+    }
+}
+
+- (void)lgIOS12ApplicationDidEnterBackground:(NSNotification *)notification {
+    (void)notification;
+    if (!LGIsIOS12()) return;
+    _ios12ApplicationInBackground = YES;
+    [self transitionIOS12MetalRendererReady:NO reason:@"application-background"];
+    [self updateIOS12ContinuousRefreshState];
+}
+
+- (void)lgIOS12ApplicationWillEnterForeground:(NSNotification *)notification {
+    (void)notification;
+    if (!LGIsIOS12()) return;
+    _ios12ApplicationInBackground = NO;
+    [self transitionIOS12MetalRendererReady:NO
+                                     reason:@"application-foreground-awaiting-frame"];
+    [self updateIOS12ContinuousRefreshState];
+    [[LGIOS12LiveBackdropProvider sharedProvider] requestRefresh];
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
@@ -1119,12 +1304,17 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 #pragma mark - LGIOS12LiveBackdropClient
 
 - (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
-    if (!texture) return;
+    if (!texture) {
+        [self logIOS12MetalEarlyReturn:@"backdrop-texture-missing"];
+        [self recordIOS12MetalRenderFailure:@"backdrop-texture-missing"
+                                  immediate:NO];
+        return;
+    }
     if (texture.device != _device) {
         LGDiagnosticLog(@"renderer.ios12.live texture-rejected reason=device-mismatch textureDevice=%@ rendererDevice=%@",
                         texture.device.name ?: @"nil", _device.name ?: @"nil");
-        [self markIOS12MetalRendererUnhealthyForReason:
-            @"backdrop-texture-device-mismatch"];
+        [self recordIOS12MetalRenderFailure:
+            @"backdrop-texture-device-mismatch" immediate:YES];
         return;
     }
     _backdropTexture = texture;
@@ -1141,31 +1331,55 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 
 - (void)providerDidFailToUpdateBackdrop:(NSError *)error {
     LGLog(@"LGLiveBackdropView failed to update backdrop: %@", error.localizedDescription);
-    [self markIOS12MetalRendererUnhealthyForReason:
-        @"backdrop-provider-failure"];
+    [self logIOS12MetalEarlyReturn:@"backdrop-provider-failure"];
+    [self recordIOS12MetalRenderFailure:@"backdrop-provider-failure"
+                              immediate:NO];
 }
 
 #pragma mark - MTKViewDelegate
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
     _outputTexture = nil;
-    [self markIOS12MetalRendererUnhealthyForReason:
-        @"metal-drawable-size-changed"];
+    LGDiagnosticLog(@"renderer.ios12.live drawable-size-change width=%.0f height=%.0f readinessRetained=%d",
+                    size.width, size.height, _metalRendererHealthy);
 }
 
 - (void)drawInMTKView:(MTKView *)view {
-    if (_metalInitializationFailed || !_backdropTexture ||
-        CGRectIsEmpty(self.bounds) || !self.window) {
-        [self markIOS12MetalRendererUnhealthyForReason:
-            @"metal-draw-precondition-failed"];
+    if (_metalInitializationFailed) {
+        [self logIOS12MetalEarlyReturn:@"metal-initialization-failed"];
+        [self recordIOS12MetalRenderFailure:@"metal-initialization-failed"
+                                  immediate:YES];
+        return;
+    }
+    if (!_backdropTexture) {
+        [self logIOS12MetalEarlyReturn:@"backdrop-texture-missing"];
+        [self recordIOS12MetalRenderFailure:@"backdrop-texture-missing"
+                                  immediate:NO];
+        return;
+    }
+    if (CGRectIsEmpty(self.bounds)) {
+        [self logIOS12MetalEarlyReturn:@"metal-view-bounds-empty"];
+        [self recordIOS12MetalRenderFailure:@"metal-view-bounds-empty"
+                                  immediate:YES];
+        return;
+    }
+    if (!self.window) {
+        [self logIOS12MetalEarlyReturn:@"metal-view-window-detached"];
+        [self recordIOS12MetalRenderFailure:@"metal-view-window-detached"
+                                  immediate:YES];
         return;
     }
 
     id<CAMetalDrawable> drawable = view.currentDrawable;
     MTLRenderPassDescriptor *renderPass = view.currentRenderPassDescriptor;
     if (!drawable || !renderPass) {
-        [self markIOS12MetalRendererUnhealthyForReason:
-            @"metal-drawable-unavailable"];
+        if (!drawable) [self logIOS12MetalEarlyReturn:@"no-current-drawable"];
+        if (!renderPass) [self logIOS12MetalEarlyReturn:@"no-render-pass-descriptor"];
+        NSString *reason = !drawable && !renderPass
+            ? @"drawable-and-render-pass-unavailable"
+            : (!drawable ? @"no-current-drawable"
+                         : @"no-render-pass-descriptor");
+        [self recordIOS12MetalRenderFailure:reason immediate:NO];
         return;
     }
 
@@ -1178,8 +1392,9 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
         _outputTexture = [_device newTextureWithDescriptor:outputDescriptor];
     }
     if (!_outputTexture) {
-        [self markIOS12MetalRendererUnhealthyForReason:
-            @"metal-output-texture-allocation-failed"];
+        [self logIOS12MetalEarlyReturn:@"output-texture-allocation-failed"];
+        [self recordIOS12MetalRenderFailure:
+            @"metal-output-texture-allocation-failed" immediate:NO];
         return;
     }
 
@@ -1229,15 +1444,17 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 
     id<MTLCommandBuffer> commandBuffer = [sLGIOS12CommandQueue commandBuffer];
     if (!commandBuffer) {
-        [self markIOS12MetalRendererUnhealthyForReason:
-            @"metal-command-buffer-allocation-failed"];
+        [self logIOS12MetalEarlyReturn:@"command-buffer-allocation-failed"];
+        [self recordIOS12MetalRenderFailure:
+            @"metal-command-buffer-allocation-failed" immediate:NO];
         return;
     }
 
     id<MTLComputeCommandEncoder> compute = [commandBuffer computeCommandEncoder];
     if (!compute) {
-        [self markIOS12MetalRendererUnhealthyForReason:
-            @"metal-compute-encoder-allocation-failed"];
+        [self logIOS12MetalEarlyReturn:@"compute-encoder-allocation-failed"];
+        [self recordIOS12MetalRenderFailure:
+            @"metal-compute-encoder-allocation-failed" immediate:NO];
         return;
     }
 
@@ -1253,8 +1470,9 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 
     id<MTLRenderCommandEncoder> present = [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
     if (!present) {
-        [self markIOS12MetalRendererUnhealthyForReason:
-            @"metal-present-encoder-allocation-failed"];
+        [self logIOS12MetalEarlyReturn:@"render-encoder-allocation-failed"];
+        [self recordIOS12MetalRenderFailure:
+            @"metal-present-encoder-allocation-failed" immediate:NO];
         return;
     }
 
@@ -1274,28 +1492,23 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
             BOOL frameHealthy =
                 completed.status == MTLCommandBufferStatusCompleted &&
                 completed.error == nil;
-            strongSelf->_metalRendererHealthy = frameHealthy;
             if (frameHealthy) {
-                if (!strongSelf->_hasRenderedFirstFrame) {
-                    strongSelf->_hasRenderedFirstFrame = YES;
-                    [strongSelf setNeedsLayout];
-                }
+                [strongSelf recordIOS12MetalRenderSuccess:
+                    @"metal-frame-completed"];
             } else {
                 LGLog(@"LGLiveBackdropView render failed: %@", completed.error.localizedDescription);
-            }
-            if (strongSelf.lgInjectedMaterial) {
-                LGUpdateMaterialReplacement(
-                    strongSelf.lgInjectedMaterial, strongSelf,
-                    frameHealthy ? @"metal-frame-completed"
-                                 : @"metal-frame-failed");
+                [strongSelf recordIOS12MetalRenderFailure:
+                    @"metal-command-buffer-completion-failed" immediate:NO];
             }
             if (shouldLogRedraw) {
-                LGDiagnosticLog(@"renderer.ios12.live Metal-redraw=%llu status=%ld completed=%d error=%@ firstFrameReady=%d",
+                LGDiagnosticLog(@"renderer.ios12.live Metal-redraw=%llu status=%ld completed=%d error=%@ hasEverCompleted=%d rendererHealthy=%d consecutiveFailures=%lu",
                                 (unsigned long long)redraw,
                                 (long)completed.status,
                                 completed.status == MTLCommandBufferStatusCompleted,
                                 completed.error.localizedDescription ?: @"none",
-                                strongSelf->_hasRenderedFirstFrame);
+                                strongSelf->_hasRenderedFirstFrame,
+                                strongSelf->_metalRendererHealthy,
+                                (unsigned long)strongSelf->_consecutiveRenderFailures);
             }
         });
     }];
