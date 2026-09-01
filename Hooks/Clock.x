@@ -2609,7 +2609,6 @@ static void LGRefreshAllClockHosts(void) {
 - (void)setFrame:(CGRect)frame {
     %orig(frame);
 }
-
 - (void)didMoveToWindow {
     %orig;
     LGApplyAbbreviatedDateTextInView((UIView *)self);

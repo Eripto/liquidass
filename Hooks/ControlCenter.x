@@ -632,23 +632,47 @@ static void roundModuleContainer(UIView *module) {
 #pragma mark - hooks
 
 %hook CCUIContentModuleContainerView
-- (void)layoutSubviews { %orig; roundModuleContainer((UIView *)self); }
-- (void)didMoveToWindow { %orig; roundModuleContainer((UIView *)self); }
+- (void)layoutSubviews {
+    %orig;
+    roundModuleContainer((UIView *)self);
+}
+- (void)didMoveToWindow {
+    %orig;
+    roundModuleContainer((UIView *)self);
+}
 %end
 
 %hook CCUIButtonModuleView
-- (void)layoutSubviews { %orig; roundToggleFills((UIView *)self); }
-- (void)didMoveToWindow { %orig; roundToggleFills((UIView *)self); }
+- (void)layoutSubviews {
+    %orig;
+    roundToggleFills((UIView *)self);
+}
+- (void)didMoveToWindow {
+    %orig;
+    roundToggleFills((UIView *)self);
+}
 %end
 
 %hook CCUIContinuousSliderView
-- (void)layoutSubviews { %orig; roundContinuousSliderFill((UIView *)self); }
-- (void)didMoveToWindow { %orig; roundContinuousSliderFill((UIView *)self); }
+- (void)layoutSubviews {
+    %orig;
+    roundContinuousSliderFill((UIView *)self);
+}
+- (void)didMoveToWindow {
+    %orig;
+    roundContinuousSliderFill((UIView *)self);
+}
 %end
 
 %hook MRUContinuousSliderView
-- (void)layoutSubviews { %orig; roundMRUSliderFill((UIView *)self); }
-- (void)didMoveToWindow { %orig; roundMRUSliderFill((UIView *)self); }
+- (void)layoutSubviews {
+    %orig;
+    roundMRUSliderFill((UIView *)self);
+}
+- (void)didMoveToWindow {
+    %orig;
+    roundMRUSliderFill((UIView *)self);
+}
 %end
 
 %hook CCUIModularControlCenterOverlayViewController
@@ -675,9 +699,7 @@ static void roundModuleContainer(UIView *module) {
 
 - (void)viewDidDisappear:(BOOL)animated {
     %orig;
-
 }
-
 - (void)viewDidLayoutSubviews {
     %orig;
     UIView *root = ((UIViewController *)self).view;
