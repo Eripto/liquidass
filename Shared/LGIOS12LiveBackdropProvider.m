@@ -3,6 +3,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import "LGSharedSupport.h"
 #import <mach/mach_time.h>
+#import <dlfcn.h>
 
 static void LGIOS12ProviderLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 static void LGIOS12ProviderLog(NSString *format, ...) {
@@ -10,7 +11,11 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
     va_start(arguments, format);
     NSString *message = [[NSString alloc] initWithFormat:format arguments:arguments];
     va_end(arguments);
+#if LIQUIDASS_DEBUG
     LGLog(@"renderer.ios12.provider %@", message);
+#else
+    NSLog(@"[LiquidAss] renderer.ios12.provider %@", message);
+#endif
 }
 
 static BOOL LGIOS12ProviderShouldLogSequence(uint64_t sequence) {
@@ -27,6 +32,174 @@ static void LGIOS12ProviderRunOnMain(dispatch_block_t block) {
     if (!block) return;
     if (NSThread.isMainThread) block();
     else dispatch_async(dispatch_get_main_queue(), block);
+}
+
+static BOOL LGIOS12ViewIsVisibleForCapture(UIView *view) {
+    return view && !view.hidden && view.alpha > 0.01 &&
+           !CGRectIsEmpty(view.bounds);
+}
+
+static BOOL LGIOS12ClassNameContainsToken(id object, NSString *token) {
+    if (!object || !token.length) return NO;
+    return [NSStringFromClass([object class])
+        rangeOfString:token options:NSCaseInsensitiveSearch].location !=
+        NSNotFound;
+}
+
+static BOOL LGIOS12HierarchyContainsClassToken(UIView *view,
+                                               NSString *token,
+                                               NSUInteger depth) {
+    if (!view || depth == 0) return NO;
+    if (LGIOS12ClassNameContainsToken(view, token)) return YES;
+    for (UIView *subview in view.subviews) {
+        if (LGIOS12HierarchyContainsClassToken(subview, token, depth - 1))
+            return YES;
+    }
+    return NO;
+}
+
+static BOOL LGIOS12WindowIsWallpaperCandidate(UIWindow *window,
+                                              UIWindow *hostWindow) {
+    if (!window || window == hostWindow || window.hidden ||
+        window.alpha <= 0.01 || LGIOS12IsStandaloneOverlayWindow(window) ||
+        window.windowLevel > hostWindow.windowLevel) return NO;
+    if (LGIOS12ClassNameContainsToken(window, @"Wallpaper") ||
+        LGIOS12ClassNameContainsToken(window.rootViewController,
+                                      @"Wallpaper")) return YES;
+    return LGIOS12HierarchyContainsClassToken(
+        window.rootViewController.view, @"Wallpaper", 4);
+}
+
+static BOOL LGIOS12ViewIsIconView(UIView *view) {
+    if (!view) return NO;
+    static Class iconViewClass = Nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        iconViewClass = NSClassFromString(@"SBIconView");
+    });
+    if (iconViewClass && [view isKindOfClass:iconViewClass]) return YES;
+    return [NSStringFromClass(view.class) isEqualToString:@"SBIconView"];
+}
+
+static void LGIOS12CollectVisibleIconViews(UIView *view,
+                                           NSMutableArray<UIView *> *icons) {
+    if (!LGIOS12ViewIsVisibleForCapture(view)) return;
+    if (LGIOS12ViewIsIconView(view)) [icons addObject:view];
+    for (UIView *subview in view.subviews)
+        LGIOS12CollectVisibleIconViews(subview, icons);
+}
+
+static BOOL LGIOS12ViewIsAncestorOfView(UIView *ancestor, UIView *view) {
+    for (UIView *cursor = view; cursor; cursor = cursor.superview) {
+        if (cursor == ancestor) return YES;
+    }
+    return NO;
+}
+
+static UIView *LGIOS12LowestCommonAncestor(NSArray<UIView *> *views,
+                                           UIView *limit) {
+    UIView *candidate = views.firstObject;
+    while (candidate && candidate != limit.superview) {
+        BOOL containsAll = YES;
+        for (UIView *view in views) {
+            if (!LGIOS12ViewIsAncestorOfView(candidate, view)) {
+                containsAll = NO;
+                break;
+            }
+        }
+        if (containsAll) return candidate;
+        candidate = candidate.superview;
+    }
+    return nil;
+}
+
+static CGFloat LGIOS12ViewBackgroundAlpha(UIView *view) {
+    CGColorRef color = view.layer.backgroundColor;
+    if (!color && view.backgroundColor) color = view.backgroundColor.CGColor;
+    return color ? CGColorGetAlpha(color) : 0.0;
+}
+
+static BOOL LGIOS12ViewHasTransparentBase(UIView *view) {
+    return view && !view.opaque && LGIOS12ViewBackgroundAlpha(view) <= 0.01;
+}
+
+static BOOL LGIOS12ViewContainsVisibleIcon(UIView *view) {
+    if (!LGIOS12ViewIsVisibleForCapture(view)) return NO;
+    if (LGIOS12ViewIsIconView(view)) return YES;
+    for (UIView *subview in view.subviews) {
+        if (LGIOS12ViewContainsVisibleIcon(subview)) return YES;
+    }
+    return NO;
+}
+
+static void LGIOS12CollectTransparentIconBranches(
+    UIView *view, NSMutableArray<UIView *> *branches, NSUInteger depth) {
+    if (!view || depth == 0 || !LGIOS12ViewContainsVisibleIcon(view)) return;
+    if (!LGIOS12ViewIsIconView(view) && LGIOS12ViewHasTransparentBase(view) &&
+        !LGIOS12HierarchyContainsClassToken(view, @"Wallpaper", 4)) {
+        [branches addObject:view];
+        return;
+    }
+    for (UIView *subview in view.subviews) {
+        LGIOS12CollectTransparentIconBranches(subview, branches, depth - 1);
+    }
+}
+
+static BOOL LGIOS12ViewIsInsideAnyView(UIView *view,
+                                      NSArray<UIView *> *containers) {
+    for (UIView *container in containers) {
+        if (LGIOS12ViewIsAncestorOfView(container, view)) return YES;
+    }
+    return NO;
+}
+
+static void LGIOS12CollectPageControls(UIView *view,
+                                       NSArray<UIView *> *existing,
+                                       NSMutableArray<UIView *> *results) {
+    if (!LGIOS12ViewIsVisibleForCapture(view)) return;
+    if (LGIOS12ClassNameContainsToken(view, @"PageControl") &&
+        !LGIOS12ViewIsInsideAnyView(view, existing)) {
+        [results addObject:view];
+        return;
+    }
+    for (UIView *subview in view.subviews)
+        LGIOS12CollectPageControls(subview, existing, results);
+}
+
+static BOOL LGIOS12RenderViewAtScreenPosition(UIView *view,
+                                               CGContextRef context) {
+    if (!LGIOS12ViewIsVisibleForCapture(view) || !context) return NO;
+    CGRect screenRect = [view convertRect:view.bounds toView:nil];
+    if (CGRectIsEmpty(screenRect) || CGRectIsEmpty(view.bounds)) return NO;
+    CGFloat scaleX = CGRectGetWidth(screenRect) / CGRectGetWidth(view.bounds);
+    CGFloat scaleY = CGRectGetHeight(screenRect) / CGRectGetHeight(view.bounds);
+    CGContextSaveGState(context);
+    CGContextTranslateCTM(context, CGRectGetMinX(screenRect),
+                          CGRectGetMinY(screenRect));
+    CGContextScaleCTM(context, scaleX, scaleY);
+    CGContextTranslateCTM(context, -CGRectGetMinX(view.bounds),
+                          -CGRectGetMinY(view.bounds));
+    [view.layer renderInContext:context];
+    CGContextRestoreGState(context);
+    return YES;
+}
+
+static BOOL LGIOS12RenderWindowAtScreenPosition(UIWindow *window,
+                                                 CGContextRef context,
+                                                 CGRect screenBounds) {
+    if (!window || !context || window.hidden || window.alpha <= 0.01 ||
+        LGIOS12IsStandaloneOverlayWindow(window)) return NO;
+    CGRect frame = CGRectIsEmpty(window.frame) ? screenBounds : window.frame;
+    CGContextSaveGState(context);
+    CGContextTranslateCTM(context, CGRectGetMinX(frame), CGRectGetMinY(frame));
+    BOOL drew = [window drawViewHierarchyInRect:window.bounds
+                              afterScreenUpdates:NO];
+    if (!drew) {
+        [window.layer renderInContext:context];
+        drew = YES;
+    }
+    CGContextRestoreGState(context);
+    return drew;
 }
 
 typedef struct {
@@ -59,6 +232,7 @@ typedef struct {
     BOOL _wallpaperCacheAttemptedForMetadata;
     uint64_t _wallpaperCacheHitCount;
     NSString *_wallpaperCacheLastUnavailableReason;
+    NSString *_cachedWallpaperDecoder;
 
     // Performance diagnostics
     uint64_t _totalCaptureTime;
@@ -440,12 +614,134 @@ typedef struct {
     return fallback;
 }
 
+- (NSArray<UIWindow *> *)visibleSourceWindowsSortedByLevel {
+    NSMutableArray<UIWindow *> *visible = [NSMutableArray array];
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        if (!window || window.hidden || window.alpha <= 0.01 ||
+            LGIOS12IsStandaloneOverlayWindow(window)) continue;
+        [visible addObject:window];
+    }
+    return [visible sortedArrayUsingComparator:^NSComparisonResult(
+        UIWindow *left, UIWindow *right) {
+        if (left.windowLevel < right.windowLevel) return NSOrderedAscending;
+        if (left.windowLevel > right.windowLevel) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+}
+
+- (void)logWindowStack:(NSArray<UIWindow *> *)windows
+             hostWindow:(UIWindow *)hostWindow {
+    if (!LGIOS12ProviderShouldLogSequence(_captureTickCount)) return;
+    NSMutableArray<NSString *> *entries = [NSMutableArray array];
+    for (UIWindow *window in windows) {
+        [entries addObject:[NSString stringWithFormat:
+            @"%@{level=%.1f root=%@ opaque=%d alpha=%.2f key=%d}",
+            NSStringFromClass(window.class), window.windowLevel,
+            NSStringFromClass(window.rootViewController.class), window.opaque,
+            window.alpha, window.isKeyWindow]];
+    }
+    LGIOS12ProviderLog(@"window stack visible=%lu selectedHost=%@ hostLevel=%.1f hostOpaque=%d hostRoot=%@ hostRootOpaque=%d excludedOverlay=LGIOS12StandaloneOverlayWindow entries=[%@]",
+                       (unsigned long)windows.count,
+                       NSStringFromClass(hostWindow.class),
+                       hostWindow.windowLevel, hostWindow.opaque,
+                       NSStringFromClass(hostWindow.rootViewController.class),
+                       hostWindow.rootViewController.view.opaque,
+                       [entries componentsJoinedByString:@", "]);
+}
+
+- (UIWindow *)wallpaperWindowBelowHostWindow:(UIWindow *)hostWindow
+                              visibleWindows:(NSArray<UIWindow *> *)windows {
+    UIWindow *candidate = nil;
+    for (UIWindow *window in windows) {
+        if (!LGIOS12WindowIsWallpaperCandidate(window, hostWindow)) continue;
+        if (!candidate || window.windowLevel >= candidate.windowLevel)
+            candidate = window;
+    }
+    return candidate;
+}
+
+- (NSArray<UIView *> *)foregroundViewsForHostWindow:(UIWindow *)hostWindow
+                                         description:(NSString **)description {
+    UIView *root = hostWindow.rootViewController.view ?: hostWindow;
+    NSMutableArray<UIView *> *icons = [NSMutableArray array];
+    LGIOS12CollectVisibleIconViews(root, icons);
+    if (!icons.count) {
+        if (description) *description = @"none:no-visible-SBIconView";
+        return @[];
+    }
+
+    UIView *common = LGIOS12LowestCommonAncestor(icons, root);
+    NSMutableArray<UIView *> *foreground = [NSMutableArray array];
+    BOOL commonIsUsable = common && common != hostWindow &&
+        LGIOS12ViewHasTransparentBase(common) &&
+        !LGIOS12HierarchyContainsClassToken(common, @"Wallpaper", 4);
+    if (commonIsUsable) {
+        [foreground addObject:common];
+    } else if (common) {
+        LGIOS12CollectTransparentIconBranches(common, foreground, 12);
+        NSMutableArray<UIView *> *pageControls = [NSMutableArray array];
+        LGIOS12CollectPageControls(root, foreground, pageControls);
+        [foreground addObjectsFromArray:pageControls];
+    }
+
+    NSMutableArray<NSString *> *classes = [NSMutableArray array];
+    for (UIView *view in foreground)
+        [classes addObject:NSStringFromClass(view.class)];
+    if (description) {
+        *description = [NSString stringWithFormat:
+            @"icons=%lu common=%@ commonOpaque=%d commonBackgroundAlpha=%.3f sources=[%@]",
+            (unsigned long)icons.count, NSStringFromClass(common.class),
+            common.opaque, LGIOS12ViewBackgroundAlpha(common),
+            [classes componentsJoinedByString:@","]];
+    }
+    return foreground;
+}
+
 static NSString *LGIOS12HomeWallpaperPathProvider(void) {
     return @"/var/mobile/Library/SpringBoard/HomeBackground.cpbitmap";
 }
 
-// Re-using the cpbitmap decoder logic
-- (UIImage *)decodeCPBitmap:(NSString *)path {
+typedef CFArrayRef (*LGIOS12CPBitmapCreateImagesFromDataFn)(
+    CFDataRef data, void *unused, int flags, void *unused2);
+
+static LGIOS12CPBitmapCreateImagesFromDataFn
+LGIOS12ResolveSystemCPBitmapDecoder(void) {
+    static LGIOS12CPBitmapCreateImagesFromDataFn decoder = NULL;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        void *handle = dlopen(
+            "/System/Library/PrivateFrameworks/AppSupport.framework/AppSupport",
+            RTLD_LAZY | RTLD_LOCAL);
+        if (handle) {
+            decoder = (LGIOS12CPBitmapCreateImagesFromDataFn)dlsym(
+                handle, "CPBitmapCreateImagesFromData");
+        }
+    });
+    return decoder;
+}
+
+static UIImage *LGIOS12DecodeCPBitmapWithSystemDecoder(NSData *data) {
+    LGIOS12CPBitmapCreateImagesFromDataFn decoder =
+        LGIOS12ResolveSystemCPBitmapDecoder();
+    if (!decoder || !data.length) return nil;
+    CFArrayRef images = decoder((__bridge CFDataRef)data, NULL, 1, NULL);
+    if (!images) return nil;
+    UIImage *image = nil;
+    if (CFArrayGetCount(images) > 0) {
+        CFTypeRef first = CFArrayGetValueAtIndex(images, 0);
+        if (first && CFGetTypeID(first) == CGImageGetTypeID()) {
+            image = [UIImage imageWithCGImage:(CGImageRef)first
+                                        scale:(UIScreen.mainScreen.scale ?: 1.0)
+                                  orientation:UIImageOrientationUp];
+        }
+    }
+    CFRelease(images);
+    return image;
+}
+
+// Raw-layout fallback for wallpaper tools/builds whose AppSupport decoder is
+// unavailable.  The iOS 12 system decoder above is the authoritative path.
+- (UIImage *)decodeCPBitmapManually:(NSString *)path {
     NSData *data = [NSData dataWithContentsOfFile:path];
     if (![data isKindOfClass:NSData.class] || data.length < 24) return nil;
 
@@ -519,6 +815,29 @@ static NSString *LGIOS12HomeWallpaperPathProvider(void) {
     return image;
 }
 
+- (UIImage *)decodeCPBitmap:(NSString *)path
+                decoderName:(NSString **)decoderName {
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (![data isKindOfClass:NSData.class] || data.length < 24) {
+        if (decoderName) *decoderName = @"unreadable-or-empty";
+        return nil;
+    }
+
+    UIImage *image = LGIOS12DecodeCPBitmapWithSystemDecoder(data);
+    if (image) {
+        if (decoderName)
+            *decoderName = @"AppSupport.CPBitmapCreateImagesFromData";
+        return image;
+    }
+
+    image = [self decodeCPBitmapManually:path];
+    if (decoderName) {
+        *decoderName = image ? @"manual-raw-layout-fallback"
+                             : @"all-decoders-failed";
+    }
+    return image;
+}
+
 - (UIImage *)cachedDecodedWallpaperAtPath:(NSString *)path {
     NSError *attributesError = nil;
     NSDictionary<NSFileAttributeKey, id> *attributes =
@@ -540,10 +859,11 @@ static NSString *LGIOS12HomeWallpaperPathProvider(void) {
         _cachedWallpaperImage = nil;
         _cachedWallpaperModificationDate = nil;
         _cachedWallpaperFileSize = nil;
+        _cachedWallpaperDecoder = nil;
         _wallpaperCacheAttemptedForMetadata = NO;
         if (![_wallpaperCacheLastUnavailableReason isEqualToString:reason]) {
             _wallpaperCacheLastUnavailableReason = reason;
-            LGIOS12ProviderLog(@"wallpaper cache=miss/redecode success=0 reason=%@ path=%@ fallback=host-window-or-black",
+            LGIOS12ProviderLog(@"wallpaper cpbitmap readable=0 decodeSuccess=0 reason=%@ path=%@ fallback=wallpaper-window-or-black",
                                reason, path);
         }
         return nil;
@@ -556,9 +876,16 @@ static NSString *LGIOS12HomeWallpaperPathProvider(void) {
     if (metadataMatches) {
         uint64_t hit = ++_wallpaperCacheHitCount;
         if (LGIOS12ProviderShouldLogSequence(hit)) {
-            LGIOS12ProviderLog(@"wallpaper cache=hit count=%llu decoded=%d modified=%@ size=%@",
+            size_t pixelWidth = _cachedWallpaperImage.CGImage
+                ? CGImageGetWidth(_cachedWallpaperImage.CGImage) : 0;
+            size_t pixelHeight = _cachedWallpaperImage.CGImage
+                ? CGImageGetHeight(_cachedWallpaperImage.CGImage) : 0;
+            LGIOS12ProviderLog(@"wallpaper cache=hit count=%llu readable=1 decoded=%d decoder=%@ pixels=%lux%lu modified=%@ size=%@",
                                (unsigned long long)hit,
                                _cachedWallpaperImage != nil,
+                               _cachedWallpaperDecoder ?: @"none",
+                               (unsigned long)pixelWidth,
+                               (unsigned long)pixelHeight,
                                modificationDate, fileSize);
         }
         return _cachedWallpaperImage;
@@ -580,14 +907,23 @@ static NSString *LGIOS12HomeWallpaperPathProvider(void) {
                            fileSize);
     }
 
-    UIImage *decoded = [self decodeCPBitmap:path];
+    NSString *decoderName = nil;
+    UIImage *decoded = [self decodeCPBitmap:path decoderName:&decoderName];
     _cachedWallpaperImage = decoded;
+    _cachedWallpaperDecoder = decoderName;
     _cachedWallpaperModificationDate = modificationDate;
     _cachedWallpaperFileSize = fileSize;
     _wallpaperCacheAttemptedForMetadata = YES;
     _wallpaperCacheHitCount = 0;
-    LGIOS12ProviderLog(@"wallpaper cache=miss/redecode success=%d reason=%@ modified=%@ size=%@ dimensions={%.0f,%.0f}",
-                       decoded != nil, reason, modificationDate, fileSize,
+    size_t pixelWidth = decoded.CGImage ? CGImageGetWidth(decoded.CGImage) : 0;
+    size_t pixelHeight = decoded.CGImage ? CGImageGetHeight(decoded.CGImage) : 0;
+    LGIOS12ProviderLog(@"wallpaper cache=miss/redecode readable=%d decodeSuccess=%d decoder=%@ reason=%@ modified=%@ size=%@ pixels=%lux%lu points={%.0f,%.0f}",
+                       [[NSFileManager defaultManager]
+                           isReadableFileAtPath:path],
+                       decoded != nil, decoderName ?: @"none", reason,
+                       modificationDate, fileSize,
+                       (unsigned long)pixelWidth,
+                       (unsigned long)pixelHeight,
                        decoded.size.width, decoded.size.height);
     return decoded;
 }
@@ -613,8 +949,18 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     CGRect screenBounds = UIScreen.mainScreen.bounds;
     CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
 
+    NSArray<UIWindow *> *visibleWindows =
+        [self visibleSourceWindowsSortedByLevel];
+    [self logWindowStack:visibleWindows hostWindow:hostWindow];
+    UIWindow *wallpaperWindow =
+        [self wallpaperWindowBelowHostWindow:hostWindow
+                              visibleWindows:visibleWindows];
     UIImage *wallpaper = [self cachedDecodedWallpaperAtPath:
         LGIOS12HomeWallpaperPathProvider()];
+    NSString *foregroundDescription = nil;
+    NSArray<UIView *> *foregroundViews =
+        [self foregroundViewsForHostWindow:hostWindow
+                               description:&foregroundDescription];
 
     LGIOS12CaptureStats captureStats = { 0 };
     captureStats.excludedGlassCount = excludedViews.count;
@@ -652,33 +998,56 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     UIGraphicsBeginImageContextWithOptions(screenBounds.size, YES, screenScale);
     CGContextRef context = UIGraphicsGetCurrentContext();
     UIImage *snapshot = nil;
-    BOOL drewHostWindow = NO;
+    BOOL drewWallpaperWindow = NO;
+    BOOL drewCPBitmap = NO;
+    BOOL drewForeground = NO;
+    BOOL usedWholeHostFallback = NO;
+    NSUInteger foregroundRenderCount = 0;
+    NSString *wallpaperSource = @"black-base";
+    NSString *foregroundSource = @"none";
 
     if (context) {
         [[UIColor blackColor] setFill];
         UIRectFill(screenBounds);
 
-        if (wallpaper) LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
-
-        CGRect frame = hostWindow.frame;
-        if (CGRectIsEmpty(frame)) frame = screenBounds;
-        CGContextSaveGState(context);
-        CGContextTranslateCTM(context, CGRectGetMinX(frame), CGRectGetMinY(frame));
-        if (captureStats.usedModelLayerExclusion) {
-            [hostWindow.layer renderInContext:context];
-            drewHostWindow = YES;
-        } else {
-            drewHostWindow = [hostWindow
-                drawViewHierarchyInRect:hostWindow.bounds
-                      afterScreenUpdates:NO];
-            if (!drewHostWindow) {
-                [hostWindow.layer renderInContext:context];
-                drewHostWindow = YES;
+        if (wallpaperWindow) {
+            drewWallpaperWindow = LGIOS12RenderWindowAtScreenPosition(
+                wallpaperWindow, context, screenBounds);
+            if (drewWallpaperWindow) {
+                wallpaperSource = [NSString stringWithFormat:@"window:%@",
+                    NSStringFromClass(wallpaperWindow.class)];
             }
         }
-        CGContextRestoreGState(context);
+        if (!drewWallpaperWindow && wallpaper) {
+            LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
+            drewCPBitmap = YES;
+            wallpaperSource = [NSString stringWithFormat:@"cpbitmap:%@",
+                _cachedWallpaperDecoder ?: @"unknown-decoder"];
+        }
 
-        if (wallpaper || drewHostWindow) {
+        for (UIView *foregroundView in foregroundViews) {
+            if (LGIOS12RenderViewAtScreenPosition(foregroundView, context)) {
+                drewForeground = YES;
+                foregroundRenderCount++;
+            }
+        }
+        if (drewForeground) {
+            foregroundSource = [NSString stringWithFormat:
+                @"transparent-icon-hierarchy:%@",
+                foregroundDescription ?: @"unknown"];
+        } else {
+            // Preserve the prior capture as a guarded last resort.  This path
+            // can still occlude a wallpaper base, so diagnostics identify it
+            // explicitly instead of pretending the composite succeeded.
+            usedWholeHostFallback = LGIOS12RenderWindowAtScreenPosition(
+                hostWindow, context, screenBounds);
+            foregroundSource = usedWholeHostFallback
+                ? @"whole-host-window-fallback"
+                : @"foreground-render-failed";
+        }
+
+        if (drewWallpaperWindow || drewCPBitmap || drewForeground ||
+            usedWholeHostFallback) {
             snapshot = UIGraphicsGetImageFromCurrentImageContext();
         }
     }
@@ -692,14 +1061,25 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         [CATransaction commit];
     }
 
-    captureStats.windowsRendered = drewHostWindow ? 1 : 0;
+    captureStats.windowsRendered = (drewWallpaperWindow ? 1 : 0) +
+                                   (usedWholeHostFallback ? 1 : 0);
     if (stats) *stats = captureStats;
     if (sourceDescription && snapshot) {
-        *sourceDescription = [NSString stringWithFormat:@"%@+host:%@+%@",
-            wallpaper ? @"cpbitmap" : @"black-base",
-            NSStringFromClass(hostWindow.class),
-            captureStats.usedModelLayerExclusion
-                ? @"model-layer-exclusion" : @"window-hierarchy"];
+        *sourceDescription = [NSString stringWithFormat:
+            @"wallpaper=%@+foreground=%@+composition=wallpaper-then-transparent-foreground",
+            wallpaperSource, foregroundSource];
+    }
+    if (LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
+        LGIOS12ProviderLog(@"wallpaper composition finalSource=%@ wallpaperWindowCandidate=%@ wallpaperWindowRendered=%d cpbitmapDecoded=%d cpbitmapRendered=%d foregroundSource=%@ foregroundViewsRendered=%lu wholeHostFallback=%d hostOpaque=%d finalPath=%@",
+                           wallpaperSource,
+                           NSStringFromClass(wallpaperWindow.class),
+                           drewWallpaperWindow, wallpaper != nil, drewCPBitmap,
+                           foregroundSource,
+                           (unsigned long)foregroundRenderCount,
+                           usedWholeHostFallback, hostWindow.opaque,
+                           usedWholeHostFallback
+                               ? @"wallpaper+opaque-host-fallback"
+                               : @"wallpaper+transparent-icon-foreground");
     }
     return snapshot;
 }
