@@ -18,7 +18,8 @@
 - (void)unregisterClient:(id<LGIOS12LiveBackdropClient>)client;
 
 - (void)requestRefresh;
-- (void)setNeedsActiveRefresh:(BOOL)active;
+- (void)setClient:(id<LGIOS12LiveBackdropClient>)client
+    requestsContinuousRefresh:(BOOL)active;
 
 - (void)registerGlassViewForExclusion:(UIView *)glassView;
 - (void)unregisterGlassViewForExclusion:(UIView *)glassView;

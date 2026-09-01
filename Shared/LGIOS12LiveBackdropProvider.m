@@ -13,14 +13,39 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
     LGDiagnosticLog(@"renderer.ios12.provider %@", message);
 }
 
+static BOOL LGIOS12ProviderShouldLogSequence(uint64_t sequence) {
+    return sequence <= 3 || (sequence % 30) == 0;
+}
+
+static BOOL LGIOS12IsStandaloneOverlayWindow(UIWindow *window) {
+    if (!window) return NO;
+    return [NSStringFromClass(window.class)
+        isEqualToString:@"LGIOS12StandaloneOverlayWindow"];
+}
+
+static void LGIOS12ProviderRunOnMain(dispatch_block_t block) {
+    if (!block) return;
+    if (NSThread.isMainThread) block();
+    else dispatch_async(dispatch_get_main_queue(), block);
+}
+
+typedef struct {
+    NSUInteger windowsRendered;
+    NSUInteger excludedGlassCount;
+    NSUInteger sameWindowExcludedCount;
+    BOOL standaloneOverlayPresent;
+    BOOL usedModelLayerExclusion;
+} LGIOS12CaptureStats;
+
 @implementation LGIOS12LiveBackdropProvider {
     id<MTLDevice> _device;
     MTKTextureLoader *_textureLoader;
     NSHashTable<id<LGIOS12LiveBackdropClient>> *_clients;
+    NSHashTable<id<LGIOS12LiveBackdropClient>> *_activeClients;
     NSHashTable<UIView *> *_excludedGlassViews;
 
     CADisplayLink *_displayLink;
-    BOOL _needsActiveRefresh;
+    BOOL _applicationInBackground;
     NSTimeInterval _lastRefreshTime;
     NSTimeInterval _targetRefreshInterval;
 
@@ -30,6 +55,8 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
     uint64_t _totalCaptureTime;
     uint64_t _totalUploadTime;
     uint64_t _captureCount;
+    uint64_t _captureTickCount;
+    uint64_t _textureDeliveryCount;
 }
 
 + (instancetype)sharedProvider {
@@ -52,95 +79,143 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
         }
 
         _clients = [NSHashTable weakObjectsHashTable];
+        _activeClients = [NSHashTable weakObjectsHashTable];
         _excludedGlassViews = [NSHashTable weakObjectsHashTable];
 
         _targetRefreshInterval = 1.0 / 10.0; // Start at 10 FPS
 
         [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(applicationDidEnterBackground)
+                                                 selector:@selector(applicationDidEnterBackground:)
                                                      name:UIApplicationDidEnterBackgroundNotification
                                                    object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(applicationWillEnterForeground)
+                                                 selector:@selector(applicationWillEnterForeground:)
                                                      name:UIApplicationWillEnterForegroundNotification
                                                    object:nil];
     }
     return self;
 }
 
+- (NSUInteger)activeClientCount {
+    return _activeClients.allObjects.count;
+}
+
+- (void)updateRefreshLoopForReason:(NSString *)reason {
+    NSUInteger activeCount = [self activeClientCount];
+    NSUInteger registeredCount = _clients.allObjects.count;
+    BOOL shouldRun = !_applicationInBackground && activeCount > 0 &&
+                     registeredCount > 0;
+
+    if (shouldRun && !_displayLink) {
+        _displayLink = [CADisplayLink displayLinkWithTarget:self
+                                                   selector:@selector(displayLinkFired:)];
+        _displayLink.preferredFramesPerSecond = 10;
+        [_displayLink addToRunLoop:NSRunLoop.mainRunLoop
+                           forMode:NSRunLoopCommonModes];
+        _lastRefreshTime = 0.0;
+        LGIOS12ProviderLog(@"active-client loop=start reason=%@ active=%lu registered=%lu captureFPS=%.1f",
+                           reason ?: @"unknown", (unsigned long)activeCount,
+                           (unsigned long)registeredCount,
+                           1.0 / _targetRefreshInterval);
+        [self requestRefresh];
+        _lastRefreshTime = CACurrentMediaTime();
+    } else if (!shouldRun && _displayLink) {
+        [_displayLink invalidate];
+        _displayLink = nil;
+        LGIOS12ProviderLog(@"active-client loop=stop reason=%@ active=%lu registered=%lu background=%d",
+                           reason ?: @"unknown", (unsigned long)activeCount,
+                           (unsigned long)registeredCount,
+                           _applicationInBackground);
+    }
+}
+
 - (void)registerClient:(id<LGIOS12LiveBackdropClient>)client {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (client) {
-            [self->_clients addObject:client];
-            if (self->_currentBackdropTexture) {
-                [client providerDidUpdateBackdropTexture:self->_currentBackdropTexture source:self->_currentSourceDescription];
-            } else {
-                [self requestRefresh];
-            }
+    if (!client) return;
+    LGIOS12ProviderRunOnMain(^{
+        [self->_clients addObject:client];
+        if (self->_currentBackdropTexture) {
+            [client providerDidUpdateBackdropTexture:self->_currentBackdropTexture
+                                              source:self->_currentSourceDescription];
+        } else {
+            [self requestRefresh];
         }
     });
 }
 
 - (void)unregisterClient:(id<LGIOS12LiveBackdropClient>)client {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (client) {
-            [self->_clients removeObject:client];
-            if (self->_clients.count == 0) {
-                [self setNeedsActiveRefresh:NO];
-            }
+    if (!client) return;
+    LGIOS12ProviderRunOnMain(^{
+        BOOL wasActive = [self->_activeClients containsObject:client];
+        [self->_activeClients removeObject:client];
+        [self->_clients removeObject:client];
+        if (wasActive) {
+            LGIOS12ProviderLog(@"active-client event=unregister class=%@ active=%lu registered=%lu",
+                               NSStringFromClass([client class]),
+                               (unsigned long)[self activeClientCount],
+                               (unsigned long)self->_clients.allObjects.count);
         }
+        [self updateRefreshLoopForReason:@"client-unregistered"];
+    });
+}
+
+- (void)setClient:(id<LGIOS12LiveBackdropClient>)client
+    requestsContinuousRefresh:(BOOL)active {
+    if (!client) return;
+    LGIOS12ProviderRunOnMain(^{
+        BOOL wasActive = [self->_activeClients containsObject:client];
+        if (active) {
+            [self->_clients addObject:client];
+            [self->_activeClients addObject:client];
+        } else {
+            [self->_activeClients removeObject:client];
+        }
+        if (wasActive != active) {
+            UIView *view = [client isKindOfClass:UIView.class]
+                ? (UIView *)client : nil;
+            LGIOS12ProviderLog(@"active-client event=%@ class=%@ active=%lu registered=%lu window=%@ hidden=%d",
+                               active ? @"start" : @"stop",
+                               NSStringFromClass([client class]),
+                               (unsigned long)[self activeClientCount],
+                               (unsigned long)self->_clients.allObjects.count,
+                               NSStringFromClass(view.window.class), view.hidden);
+        }
+        [self updateRefreshLoopForReason:active
+            ? @"client-visible" : @"client-not-visible"];
     });
 }
 
 - (void)registerGlassViewForExclusion:(UIView *)glassView {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (glassView) {
-            [self->_excludedGlassViews addObject:glassView];
-        }
+    if (!glassView) return;
+    LGIOS12ProviderRunOnMain(^{
+        [self->_excludedGlassViews addObject:glassView];
     });
 }
 
 - (void)unregisterGlassViewForExclusion:(UIView *)glassView {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (glassView) {
-            [self->_excludedGlassViews removeObject:glassView];
-        }
+    if (!glassView) return;
+    LGIOS12ProviderRunOnMain(^{
+        [self->_excludedGlassViews removeObject:glassView];
     });
 }
 
-- (void)setNeedsActiveRefresh:(BOOL)active {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self->_needsActiveRefresh == active) return;
-        self->_needsActiveRefresh = active;
-
-        if (active) {
-            if (!self->_displayLink && self->_clients.count > 0) {
-                self->_displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkFired:)];
-                // preferredFramesPerSecond is available throughout the
-                // project's iOS 12+ deployment range.
-                self->_displayLink.preferredFramesPerSecond = 10;
-                [self->_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-                LGIOS12ProviderLog(@"Active refresh loop started (target: %.1f FPS)", 1.0 / self->_targetRefreshInterval);
-            }
-        } else {
-            [self->_displayLink invalidate];
-            self->_displayLink = nil;
-            LGIOS12ProviderLog(@"Active refresh loop stopped");
-        }
-    });
+- (void)applicationDidEnterBackground:(NSNotification *)notification {
+    (void)notification;
+    _applicationInBackground = YES;
+    [self updateRefreshLoopForReason:@"application-background"];
 }
 
-- (void)applicationDidEnterBackground {
-    [self setNeedsActiveRefresh:NO];
-}
-
-- (void)applicationWillEnterForeground {
-    if (_clients.count > 0) {
-        [self requestRefresh];
-    }
+- (void)applicationWillEnterForeground:(NSNotification *)notification {
+    (void)notification;
+    _applicationInBackground = NO;
+    [self updateRefreshLoopForReason:@"application-foreground"];
 }
 
 - (void)displayLinkFired:(CADisplayLink *)link {
+    (void)link;
+    if (_applicationInBackground || [self activeClientCount] == 0) {
+        [self updateRefreshLoopForReason:@"display-link-no-active-clients"];
+        return;
+    }
     CFTimeInterval current = CACurrentMediaTime();
     if (current - _lastRefreshTime >= _targetRefreshInterval) {
         [self performCaptureAndUpload];
@@ -149,48 +224,52 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
 }
 
 - (void)requestRefresh {
-    dispatch_async(dispatch_get_main_queue(), ^{
+    LGIOS12ProviderRunOnMain(^{
         [self performCaptureAndUpload];
     });
 }
 
 - (void)performCaptureAndUpload {
-    if (_isCapturing || !_device) return;
+    if (_isCapturing || !_device || _applicationInBackground) return;
     _isCapturing = YES;
+    uint64_t tick = ++_captureTickCount;
 
     uint64_t captureStart = mach_absolute_time();
-
-    // Hide excluded views
-    NSMutableArray<UIView *> *hiddenViews = [NSMutableArray array];
-    NSMutableArray<NSNumber *> *originalHiddenStates = [NSMutableArray array];
-
-    for (UIView *view in _excludedGlassViews) {
-        if (!view.hidden) {
-            [hiddenViews addObject:view];
-            [originalHiddenStates addObject:@(view.hidden)];
-            view.hidden = YES;
-        }
-    }
-
-    // Capture
     UIWindow *hostWindow = [self springBoardHostWindow];
     if (!hostWindow) {
-        [self finishCaptureWithHiddenViews:hiddenViews originalStates:originalHiddenStates error:[NSError errorWithDomain:@"LGIOS12" code:1 userInfo:@{NSLocalizedDescriptionKey: @"No host window found"}]];
+        [self finishCaptureWithError:[NSError errorWithDomain:@"LGIOS12"
+            code:1 userInfo:@{NSLocalizedDescriptionKey: @"No host window found"}]];
         return;
     }
 
+    NSArray<UIView *> *excludedViews = _excludedGlassViews.allObjects;
+    LGIOS12CaptureStats stats = { 0 };
     NSString *sourceDesc = nil;
-    UIImage *snapshot = [self captureSpringBoardBackdrop:hostWindow sourceDescription:&sourceDesc];
-
-    // Restore excluded views immediately after capture, even if it failed
-    for (NSUInteger i = 0; i < hiddenViews.count; i++) {
-        hiddenViews[i].hidden = originalHiddenStates[i].boolValue;
-    }
+    UIImage *snapshot = [self captureSpringBoardBackdrop:hostWindow
+                                          excludingViews:excludedViews
+                                                   stats:&stats
+                                       sourceDescription:&sourceDesc];
 
     uint64_t captureEnd = mach_absolute_time();
 
+    if (LGIOS12ProviderShouldLogSequence(tick)) {
+        LGIOS12ProviderLog(@"capture tick=%llu hostWindow=%@ windowsRendered=%lu excludedGlass=%lu sameWindowExcluded=%lu standaloneSeparateOverlay=%d exclusionStrategy=%@ success=%d activeClients=%lu",
+                           (unsigned long long)tick,
+                           NSStringFromClass(hostWindow.class),
+                           (unsigned long)stats.windowsRendered,
+                           (unsigned long)stats.excludedGlassCount,
+                           (unsigned long)stats.sameWindowExcludedCount,
+                           stats.standaloneOverlayPresent,
+                           stats.usedModelLayerExclusion
+                               ? @"model-layer-render-no-commit"
+                               : @"structural-window-separation",
+                           snapshot != nil,
+                           (unsigned long)[self activeClientCount]);
+    }
+
     if (!snapshot) {
-        [self finishCaptureWithHiddenViews:nil originalStates:nil error:[NSError errorWithDomain:@"LGIOS12" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Capture failed"}]];
+        [self finishCaptureWithError:[NSError errorWithDomain:@"LGIOS12"
+            code:2 userInfo:@{NSLocalizedDescriptionKey: @"Capture failed"}]];
         return;
     }
 
@@ -210,7 +289,8 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
     uint64_t uploadEnd = mach_absolute_time();
 
     if (!texture) {
-        [self finishCaptureWithHiddenViews:nil originalStates:nil error:error];
+        [self finishCaptureWithError:error ?: [NSError errorWithDomain:@"LGIOS12"
+            code:3 userInfo:@{NSLocalizedDescriptionKey: @"Texture upload failed"}]];
         return;
     }
 
@@ -246,36 +326,40 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
         _captureCount = 0;
     }
 
-    // Notify clients
-    for (id<LGIOS12LiveBackdropClient> client in _clients) {
+    NSArray<id<LGIOS12LiveBackdropClient>> *clients = _clients.allObjects;
+    uint64_t delivery = ++_textureDeliveryCount;
+    if (LGIOS12ProviderShouldLogSequence(delivery)) {
+        LGIOS12ProviderLog(@"texture delivery=%llu source=%@ dimensions=%lux%lu clients=%lu activeClients=%lu device=%@",
+                           (unsigned long long)delivery,
+                           sourceDesc ?: @"unknown",
+                           (unsigned long)texture.width,
+                           (unsigned long)texture.height,
+                           (unsigned long)clients.count,
+                           (unsigned long)[self activeClientCount],
+                           texture.device.name ?: @"unknown");
+    }
+    for (id<LGIOS12LiveBackdropClient> client in clients) {
         [client providerDidUpdateBackdropTexture:texture source:sourceDesc];
     }
 
     _isCapturing = NO;
 }
 
-- (void)finishCaptureWithHiddenViews:(NSArray<UIView *> *)hiddenViews originalStates:(NSArray<NSNumber *> *)states error:(NSError *)error {
-    // Failsafe restore if not already done
-    if (hiddenViews) {
-        for (NSUInteger i = 0; i < hiddenViews.count; i++) {
-            hiddenViews[i].hidden = states[i].boolValue;
-        }
-    }
-
+- (void)finishCaptureWithError:(NSError *)error {
     LGIOS12ProviderLog(@"Capture/upload failed: %@", error.localizedDescription);
-    for (id<LGIOS12LiveBackdropClient> client in _clients) {
+    for (id<LGIOS12LiveBackdropClient> client in _clients.allObjects) {
         [client providerDidFailToUpdateBackdrop:error];
     }
     _isCapturing = NO;
 }
 
-// Reuse existing capture logic from standalone view, but centralized
 - (UIWindow *)springBoardHostWindow {
     UIApplication *application = UIApplication.sharedApplication;
     NSArray<UIWindow *> *windows = [application.windows copy];
     UIWindow *fallback = nil;
     for (UIWindow *window in windows) {
-        if (window.hidden || window.alpha <= 0.01) continue;
+        if (window.hidden || window.alpha <= 0.01 ||
+            LGIOS12IsStandaloneOverlayWindow(window)) continue;
         NSString *className = NSStringFromClass(window.class);
         if ([className containsString:@"HomeScreenWindow"]) return window;
         if (!fallback && window.windowLevel == UIWindowLevelNormal)
@@ -283,8 +367,13 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
     }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    return fallback ?: application.keyWindow;
+    UIWindow *keyWindow = application.keyWindow;
 #pragma clang diagnostic pop
+    if (!fallback && !keyWindow.hidden && keyWindow.alpha > 0.01 &&
+        !LGIOS12IsStandaloneOverlayWindow(keyWindow)) {
+        fallback = keyWindow;
+    }
+    return fallback;
 }
 
 static NSString *LGIOS12HomeWallpaperPathProvider(void) {
@@ -379,62 +468,101 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
 }
 
 
-- (UIImage *)captureSpringBoardBackdrop:(UIWindow *)hostWindow sourceDescription:(NSString **)sourceDescription {
+- (UIImage *)captureSpringBoardBackdrop:(UIWindow *)hostWindow
+                          excludingViews:(NSArray<UIView *> *)excludedViews
+                                   stats:(LGIOS12CaptureStats *)stats
+                       sourceDescription:(NSString **)sourceDescription {
     if (!hostWindow) return nil;
     CGRect screenBounds = UIScreen.mainScreen.bounds;
     CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
 
     UIImage *wallpaper = [self decodeCPBitmap:LGIOS12HomeWallpaperPathProvider()];
 
+    LGIOS12CaptureStats captureStats = { 0 };
+    captureStats.excludedGlassCount = excludedViews.count;
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        if (LGIOS12IsStandaloneOverlayWindow(window) &&
+            !window.hidden && window.alpha > 0.01) {
+            captureStats.standaloneOverlayPresent = YES;
+            break;
+        }
+    }
+
+    NSMutableArray<CALayer *> *sameWindowLayers = [NSMutableArray array];
+    NSMutableArray<NSNumber *> *originalLayerHiddenStates =
+        [NSMutableArray array];
+    for (UIView *glassView in excludedViews) {
+        if (!glassView || glassView.window != hostWindow || glassView.hidden ||
+            glassView.alpha <= 0.01) continue;
+        [sameWindowLayers addObject:glassView.layer];
+        [originalLayerHiddenStates addObject:@(glassView.layer.hidden)];
+    }
+    captureStats.sameWindowExcludedCount = sameWindowLayers.count;
+    captureStats.usedModelLayerExclusion = sameWindowLayers.count > 0;
+
+    // A standalone test view lives in a separate overlay UIWindow and can
+    // never enter this source image.  Production views may eventually share
+    // the host hierarchy, so render their model tree with only the glass
+    // layers hidden.  The state is restored before this transaction commits;
+    // there is no visible UIView hide/show and no forced CA flush.
+    if (captureStats.usedModelLayerExclusion) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        for (CALayer *layer in sameWindowLayers) layer.hidden = YES;
+    }
+
     UIGraphicsBeginImageContextWithOptions(screenBounds.size, YES, screenScale);
     CGContextRef context = UIGraphicsGetCurrentContext();
+    UIImage *snapshot = nil;
+    BOOL drewHostWindow = NO;
 
-    [[UIColor blackColor] setFill];
-    UIRectFill(screenBounds);
+    if (context) {
+        [[UIColor blackColor] setFill];
+        UIRectFill(screenBounds);
 
-    BOOL drewWallpaper = wallpaper != nil;
-    if (wallpaper) LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
+        if (wallpaper) LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
 
-    NSArray<UIWindow *> *windows = [[UIApplication sharedApplication].windows
-        sortedArrayUsingComparator:^NSComparisonResult(UIWindow *left, UIWindow *right) {
-            if (left.windowLevel < right.windowLevel) return NSOrderedAscending;
-            if (left.windowLevel > right.windowLevel) return NSOrderedDescending;
-            return NSOrderedSame;
-        }];
-
-    NSUInteger drawnWindows = 0;
-    for (UIWindow *window in windows) {
-        if (window.hidden || window.alpha <= 0.01 ||
-            window.windowLevel > hostWindow.windowLevel + 0.01) continue;
-
-        NSString *className = NSStringFromClass(window.class);
-        if ([className containsString:@"Keyboard"] ||
-            [className containsString:@"TextEffects"]) continue;
-
-        CGRect frame = window.frame;
+        CGRect frame = hostWindow.frame;
         if (CGRectIsEmpty(frame)) frame = screenBounds;
-
         CGContextSaveGState(context);
         CGContextTranslateCTM(context, CGRectGetMinX(frame), CGRectGetMinY(frame));
-
-        BOOL drewHierarchy = [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:NO];
-        if (!drewHierarchy) [window.layer renderInContext:context];
-
+        if (captureStats.usedModelLayerExclusion) {
+            [hostWindow.layer renderInContext:context];
+            drewHostWindow = YES;
+        } else {
+            drewHostWindow = [hostWindow
+                drawViewHierarchyInRect:hostWindow.bounds
+                      afterScreenUpdates:NO];
+            if (!drewHostWindow) {
+                [hostWindow.layer renderInContext:context];
+                drewHostWindow = YES;
+            }
+        }
         CGContextRestoreGState(context);
-        drawnWindows++;
-        if (window == hostWindow) break;
-    }
 
-    UIImage *snapshot = (drewWallpaper || drawnWindows)
-        ? UIGraphicsGetImageFromCurrentImageContext() : nil;
+        if (wallpaper || drewHostWindow) {
+            snapshot = UIGraphicsGetImageFromCurrentImageContext();
+        }
+    }
     UIGraphicsEndImageContext();
 
-    if (sourceDescription && snapshot) {
-        *sourceDescription = [NSString stringWithFormat:@"%@+%lu-window%@",
-            drewWallpaper ? @"cpbitmap" : @"window-hierarchy",
-            (unsigned long)drawnWindows, drawnWindows == 1 ? @"" : @"s"];
+    if (captureStats.usedModelLayerExclusion) {
+        for (NSUInteger index = 0; index < sameWindowLayers.count; index++) {
+            sameWindowLayers[index].hidden =
+                originalLayerHiddenStates[index].boolValue;
+        }
+        [CATransaction commit];
     }
 
+    captureStats.windowsRendered = drewHostWindow ? 1 : 0;
+    if (stats) *stats = captureStats;
+    if (sourceDescription && snapshot) {
+        *sourceDescription = [NSString stringWithFormat:@"%@+host:%@+%@",
+            wallpaper ? @"cpbitmap" : @"black-base",
+            NSStringFromClass(hostWindow.class),
+            captureStats.usedModelLayerExclusion
+                ? @"model-layer-exclusion" : @"window-hierarchy"];
+    }
     return snapshot;
 }
 

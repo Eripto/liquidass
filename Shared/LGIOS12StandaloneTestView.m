@@ -6,6 +6,7 @@
 #import <simd/simd.h>
 #import <math.h>
 #import <stdarg.h>
+#import "LGIOS12LiveBackdropProvider.h"
 
 // The render-server CAFilter backend cannot be enabled on iOS 12 until the
 // iOS 12 QuartzCore layouts have been independently recovered from that OS's
@@ -28,6 +29,24 @@ static void LGIOS12Log(NSString *format, ...) {
     LGDiagnosticLog(@"%@ %@", kLGIOS12DiagnosticsPrefix, message);
 }
 
+static BOOL LGIOS12ShouldLogSequence(uint64_t sequence) {
+    return sequence <= 3 || (sequence % 30) == 0;
+}
+
+@interface LGIOS12StandaloneOverlayWindow : UIWindow
+@end
+
+@implementation LGIOS12StandaloneOverlayWindow
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hitView = [super hitTest:point withEvent:event];
+    UIView *rootView = self.rootViewController.view;
+    if (hitView == self || hitView == rootView) return nil;
+    return hitView;
+}
+
+@end
+
 static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     UIApplication *application = UIApplication.sharedApplication;
     NSArray<UIWindow *> *windows = [application.windows copy];
@@ -35,22 +54,29 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     for (UIWindow *window in windows) {
         if (window.hidden || window.alpha <= 0.01) continue;
         NSString *className = NSStringFromClass(window.class);
+        if ([className isEqualToString:@"LGIOS12StandaloneOverlayWindow"])
+            continue;
         if ([className containsString:@"HomeScreenWindow"]) return window;
         if (!fallback && window.windowLevel == UIWindowLevelNormal)
             fallback = window;
     }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    return fallback ?: application.keyWindow;
+    UIWindow *keyWindow = application.keyWindow;
 #pragma clang diagnostic pop
+    if (!fallback &&
+        ![NSStringFromClass(keyWindow.class)
+            isEqualToString:@"LGIOS12StandaloneOverlayWindow"]) {
+        fallback = keyWindow;
+    }
+    return fallback;
 }
-
-#import "LGIOS12LiveBackdropProvider.h"
 
 @interface LGIOS12FloatingGlassTestView : UIView <MTKViewDelegate, LGIOS12LiveBackdropClient>
 @property (nonatomic, readonly) BOOL rendererReady;
 @property (nonatomic, readonly) BOOL metalInitialized;
 - (instancetype)initWithFrame:(CGRect)frame;
+- (void)updateContinuousRefreshState;
 @end
 
 @implementation LGIOS12FloatingGlassTestView {
@@ -64,9 +90,10 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     UILabel *_caption;
     CGPoint _panOffset;
     BOOL _loggedRenderCallback;
-    BOOL _loggedDispatchCompletion;
     BOOL _loggedUniforms;
     BOOL _rendererReady;
+    uint64_t _textureDeliveryCount;
+    uint64_t _metalRedrawCount;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -155,9 +182,9 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
         initWithTarget:self action:@selector(handlePan:)];
     [self addGestureRecognizer:pan];
+    self.hidden = YES;
     [[LGIOS12LiveBackdropProvider sharedProvider] registerClient:self];
     [[LGIOS12LiveBackdropProvider sharedProvider] registerGlassViewForExclusion:self];
-    self.hidden = YES;
     return self;
 }
 
@@ -165,10 +192,33 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 - (BOOL)rendererReady { return _rendererReady; }
 - (BOOL)metalInitialized { return _computePipeline && _presentPipeline && _commandQueue; }
 - (void)dealloc {
+    [[LGIOS12LiveBackdropProvider sharedProvider]
+        setClient:self requestsContinuousRefresh:NO];
     [[LGIOS12LiveBackdropProvider sharedProvider] unregisterClient:self];
     [[LGIOS12LiveBackdropProvider sharedProvider] unregisterGlassViewForExclusion:self];
 }
 
+- (void)updateContinuousRefreshState {
+    BOOL visible = self.window != nil && !self.hidden && self.alpha > 0.01 &&
+                   self.metalInitialized;
+    [[LGIOS12LiveBackdropProvider sharedProvider]
+        setClient:self requestsContinuousRefresh:visible];
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    [self updateContinuousRefreshState];
+}
+
+- (void)setHidden:(BOOL)hidden {
+    [super setHidden:hidden];
+    [self updateContinuousRefreshState];
+}
+
+- (void)setAlpha:(CGFloat)alpha {
+    [super setAlpha:alpha];
+    [self updateContinuousRefreshState];
+}
 
 
 - (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
@@ -182,11 +232,16 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     if (_rendererReady && self.hidden) {
         self.hidden = NO;
     }
-    LGIOS12Log(@"MTLTexture acquired success=1 source=%@ dimensions=%lux%lu format=%lu usage=%lu",
-               source, (unsigned long)texture.width,
-               (unsigned long)texture.height,
-               (unsigned long)texture.pixelFormat,
-               (unsigned long)texture.usage);
+    uint64_t delivery = ++_textureDeliveryCount;
+    if (LGIOS12ShouldLogSequence(delivery)) {
+        LGIOS12Log(@"texture delivery=%llu acquired=1 source=%@ dimensions=%lux%lu format=%lu usage=%lu attached=%d hidden=%d",
+                   (unsigned long long)delivery, source,
+                   (unsigned long)texture.width,
+                   (unsigned long)texture.height,
+                   (unsigned long)texture.pixelFormat,
+                   (unsigned long)texture.usage,
+                   self.window != nil, self.hidden);
+    }
     [_metalView draw];
 }
 
@@ -208,7 +263,6 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         _panOffset = CGPointMake(point.x - self.center.x,
                                  point.y - self.center.y);
-        [[LGIOS12LiveBackdropProvider sharedProvider] setNeedsActiveRefresh:YES];
     } else if (recognizer.state == UIGestureRecognizerStateChanged) {
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
@@ -219,8 +273,8 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     } else if (recognizer.state == UIGestureRecognizerStateEnded ||
                recognizer.state == UIGestureRecognizerStateCancelled ||
                recognizer.state == UIGestureRecognizerStateFailed) {
-        [[LGIOS12LiveBackdropProvider sharedProvider] setNeedsActiveRefresh:NO];
         [[LGIOS12LiveBackdropProvider sharedProvider] requestRefresh];
+        [_metalView draw];
     }
 }
 
@@ -324,13 +378,14 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
     [present endEncoding];
     [commandBuffer presentDrawable:drawable];
 
+    uint64_t redraw = ++_metalRedrawCount;
+    BOOL shouldLogRedraw = LGIOS12ShouldLogSequence(redraw);
     __weak typeof(self) weakSelf = self;
     [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
         __strong typeof(weakSelf) self = weakSelf;
-        if (!self || self->_loggedDispatchCompletion) return;
-        self->_loggedDispatchCompletion = YES;
-        LGIOS12Log(@"Metal compute dispatch executed status=%ld completed=%d error=%@",
-                   (long)completed.status,
+        if (!self || !shouldLogRedraw) return;
+        LGIOS12Log(@"Metal redraw=%llu compute dispatch completed status=%ld completed=%d error=%@",
+                   (unsigned long long)redraw, (long)completed.status,
                    completed.status == MTLCommandBufferStatusCompleted,
                    completed.error.localizedDescription ?: @"none");
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -343,14 +398,18 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
         });
     }];
     [commandBuffer commit];
-    LGIOS12Log(@"Metal compute dispatch encoded groups={%lu,%lu} threads={8,8} cardOrigin={%.0f,%.0f}",
-               (unsigned long)groups.width, (unsigned long)groups.height,
-               uniforms.cardOrigin.x, uniforms.cardOrigin.y);
+    if (shouldLogRedraw) {
+        LGIOS12Log(@"Metal redraw=%llu compute dispatch encoded groups={%lu,%lu} threads={8,8} cardOrigin={%.0f,%.0f}",
+                   (unsigned long long)redraw,
+                   (unsigned long)groups.width, (unsigned long)groups.height,
+                   uniforms.cardOrigin.x, uniforms.cardOrigin.y);
+    }
 }
 
 @end
 
 static LGIOS12FloatingGlassTestView *sLGIOS12TestView;
+static LGIOS12StandaloneOverlayWindow *sLGIOS12OverlayWindow;
 
 static void LGIOS12LogLiveCAFilterStages(void) {
     // QuartzCore itself is loaded because CALayer is live.  Every deeper stage
@@ -371,11 +430,47 @@ static void LGIOS12LogLiveCAFilterStages(void) {
 
 
 static void LGIOS12RemoveTestSurface(void) {
-    if (!sLGIOS12TestView) return;
-    LGIOS12Log(@"remove test surface view=%@ superview=%@",
-               sLGIOS12TestView, sLGIOS12TestView.superview);
-    [sLGIOS12TestView removeFromSuperview];
-    sLGIOS12TestView = nil;
+    if (sLGIOS12TestView) {
+        LGIOS12Log(@"remove test surface view=%@ superview=%@ overlay=%@",
+                   sLGIOS12TestView, sLGIOS12TestView.superview,
+                   sLGIOS12OverlayWindow);
+        [[LGIOS12LiveBackdropProvider sharedProvider]
+            setClient:sLGIOS12TestView requestsContinuousRefresh:NO];
+        sLGIOS12TestView.hidden = YES;
+        [sLGIOS12TestView removeFromSuperview];
+        sLGIOS12TestView = nil;
+    }
+    sLGIOS12OverlayWindow.hidden = YES;
+    sLGIOS12OverlayWindow.rootViewController = nil;
+    sLGIOS12OverlayWindow = nil;
+}
+
+static LGIOS12StandaloneOverlayWindow *
+LGIOS12EnsureStandaloneOverlayWindow(UIWindow *hostWindow) {
+    if (!hostWindow) return nil;
+    if (!sLGIOS12OverlayWindow) {
+        sLGIOS12OverlayWindow = [[LGIOS12StandaloneOverlayWindow alloc]
+            initWithFrame:UIScreen.mainScreen.bounds];
+        sLGIOS12OverlayWindow.backgroundColor = UIColor.clearColor;
+        sLGIOS12OverlayWindow.opaque = NO;
+
+        UIViewController *rootController = [UIViewController new];
+        rootController.view.backgroundColor = UIColor.clearColor;
+        rootController.view.opaque = NO;
+        rootController.view.frame = sLGIOS12OverlayWindow.bounds;
+        rootController.view.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                               UIViewAutoresizingFlexibleHeight;
+        sLGIOS12OverlayWindow.rootViewController = rootController;
+    }
+    sLGIOS12OverlayWindow.frame = UIScreen.mainScreen.bounds;
+    sLGIOS12OverlayWindow.windowLevel = hostWindow.windowLevel + 1.0;
+    sLGIOS12OverlayWindow.hidden = NO;
+    LGIOS12Log(@"standalone overlay ready class=%@ hostClass=%@ hostLevel=%.1f overlayLevel=%.1f separateOverlay=YES key=%d",
+               NSStringFromClass(sLGIOS12OverlayWindow.class),
+               NSStringFromClass(hostWindow.class), hostWindow.windowLevel,
+               sLGIOS12OverlayWindow.windowLevel,
+               sLGIOS12OverlayWindow.isKeyWindow);
+    return sLGIOS12OverlayWindow;
 }
 
 
@@ -399,7 +494,17 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
     if (!hostWindow) return;
 
     if (sLGIOS12TestView) {
+        sLGIOS12OverlayWindow.hidden = NO;
+        [sLGIOS12TestView updateContinuousRefreshState];
         [[LGIOS12LiveBackdropProvider sharedProvider] requestRefresh];
+        return;
+    }
+
+    LGIOS12StandaloneOverlayWindow *overlayWindow =
+        LGIOS12EnsureStandaloneOverlayWindow(hostWindow);
+    UIView *overlayRootView = overlayWindow.rootViewController.view;
+    if (!overlayWindow || !overlayRootView) {
+        LGIOS12Log(@"standalone install aborted reason=overlay-window-init-failed stockUI=untouched");
         return;
     }
 
@@ -417,15 +522,24 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
                NSStringFromCGRect(frame), test.metalInitialized);
     if (!test || !test.metalInitialized) {
         LGIOS12Log(@"standalone install aborted reason=renderer-init-failed stockUI=untouched");
+        overlayWindow.hidden = YES;
+        sLGIOS12OverlayWindow = nil;
         return;
     }
 
     test.layer.zPosition = 10000.0;
-    [hostWindow addSubview:test];
+    [overlayRootView addSubview:test];
     sLGIOS12TestView = test;
-    LGIOS12Log(@"addSubview complete view=%@ superview=%@ window=%@ hidden=%d alpha=%.3f frame=%@ z=%.1f",
+    // The view starts hidden during construction so it cannot enter an early
+    // source capture.  Once attached to its separate overlay, make it visible
+    // and let its client lifecycle keep the provider alive even if the first
+    // texture upload needs to retry.
+    test.hidden = NO;
+    LGIOS12Log(@"addSubview complete view=%@ superview=%@ window=%@ hostWindow=%@ separateOverlay=%d hidden=%d alpha=%.3f frame=%@ z=%.1f",
                test, NSStringFromClass(test.superview.class),
-               NSStringFromClass(test.window.class), test.hidden, test.alpha,
+               NSStringFromClass(test.window.class),
+               NSStringFromClass(hostWindow.class),
+               test.window == overlayWindow, test.hidden, test.alpha,
                NSStringFromCGRect(test.frame), test.layer.zPosition);
     [test setNeedsLayout];
     [test layoutIfNeeded];

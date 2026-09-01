@@ -21,6 +21,10 @@ static const void *kLGMaterialSuppressedKey = &kLGMaterialSuppressedKey;
 static const void *kLGMaterialOriginalHiddenKey = &kLGMaterialOriginalHiddenKey;
 static const void *kLGMaterialOriginalAlphaKey = &kLGMaterialOriginalAlphaKey;
 
+static BOOL LGIOS12LiveShouldLogSequence(uint64_t sequence) {
+    return sequence <= 3 || (sequence % 30) == 0;
+}
+
 static NSDictionary<NSString *, id> *sLGGlassPreferences;
 
 static NSString *LGGlassPreferencesPath(void) {
@@ -318,6 +322,7 @@ static CGFloat LGScaleForSize(CGSize s) {
 - (void)updateSpecular;
 - (void)applySpecularAngle:(CGFloat)angle;
 - (void)reapplyFilterForParameterReload;
+- (void)updateIOS12ContinuousRefreshState;
 @end
 
 static void LGRefreshAllLiveGlasses(NSString *reason) {
@@ -528,6 +533,8 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
     id<MTLTexture> _outputTexture;
     BOOL _metalInitializationFailed;
     BOOL _hasRenderedFirstFrame;
+    uint64_t _ios12TextureDeliveryCount;
+    uint64_t _ios12MetalRedrawCount;
 }
 
 - (NSString *)lgEffectiveFilterType {
@@ -669,6 +676,8 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 
 - (void)dealloc {
     if (LGIsIOS12()) {
+        [[LGIOS12LiveBackdropProvider sharedProvider]
+            setClient:self requestsContinuousRefresh:NO];
         [[LGIOS12LiveBackdropProvider sharedProvider] unregisterClient:self];
         [[LGIOS12LiveBackdropProvider sharedProvider] unregisterGlassViewForExclusion:self];
     }
@@ -679,15 +688,24 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 - (void)didMoveToWindow {
     [super didMoveToWindow];
     [self applyFilters];
-    if (LGIsIOS12() && self.window && _metalView && !_metalInitializationFailed) {
-        [[LGIOS12LiveBackdropProvider sharedProvider] requestRefresh];
-    }
+    [self updateIOS12ContinuousRefreshState];
 }
 - (void)setHidden:(BOOL)hidden {
     [super setHidden:hidden];
-    if (LGIsIOS12() && !hidden && self.window && _metalView && !_metalInitializationFailed) {
-        [[LGIOS12LiveBackdropProvider sharedProvider] requestRefresh];
-    }
+    [self updateIOS12ContinuousRefreshState];
+}
+- (void)setAlpha:(CGFloat)alpha {
+    [super setAlpha:alpha];
+    [self updateIOS12ContinuousRefreshState];
+}
+- (void)updateIOS12ContinuousRefreshState {
+    if (!LGIsIOS12()) return;
+    UIWindow *window = self.window;
+    BOOL visible = _metalView && !_metalInitializationFailed && window &&
+                   !self.hidden && self.alpha > 0.01 &&
+                   !window.hidden && window.alpha > 0.01;
+    [[LGIOS12LiveBackdropProvider sharedProvider]
+        setClient:self requestsContinuousRefresh:visible];
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
@@ -1043,8 +1061,21 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
 #pragma mark - LGIOS12LiveBackdropClient
 
 - (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source {
-    if (!texture || texture.device != _device) return;
+    if (!texture) return;
+    if (texture.device != _device) {
+        LGDiagnosticLog(@"renderer.ios12.live texture-rejected reason=device-mismatch textureDevice=%@ rendererDevice=%@",
+                        texture.device.name ?: @"nil", _device.name ?: @"nil");
+        return;
+    }
     _backdropTexture = texture;
+    uint64_t delivery = ++_ios12TextureDeliveryCount;
+    if (LGIOS12LiveShouldLogSequence(delivery)) {
+        LGDiagnosticLog(@"renderer.ios12.live texture-delivery=%llu source=%@ dimensions=%lux%lu attached=%d hidden=%d alpha=%.3f",
+                        (unsigned long long)delivery, source ?: @"unknown",
+                        (unsigned long)texture.width,
+                        (unsigned long)texture.height,
+                        self.window != nil, self.hidden, self.alpha);
+    }
     [_metalView draw];
 }
 
@@ -1143,6 +1174,8 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
     [present drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     [present endEncoding];
 
+    uint64_t redraw = ++_ios12MetalRedrawCount;
+    BOOL shouldLogRedraw = LGIOS12LiveShouldLogSequence(redraw);
     __weak typeof(self) weakSelf = self;
     [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -1160,11 +1193,25 @@ static void LGIOS12InitializeSharedMetal(id<MTLDevice> device) {
             } else {
                 LGLog(@"LGLiveBackdropView render failed: %@", completed.error.localizedDescription);
             }
+            if (shouldLogRedraw) {
+                LGDiagnosticLog(@"renderer.ios12.live Metal-redraw=%llu status=%ld completed=%d error=%@ firstFrameReady=%d",
+                                (unsigned long long)redraw,
+                                (long)completed.status,
+                                completed.status == MTLCommandBufferStatusCompleted,
+                                completed.error.localizedDescription ?: @"none",
+                                strongSelf->_hasRenderedFirstFrame);
+            }
         });
     }];
 
     [commandBuffer presentDrawable:drawable];
     [commandBuffer commit];
+    if (shouldLogRedraw) {
+        LGDiagnosticLog(@"renderer.ios12.live Metal-redraw=%llu encoded cardOrigin={%.0f,%.0f} output=%lux%lu",
+                        (unsigned long long)redraw,
+                        uniforms.cardOrigin.x, uniforms.cardOrigin.y,
+                        (unsigned long)width, (unsigned long)height);
+    }
 }
 
 @end
