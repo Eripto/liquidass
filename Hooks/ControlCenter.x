@@ -4,6 +4,7 @@
 #import "../Shared/LGGlassKit.h"
 #import "../Shared/LGSharedSupport.h"
 #import <objc/runtime.h>
+#import "../Shared/LGIOS12GlassHost.h"
 
 #pragma mark - taxonomy
 
@@ -796,7 +797,45 @@ static void roundModuleContainer(UIView *module) {
         }
     });
 
+    // ===================================================================
+    // PHASE 1: iOS 12 Control Center on the verified Metal Liquid Glass.
+    //
+    // HOST: the same MTMaterialView instances LiquidAss already identifies
+    // through ccGlassRadiusForMaterial() -- the module tile backgrounds inside
+    // CCUIContentModuleContainerView. No new detection, no new class-name
+    // guessing, and every existing exclusion is inherited unchanged: the
+    // SBElastic volume-HUD hierarchy, non-MRU slider internals, and anything
+    // under the minimum size all still return a negative radius and are
+    // therefore left completely alone.
+    //
+    // WHY THE TILES AND NOT THE FULL-SCREEN BACKDROP: the full-screen CC
+    // backdrop material is handled elsewhere in this file (blur cap, dim
+    // sync). Converting it is a separate decision with its own visual and
+    // performance profile, so phase 1 deliberately leaves it on the stock
+    // implementation.
+    //
+    // WHAT THE GLASS SHOWS: the provider composes its backdrop from wallpaper
+    // plus Home Screen icons only -- it never renders the whole host window --
+    // so Control Center's own content structurally cannot enter the backdrop.
+    // A CC tile therefore refracts the live Home Screen behind it, which is
+    // exactly what it should show, and there is no feedback path even before
+    // capture exclusion is considered.
+    //
+    // FOREGROUND: a module's real controls live in sibling views above the
+    // material, not inside it, so inserting at index 0 of the material keeps
+    // every button, slider and label above the glass and fully interactive.
+    // ===================================================================
+    if (LGIOS12GlassSurfacesAvailable()) {
+        LGIOS12RegisterGlassSurface(@"ControlCenter", ^CGFloat(UIView *material) {
+            return ccGlassRadiusForMaterial(material);
+        });
+    }
+
     LGRegisterMaterialHost(@"ControlCenter", 110, ^BOOL(UIView *material) {
+        // On iOS 12 the Metal path above claims these materials instead;
+        // running both would double-composite the same host. Every other iOS
+        // version keeps the existing LGLiveBackdropView behaviour untouched.
+        if (LGIOS12GlassSurfacesAvailable()) return NO;
         return ccGlassRadiusForMaterial(material) >= 0.0;
     }, UIEdgeInsetsZero, ^CGFloat(UIView *material) {
         return ccGlassRadiusForMaterial(material);

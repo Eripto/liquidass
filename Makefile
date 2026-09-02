@@ -45,6 +45,7 @@ liquidass_FILES     = Tweak.x Hooks/Dock.x Hooks/Folder.x Hooks/AppIcons.x Hooks
                       Shared/LGIOS12ForegroundProbeView.m \
                       Shared/LGIOS12PerfHUDView.m \
                       Shared/LGIOS12MetalGlassView.m \
+                      Shared/LGIOS12GlassHost.x \
                       Shared/LGSharedSupport.m Shared/LGCompatibility.m
 liquidass_CFLAGS    = -fobjc-arc -DLIQUIDASS_DEBUG=$(LIQUIDASS_DEBUG)
 liquidass_FRAMEWORKS = UIKit QuartzCore CoreText CoreGraphics CoreMotion Metal MetalKit
