@@ -1716,39 +1716,76 @@ typedef struct {
             _perf.textureAge.worst = 0.0;
         }
 
-        if (_captureCount % 60 == 0) {
-            mach_timebase_info_data_t tb;
-            mach_timebase_info(&tb);
-            double captureMs = (double)(_totalCaptureTime / _captureCount) * tb.numer / tb.denom / 1000000.0;
-            double uploadMs = (double)(_totalUploadTime / _captureCount) * tb.numer / tb.denom / 1000000.0;
-            double deliveredFPS = _rollingDeliveryIntervalCount > 0
-                ? 1000.0 / (_rollingDeliveryIntervalSumMs / _rollingDeliveryIntervalCount) : 0.0;
-            LGIOS12ProviderLog(@"Performance avg (60 captures): hierarchyCapture=%.2fms upload=%.2fms "
-                               "deliveredFPS(actual)=%.1f droppedStale=%llu droppedSuperseded=%llu",
-                               captureMs, uploadMs, deliveredFPS,
-                               (unsigned long long)_droppedStaleCount,
-                               (unsigned long long)_droppedSupersededCount);
-
-            // Adaptive throttling: explicit 30/24/20/15 tiers against the
-            // ~33.3ms budget for 30 FPS, per the requested target model,
-            // rather than a continuous multiplicative fudge.
+        // ADAPTIVE CAPTURE CADENCE.
+        //
+        // Re-evaluated every 20 deliveries rather than 60, so a device that
+        // cannot hold a tier drops out of it in well under a second instead of
+        // stuttering through two more.
+        //
+        // The decision uses the measured total source-frame latency -- capture
+        // through publish -- not a sum of two stages, because that total is
+        // what actually governs whether a tier is sustainable.
+        //
+        // A stable 24 beats a nominal 30 with stalls, so the worst-frame value
+        // gates promotion: a tier is only climbed when BOTH the average and
+        // the recent worst fit the faster budget. Demotion needs only the
+        // average, so a struggling device sheds rate promptly.
+        //
+        // None of this affects card smoothness: dragging redraws Metal from
+        // the latest texture on its own display link and never requests a
+        // capture (see dragRedrawDisplayLinkFired:).
+        if (_captureCount % 20 == 0) {
             static const double kTierIntervals[] = {1.0/30.0, 1.0/24.0, 1.0/20.0, 1.0/15.0};
-            double totalMs = captureMs + uploadMs;
-            NSInteger currentTier = 0;
+            static const int kTierCount = 4;
+
+            int currentTier = 0;
             double bestDelta = DBL_MAX;
-            for (NSInteger i = 0; i < 4; i++) {
+            for (int i = 0; i < kTierCount; i++) {
                 double delta = fabs(_targetRefreshInterval - kTierIntervals[i]);
                 if (delta < bestDelta) { bestDelta = delta; currentTier = i; }
             }
-            if (totalMs > (1000.0 * kTierIntervals[currentTier]) && currentTier < 3) {
+
+            double avgMs = _perf.totalSourceFrame.ema;
+            double worstMs = _perf.totalSourceFrame.worst;
+            double budgetMs = 1000.0 * kTierIntervals[currentTier];
+
+            if (avgMs > budgetMs && currentTier < kTierCount - 1) {
                 _targetRefreshInterval = kTierIntervals[currentTier + 1];
-                LGIOS12ProviderLog(@"Throttling refresh rate to %.1f FPS (measured %.2fms > %.2fms budget)",
-                                   1.0 / _targetRefreshInterval, totalMs, 1000.0 * kTierIntervals[currentTier]);
-            } else if (currentTier > 0 &&
-                       totalMs < (1000.0 * kTierIntervals[currentTier - 1] * 0.85)) {
-                _targetRefreshInterval = kTierIntervals[currentTier - 1];
-                LGIOS12ProviderLog(@"Increasing refresh rate to %.1f FPS (measured %.2fms has headroom)",
-                                   1.0 / _targetRefreshInterval, totalMs);
+                if (LGIOS12CurrentDiagMode() != 0) {
+                    LGIOS12ProviderLog(@"cadence DOWN to %.0f FPS (avg %.2fms > budget %.2fms, worst %.2fms)",
+                                       1.0 / _targetRefreshInterval, avgMs, budgetMs, worstMs);
+                }
+            } else if (currentTier > 0) {
+                double fasterBudgetMs = 1000.0 * kTierIntervals[currentTier - 1];
+                // 0.85 leaves headroom so the tier does not oscillate, and the
+                // worst-frame test keeps a spiky device out of a tier it can
+                // only hit on average.
+                if (avgMs < fasterBudgetMs * 0.85 && worstMs < fasterBudgetMs) {
+                    _targetRefreshInterval = kTierIntervals[currentTier - 1];
+                    if (LGIOS12CurrentDiagMode() != 0) {
+                        LGIOS12ProviderLog(@"cadence UP to %.0f FPS (avg %.2fms, worst %.2fms, budget %.2fms)",
+                                           1.0 / _targetRefreshInterval, avgMs, worstMs, fasterBudgetMs);
+                    }
+                }
+            }
+        }
+
+        if (_captureCount % 60 == 0) {
+            if (LGIOS12CurrentDiagMode() != 0) {
+                LGIOS12ProviderLog(@"Performance avg (60 captures): capture=%.2fms upload=%.2fms "
+                                   "total=%.2fms(worst %.2fms) deliveredFPS=%.1f target=%.0f "
+                                   "iconComposition=%.2fms wallpaper=%.2fms "
+                                   "cacheHit=%lu miss=%lu droppedStale=%llu droppedSuperseded=%llu",
+                                   LGIOS12MsFromTicks(_totalCaptureTime / MAX((uint64_t)1, _captureCount)),
+                                   LGIOS12MsFromTicks(_totalUploadTime / MAX((uint64_t)1, _captureCount)),
+                                   _perf.totalSourceFrame.ema, _perf.totalSourceFrame.worst,
+                                   _perf.deliveredBackdropFPS,
+                                   _targetRefreshInterval > 0 ? 1.0 / _targetRefreshInterval : 0.0,
+                                   _perf.iconComposition.ema, _perf.wallpaperComposition.ema,
+                                   (unsigned long)_perf.iconCacheHits,
+                                   (unsigned long)_perf.iconCacheMisses,
+                                   (unsigned long long)_droppedStaleCount,
+                                   (unsigned long long)_droppedSupersededCount);
             }
 
             _totalCaptureTime = 0;
