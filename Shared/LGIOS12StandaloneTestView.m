@@ -642,20 +642,20 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
     [test setNeedsLayout];
     [test layoutIfNeeded];
 
-    // ON-SCREEN FOREGROUND PROBE.
+    // ON-SCREEN FOREGROUND PROBE -- MODE 7 ONLY.
     //
-    // Installed alongside the glass card, in the same overlay window, which is
-    // already excluded from capture -- so the probe can neither perturb the
-    // source image nor appear inside it. It is plain UIKit: no Metal, no
-    // shader, no provider capture code, nothing that can affect the wallpaper
-    // path or the capture CTM.
+    // This panel did its job: it established on device that icon pixels are
+    // obtainable and that composition works. It is diagnostic apparatus, not
+    // product, so it is now strictly gated behind the diagnostic mode that
+    // owns it. Mode 0 is normal Liquid Glass and nothing else: no panel, no
+    // enlarged icon, no mechanism thumbnails, no debug text, no labels. (The
+    // magenta foreground outline is likewise confined to modes 3 and 7, and
+    // the raw-source shader to modes 1-4 and 7, so neither can reach mode 0.)
     //
-    // On by default in this build so the result is visible from a screen
-    // recording alone; set DisableVisualProbe=true in the ios12diag plist to
-    // suppress it.
-    NSDictionary *diagPrefs = [NSDictionary dictionaryWithContentsOfFile:
-        @"/var/mobile/Library/Preferences/dylv.liquidass.ios12diag.plist"];
-    if (![diagPrefs[@"DisableVisualProbe"] boolValue]) {
+    // It was previously on by default, which is what covered the glass card.
+    // The card itself was always being created -- it was hidden behind the
+    // panel, not replaced by it.
+    if (LGIOS12CurrentDiagMode() == 7) {
         CGFloat probeWidth = MIN(340.0, CGRectGetWidth(hostWindow.bounds) - 16.0);
         CGFloat probeHeight = MIN(430.0, CGRectGetHeight(hostWindow.bounds) - 80.0);
         CGRect probeFrame = CGRectMake(
@@ -668,10 +668,22 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
         [overlayRootView addSubview:probe];
         sLGIOS12ProbeView = probe;
         [probe startProbing];
-        LGIOS12Log(@"visual foreground probe installed frame=%@ window=%@",
+        LGIOS12Log(@"visual foreground probe installed (MODE 7 ONLY) frame=%@ window=%@",
                    NSStringFromCGRect(probeFrame),
                    NSStringFromClass(probe.window.class));
     }
+
+    // Surface census. Confirms from the device itself that mode 0 puts exactly
+    // one thing on screen -- the Liquid Glass card -- and that the probe panel
+    // is absent rather than merely moved.
+    LGIOS12Log(@"surface census mode=%ld glassCard=%d glassCardVisible=%d "
+               "glassShader=%@ probePanel=%d overlaySubviews=%lu",
+               (long)LGIOS12CurrentDiagMode(),
+               sLGIOS12TestView != nil,
+               sLGIOS12TestView != nil && !sLGIOS12TestView.hidden,
+               LGIOS12DiagRawDisplay() ? @"rawBackdropIOS12" : @"liquidGlassIOS12",
+               sLGIOS12ProbeView != nil,
+               (unsigned long)overlayRootView.subviews.count);
 }
 
 
