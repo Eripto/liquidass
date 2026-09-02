@@ -1,6 +1,8 @@
 #import <UIKit/UIKit.h>
 #import "../Shared/LGLiveBackdropView.h"
 #import "../Shared/LGGlassKit.h"
+#import "../Shared/LGIOS12GlassHost.h"
+#import "../Shared/LGSharedSupport.h"
 #import <objc/runtime.h>
 
 static BOOL LGHasMaterialAncestorBefore(UIView *material, NSString *stopClassName) {
@@ -102,9 +104,15 @@ static void LGUpdatePlatterGlass(UIView *material) {
 
     if (LGIsPlatterMaterial(material)) {
         BOOL topBanner = LGIsTopBannerPresentation(material);
+        // iOS 12: Notification Center platters are claimed by the shared Metal
+        // glass registry instead. Running both would double-composite the same
+        // host. Transient top banners are NOT claimed and stay here -- see the
+        // registration in %ctor for why.
+        if (!topBanner && LGIOS12GlassSurfacesAvailable()) return;
         NSString *prefix = topBanner ? @"Banner" : @"Notification";
         NSString *previous = objc_getAssociatedObject(material, kLGPlatterClassificationKey);
         if (previous && ![previous isEqualToString:prefix]) {
+
             LGRemoveGlassFromMaterial(material, kGlassKey);
         }
         if (![previous isEqualToString:prefix]) {
@@ -173,3 +181,46 @@ static void LGUpdatePlatterGlass(UIView *material) {
     LGDisableLockscreenStackDimming(self);
 }
 %end
+
+%ctor {
+    // ===================================================================
+    // PHASE 2: iOS 12 Notification Center on the verified Metal glass.
+    //
+    // HOST: the same MTMaterialView instances this file already identifies as
+    // platter backgrounds via LGIsPlatterMaterial() -- the outermost material
+    // inside a PLPlatterView. No new class-name guessing: the existing
+    // detection already excludes nested materials
+    // (LGHasMaterialAncestorBefore) and the switcher's app-suggestion banner,
+    // and those exclusions are inherited exactly.
+    //
+    // BANNERS ARE DELIBERATELY EXCLUDED, and this is a correctness decision,
+    // not a scope cut. This file already separates the two presentations:
+    // LGIsTopBannerPresentation() distinguishes a transient banner from a
+    // Notification Center / lock screen notification. The shared backdrop is
+    // composed from wallpaper plus Home Screen icons ONLY, so it is the right
+    // backdrop for Notification Center -- which is presented over the Home or
+    // Lock Screen -- but the WRONG one for a banner, which floats over
+    // whatever app is in the foreground. A banner would refract the Home
+    // Screen while sitting over an app. Banners stay on the existing
+    // implementation until the provider can supply an app-content backdrop.
+    //
+    // PLATTER ACTION BUTTONS are also left alone: they sit inside a platter
+    // that now carries glass of its own, and nesting a second glass surface
+    // inside the first would double-composite.
+    //
+    // FOREGROUND: notification text, icons and buttons are sibling views above
+    // the platter material, not children of it, so inserting at index 0 of the
+    // material keeps them above the glass and interactive.
+    // ===================================================================
+    if (LGIOS12GlassSurfacesAvailable()) {
+        LGIOS12RegisterGlassSurface(@"NotificationCenter", ^CGFloat(UIView *material) {
+            if (!LGIsPlatterMaterial(material)) return -1.0;
+            if (LGIsTopBannerPresentation(material)) return -1.0;
+            CGSize size = material.bounds.size;
+            if (size.width < 100.0 || size.height < 30.0) return -1.0;
+            // iOS 12 notification platter rounding, used only if the host
+            // exposes none of its own.
+            return LGIOS12GlassInheritedCornerRadius(material, 13.0);
+        });
+    }
+}

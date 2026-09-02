@@ -34,6 +34,14 @@ typedef CGFloat (^LGIOS12GlassRadiusProvider)(UIView *material);
 void LGIOS12RegisterGlassSurface(NSString *name,
                                  LGIOS12GlassRadiusProvider radiusProvider);
 
+// Best-effort corner radius for a material, read from the host hierarchy
+// rather than assumed: the material's own rounding, else the nearest rounded
+// ancestor, else the caller's fallback. Shared so each surface does not
+// reimplement it. Note the glass is a SUBVIEW of the material, so the host's
+// real mask already clips it exactly -- this value only positions the shader's
+// Fresnel edge on the visible corner.
+CGFloat LGIOS12GlassInheritedCornerRadius(UIView *material, CGFloat fallback);
+
 // YES only on iOS 12 inside SpringBoard. Callers use this to decide whether to
 // hand their material to this path or leave it on the existing
 // LGLiveBackdropView implementation.

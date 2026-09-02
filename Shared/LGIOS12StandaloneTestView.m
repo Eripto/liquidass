@@ -10,6 +10,7 @@
 #import "LGIOS12ForegroundProbeView.h"
 #import "LGIOS12PerfHUDView.h"
 #import "LGIOS12MetalGlassView.h"
+#import "LGIOS12Quality.h"
 
 // The render-server CAFilter backend cannot be enabled on iOS 12 until the
 // iOS 12 QuartzCore layouts have been independently recovered from that OS's
@@ -398,6 +399,11 @@ static void LGIOS12TestPrefsReloaded(CFNotificationCenterRef center,
     dispatch_async(dispatch_get_main_queue(), ^{
         LGIOS12Log(@"preference reload notification received name=%@",
                    (__bridge NSString *)name);
+        // LIVE QUALITY CHANGE. Re-reads Global.Quality and bumps the shared
+        // generation; the provider notices at its next frame boundary and
+        // reconfigures (buffers, icon cache, cadence ceiling), and glass views
+        // pick up the new scale on their next draw. No respring needed.
+        LGIOS12QualityReload();
         LGIOS12InstallOrUpdateTestSurface();
     });
 }

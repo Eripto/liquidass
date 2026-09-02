@@ -104,18 +104,12 @@ static BOOL dockIOS12GlassEnabled(void) {
     return enabled;
 }
 
-// The Dock's real corner radius, read from the host rather than assumed, so
-// the shader's Fresnel edge lands on the visible corner.
+// Dock-specific fallback only; the generic lookup lives in the shared host.
 static CGFloat dockIOS12CornerRadius(UIView *material) {
-    if (material.layer.cornerRadius > 0.0) return material.layer.cornerRadius;
-    // A masked host reports zero; fall back to the platter's own rounding.
-    for (UIView *ancestor = material; ancestor; ancestor = ancestor.superview) {
-        if (ancestor.layer.cornerRadius > 0.0) return ancestor.layer.cornerRadius;
-    }
-    if (dockModeForMaterial(material) == LGDockModeFloating) {
-        return MIN(22.0, CGRectGetHeight(material.bounds) * 0.5);
-    }
-    return dockIsFullScreenPhone(material) ? 22.0 : 0.0;
+    CGFloat fallback = (dockModeForMaterial(material) == LGDockModeFloating)
+        ? MIN(22.0, CGRectGetHeight(material.bounds) * 0.5)
+        : (dockIsFullScreenPhone(material) ? 22.0 : 0.0);
+    return LGIOS12GlassInheritedCornerRadius(material, fallback);
 }
 
 static void configureDockGlass(UIView *material, LGLiveBackdropView *glass) {

@@ -2,6 +2,7 @@
 #import <MetalKit/MetalKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import "LGSharedSupport.h"
+#import "LGIOS12Quality.h"
 #import <mach/mach_time.h>
 #import <dlfcn.h>
 #import <float.h>
@@ -1159,11 +1160,17 @@ typedef struct {
     UIWindow *_cachedIconWindow;
     uint64_t  _cachedIconSetTick;
 
+    uint32_t _appliedQualityGeneration;
+
     LGIOS12PerfSnapshot _perf;
     uint64_t _lastDisplayLinkTicks;
     uint64_t _lastPublishTicks;
     uint64_t _lastRedrawTicks;
     uint64_t _perfWindowResetCounter;
+}
+
+- (CGFloat)effectiveCaptureScale {
+    return LGIOS12QualityEffectiveScale();
 }
 
 - (LGIOS12PerfSnapshot)performanceSnapshot {
@@ -1177,6 +1184,11 @@ typedef struct {
     snapshot.captureBufferBytes =
         _captureBufferPixelHeight * _captureBufferBytesPerRow;
     snapshot.legacyPath = LGIOS12PerfLegacyPath();
+    snapshot.qualityTier = LGIOS12QualityCurrentTier();
+    snapshot.qualityEffectiveScale = LGIOS12QualityEffectiveScale();
+    snapshot.qualityMaxCaptureFPS = LGIOS12QualityMaxCaptureFPS();
+    snapshot.backdropTextureWidth = _captureBufferPixelWidth;
+    snapshot.backdropTextureHeight = _captureBufferPixelHeight;
     return snapshot;
 }
 
@@ -1475,6 +1487,24 @@ typedef struct {
         return;
     }
 
+    // LIVE QUALITY CHANGE. Picked up at a frame boundary rather than mid-frame,
+    // so nothing reallocates underneath work already in progress. The capture
+    // buffers reallocate naturally on the next size mismatch; the icon artwork
+    // cache is rendered at the old scale and must be dropped explicitly.
+    uint32_t qualityGeneration = LGIOS12QualityGeneration();
+    if (qualityGeneration != _appliedQualityGeneration) {
+        _appliedQualityGeneration = qualityGeneration;
+        [self invalidateIconArtworkCacheForReason:@"quality-changed"];
+        _wallpaperBaseValid = NO;
+        double maxFPS = LGIOS12QualityMaxCaptureFPS();
+        if (_targetRefreshInterval < 1.0 / maxFPS) {
+            _targetRefreshInterval = 1.0 / maxFPS;
+        }
+        LGIOS12ProviderLog(@"quality applied tier=%@ effectiveScale=%.2f maxFPS=%.0f",
+                           LGIOS12QualityTierName(LGIOS12QualityCurrentTier()),
+                           LGIOS12QualityEffectiveScale(), maxFPS);
+    }
+
     _isCapturing = YES;
     uint64_t tick = ++_captureTickCount;
     uint32_t sequence = ++_captureSequence;
@@ -1749,6 +1779,15 @@ typedef struct {
             double worstMs = _perf.totalSourceFrame.worst;
             double budgetMs = 1000.0 * kTierIntervals[currentTier];
 
+            // Quality caps the ladder. It is a ceiling only: the ladder still
+            // measures real latency and drops below it freely, so quality can
+            // never force MORE capturing than the device can sustain.
+            double qualityCeilingInterval = 1.0 / LGIOS12QualityMaxCaptureFPS();
+            if (_targetRefreshInterval < qualityCeilingInterval) {
+                _targetRefreshInterval = qualityCeilingInterval;
+                budgetMs = 1000.0 * qualityCeilingInterval;
+            }
+
             if (avgMs > budgetMs && currentTier < kTierCount - 1) {
                 _targetRefreshInterval = kTierIntervals[currentTier + 1];
                 if (LGIOS12CurrentDiagMode() != 0) {
@@ -1760,7 +1799,8 @@ typedef struct {
                 // 0.85 leaves headroom so the tier does not oscillate, and the
                 // worst-frame test keeps a spiky device out of a tier it can
                 // only hit on average.
-                if (avgMs < fasterBudgetMs * 0.85 && worstMs < fasterBudgetMs) {
+                if (avgMs < fasterBudgetMs * 0.85 && worstMs < fasterBudgetMs &&
+                    kTierIntervals[currentTier - 1] >= qualityCeilingInterval) {
                     _targetRefreshInterval = kTierIntervals[currentTier - 1];
                     if (LGIOS12CurrentDiagMode() != 0) {
                         LGIOS12ProviderLog(@"cadence UP to %.0f FPS (avg %.2fms, worst %.2fms, budget %.2fms)",
@@ -2591,7 +2631,9 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     }
 
     [self ensureIconArtworkCache];
-    CGFloat scale = UIScreen.mainScreen.scale ?: 2.0;
+    // Icon artwork follows the same scale, so lowering quality also shrinks
+    // the per-icon bitmaps -- less CPU per re-render and less cache memory.
+    CGFloat scale = LGIOS12QualityEffectiveScale();
     CGRect firstRect = CGRectNull;
 
     for (UIView *icon in icons) {
@@ -2687,7 +2729,9 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                        sourceDescription:(NSString **)sourceDescription {
     if (!hostWindow) return nil;
     CGRect screenBounds = UIScreen.mainScreen.bounds;
-    CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
+    // The single shared scale: capture buffer, compute output texture and the
+    // shader's screen-space uniforms all use this, so they cannot drift apart.
+    CGFloat screenScale = LGIOS12QualityEffectiveScale();
 
     uint64_t stageStart = mach_absolute_time();
     NSArray<UIWindow *> *visibleWindows =

@@ -47,12 +47,19 @@ typedef struct {
     NSUInteger iconCacheEntries;
     NSUInteger iconCacheBytes;
     NSUInteger captureBufferBytes;
+    NSUInteger backdropTextureWidth;
+    NSUInteger backdropTextureHeight;
 
     unsigned long long droppedStale;
     unsigned long long droppedSuperseded;
     unsigned long long captureCount;
 
     BOOL legacyPath;
+
+    // Quality diagnostics
+    NSInteger qualityTier;          // LGIOS12QualityTier
+    double    qualityEffectiveScale;
+    double    qualityMaxCaptureFPS;
 } LGIOS12PerfSnapshot;
 
 @protocol LGIOS12LiveBackdropClient <NSObject>
@@ -86,6 +93,13 @@ typedef struct {
 @property (nonatomic, readonly) NSUInteger lastForegroundIconsDrawn;
 @property (nonatomic, readonly) NSUInteger lastForegroundPrimitivesDrawn;
 @property (nonatomic, readonly, copy) NSString *lastForegroundPathName;
+
+// The single shared scale for the capture buffer, the Metal compute output
+// texture and the shader's screen-space uniforms. Driven by the Global.Quality
+// tier. Glass clients MUST use this rather than UIScreen.scale, because the
+// shader adds output-space pixels to the source-space cardOrigin and the two
+// spaces have to share a scale.
+- (CGFloat)effectiveCaptureScale;
 
 // Live pipeline timings. Cheap to read; safe on the main thread.
 - (LGIOS12PerfSnapshot)performanceSnapshot;

@@ -30,6 +30,15 @@ void LGIOS12RegisterGlassSurface(NSString *name,
           name, (unsigned long)sSurfaces.count);
 }
 
+CGFloat LGIOS12GlassInheritedCornerRadius(UIView *material, CGFloat fallback) {
+    if (!material) return fallback;
+    if (material.layer.cornerRadius > 0.0) return material.layer.cornerRadius;
+    for (UIView *ancestor = material; ancestor; ancestor = ancestor.superview) {
+        if (ancestor.layer.cornerRadius > 0.0) return ancestor.layer.cornerRadius;
+    }
+    return fallback;
+}
+
 BOOL LGIOS12GlassSurfacesAvailable(void) {
     return LGIsIOS12() && LGIsSpringBoardProcess();
 }

@@ -1,5 +1,6 @@
 #import "LGIOS12PerfHUDView.h"
 #import "LGIOS12LiveBackdropProvider.h"
+#import "LGIOS12Quality.h"
 
 @implementation LGIOS12PerfHUDView {
     UILabel *_headlineLabel;
@@ -86,7 +87,10 @@ static NSString *LGIOS12HUDRow(NSString *name, LGIOS12Stat stat) {
     _headlineLabel.text = [NSString stringWithFormat:
         @"backdrop %.1f fps  ·  metal %.1f fps  ·  target %.0f\n%@",
         perf.deliveredBackdropFPS, perf.metalRedrawFPS, perf.targetFPS,
-        perf.legacyPath ? @"PATH: LEGACY (optimizations off)" : @"PATH: OPTIMIZED"];
+        [NSString stringWithFormat:@"quality %@ · scale %.2f · cap %.0f fps%@",
+            LGIOS12QualityTierName((LGIOS12QualityTier)perf.qualityTier),
+            perf.qualityEffectiveScale, perf.qualityMaxCaptureFPS,
+            perf.legacyPath ? @" · LEGACY" : @""]];
 
     NSMutableString *table = [NSMutableString string];
     [table appendFormat:@"%-22s %7s %7s\n", "stage", "avg ms", "worst"];
@@ -108,6 +112,9 @@ static NSString *LGIOS12HUDRow(NSString *name, LGIOS12Stat stat) {
     [table appendFormat:@"icon cache hit=%lu miss=%lu entries=%lu\n",
         (unsigned long)perf.iconCacheHits, (unsigned long)perf.iconCacheMisses,
         (unsigned long)perf.iconCacheEntries];
+    [table appendFormat:@"backdrop texture %lux%lu\n",
+        (unsigned long)perf.backdropTextureWidth,
+        (unsigned long)perf.backdropTextureHeight];
     [table appendFormat:@"mem: capture buf %.2f MB · icon cache %.2f MB\n",
         perf.captureBufferBytes / 1048576.0, perf.iconCacheBytes / 1048576.0];
     [table appendFormat:@"dropped stale=%llu superseded=%llu captures=%llu",

@@ -266,8 +266,22 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
         if (!renderPass) [self logMetalEarlyReturn:@"no-render-pass-descriptor"];
         return;
     }
-    NSUInteger width = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.width));
-    NSUInteger height = MAX((NSUInteger)1, (NSUInteger)llround(view.drawableSize.height));
+    // QUALITY: the compute output is sized by the SHARED scale, not the
+    // drawable. At HIGH this is exactly the drawable size, so the verified
+    // configuration is unchanged. Below HIGH the compute pass does
+    // proportionally less work and the existing present pass upscales the
+    // result -- it already samples with filter::linear over normalized
+    // coordinates, so no shader change is required.
+    //
+    // This must match the provider's capture scale: the kernel adds output
+    // pixel coordinates directly to the source-space cardOrigin, so the two
+    // spaces share one scale or refraction misaligns.
+    CGFloat renderScale =
+        [LGIOS12LiveBackdropProvider sharedProvider].effectiveCaptureScale;
+    NSUInteger width = MAX((NSUInteger)1,
+        (NSUInteger)llround(CGRectGetWidth(self.bounds) * renderScale));
+    NSUInteger height = MAX((NSUInteger)1,
+        (NSUInteger)llround(CGRectGetHeight(self.bounds) * renderScale));
     if (!_outputTexture || _outputTexture.width != width ||
         _outputTexture.height != height) {
         MTLTextureDescriptor *outputDescriptor =
@@ -286,7 +300,9 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
     }
 
     CGRect screenRect = [self convertRect:self.bounds toView:nil];
-    CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
+    // Every screen-space uniform below uses the same shared scale as the
+    // capture buffer and the output texture.
+    CGFloat screenScale = renderScale;
     LGIOS12LiveUniforms uniforms = {
         .outputResolution = { (float)width, (float)height },
         .sourceResolution = { (float)_backdropTexture.width,
