@@ -14,6 +14,9 @@ typedef struct {
     float blurRadius;
     float specularOpacity;
     float specularAngle;
+    // Source pixels per output pixel: captureScale / outputScale.
+    // 1.0 reproduces the previous behaviour exactly.
+    float sourceScale;
     vector_float4 tintColor;
 } LGIOS12LiveUniforms;
 
@@ -24,6 +27,7 @@ static NSString * const kLGIOS12LiveMetalSource = @
 "  float2 outputResolution; float2 sourceResolution; float2 cardOrigin;\n"
 "  float radius; float bezelWidth; float glassThickness; float refractionScale;\n"
 "  float refractiveIndex; float blurRadius; float specularOpacity; float specularAngle;\n"
+"  float sourceScale;\n"
 "  float4 tintColor;\n"
 "};\n"
 "float surfaceConvexSquircle(float x) { return pow(1.0-pow(1.0-x,4.0),0.25); }\n"
@@ -65,8 +69,8 @@ static NSString * const kLGIOS12LiveMetalSource = @
 "  float bezel=max(u.bezelWidth,1.0); float ratio=clamp(edgeDistance/bezel,0.0,1.0);\n"
 "  float normDisp=edgeDistance<bezel?displacement(ratio,u.glassThickness,bezel,1.0/max(u.refractiveIndex,1.001)):0.0;\n"
 "  float2 dispPx=-dir*normDisp*bezel*u.refractionScale;\n"
-"  float2 sampleUV=clamp((u.cardOrigin+px+dispPx)/u.sourceResolution,0.0,1.0);\n"
-"  float2 texel=1.0/u.sourceResolution; float blurStep=max(1.0,u.blurRadius*0.35);\n"
+"  float2 sampleUV=clamp((u.cardOrigin+(px+dispPx)*u.sourceScale)/u.sourceResolution,0.0,1.0);\n"
+"  float2 texel=1.0/u.sourceResolution; float blurStep=max(1.0,u.blurRadius*0.35*u.sourceScale);\n"
 "  float4 sharp=source.sample(s,sampleUV);\n"
 "  float4 blurred=sharp*0.24;\n"
 "  blurred+=source.sample(s,sampleUV+float2( blurStep,0.0)*texel)*0.11;\n"
@@ -103,7 +107,7 @@ static NSString * const kLGIOS12LiveMetalSource = @
 "  uint W=output.get_width(), H=output.get_height(); if(gid.x>=W || gid.y>=H) return;\n"
 "  constexpr sampler s(filter::linear,address::clamp_to_edge);\n"
 "  float2 px=float2(gid)+0.5;\n"
-"  float2 uv=clamp((u.cardOrigin+px)/u.sourceResolution,0.0,1.0);\n"
+"  float2 uv=clamp((u.cardOrigin+px*u.sourceScale)/u.sourceResolution,0.0,1.0);\n"
 "  float4 c=source.sample(s,uv);\n"
 "  uint m=14;\n"
 "  if(gid.x<m && gid.y<m) c=float4(1.0,0.0,0.0,1.0);\n"

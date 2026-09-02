@@ -3,7 +3,9 @@
 
 static LGIOS12QualityTier sTier = LGIOS12QualityTierHigh;
 static CGFloat sRenderScaleFactor = 1.0;
-static double sMaxCaptureFPS = 30.0;
+// Global capture target. Quality does not modify it.
+static const double kLGIOS12TargetCaptureFPS = 40.0;
+static double sMaxCaptureFPS = kLGIOS12TargetCaptureFPS;
 static uint32_t sGeneration = 1;
 static dispatch_once_t sLoadOnce;
 
@@ -14,33 +16,28 @@ static void LGIOS12QualityApplyValue(CGFloat quality) {
     if (!isfinite(quality)) quality = 1.0;
     quality = fmin(1.0, fmax(0.1, quality));
 
-    LGIOS12QualityTier tier;
-    CGFloat factor;
-    double maxFPS;
-    if (quality < 0.40) {
-        tier = LGIOS12QualityTierLow;
-        factor = 0.50;      // quarter of the pixels, CPU and GPU alike
-        maxFPS = 20.0;
-    } else if (quality < 0.80) {
-        tier = LGIOS12QualityTierMedium;
-        factor = 0.75;
-        maxFPS = 24.0;
-    } else {
-        tier = LGIOS12QualityTierHigh;
-        factor = 1.00;      // exactly the verified configuration
-        maxFPS = 30.0;
-    }
+    // MONOTONIC IDENTITY MAPPING. The slider value IS the backdrop resolution
+    // multiplier: 1.00 -> 1.00x native, 0.60 -> 0.60x, 0.10 -> 0.10x. No tiers
+    // and no rounding, so every slider movement changes the source texture
+    // dimensions. Aspect ratio is preserved because the same factor scales both
+    // axes of the full-screen capture.
+    CGFloat factor = quality;
 
-    BOOL changed = (tier != sTier) || (factor != sRenderScaleFactor) ||
-                   (maxFPS != sMaxCaptureFPS);
+    // The tier is now a DIAGNOSTIC LABEL ONLY. It no longer gates anything --
+    // it never changes cadence and never changes a visual parameter.
+    LGIOS12QualityTier tier = (quality < 0.40) ? LGIOS12QualityTierLow
+                            : (quality < 0.80) ? LGIOS12QualityTierMedium
+                                               : LGIOS12QualityTierHigh;
+
+    BOOL changed = (factor != sRenderScaleFactor);
     sTier = tier;
     sRenderScaleFactor = factor;
-    sMaxCaptureFPS = maxFPS;
+    sMaxCaptureFPS = kLGIOS12TargetCaptureFPS;   // quality never limits cadence
     if (changed) {
         sGeneration++;
-        LGLog(@"ios12.quality tier=%@ sliderValue=%.2f renderScaleFactor=%.2f "
-              "maxCaptureFPS=%.0f generation=%u",
-              LGIOS12QualityTierName(tier), quality, factor, maxFPS, sGeneration);
+        LGLog(@"ios12.quality value=%.2f backdropScaleFactor=%.2f label=%@ generation=%u "
+              "(resolution only -- blur/refraction/tint/Fresnel/specular/radius unaffected)",
+              quality, factor, LGIOS12QualityTierName(tier), sGeneration);
     }
 }
 

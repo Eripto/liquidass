@@ -405,6 +405,11 @@ static void LGIOS12TestPrefsReloaded(CFNotificationCenterRef center,
         // pick up the new scale on their next draw. No respring needed.
         LGIOS12QualityReload();
         LGIOS12InstallOrUpdateTestSurface();
+        // Request a fresh backdrop so a quality change is visible immediately
+        // rather than at whatever the next scheduled capture happens to be.
+        // Reaches every registered glass client -- Control Center, Notification
+        // Center and the standalone card all share this one provider.
+        [[LGIOS12LiveBackdropProvider sharedProvider] requestRefresh];
     });
 }
 

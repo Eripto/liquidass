@@ -17,29 +17,26 @@
 // The default of 1.0 maps to HIGH with a render scale of exactly 1.0, so an
 // untouched install renders bit-identically to the device-verified build.
 //
-// WHAT THE TIER CONTROLS
+// WHAT THE SETTING CONTROLS -- AND ONLY THIS
 //
-//   render scale     multiplies the screen scale for BOTH the CPU backdrop
-//                    capture buffer AND the Metal compute output texture.
-//                    Tying them together is not an optimisation -- it is
-//                    required for correctness: the shader adds output-space
-//                    pixel coordinates directly to the source-space cardOrigin
-//                    (sampleUV = (cardOrigin + px + disp) / sourceResolution),
-//                    so the two spaces MUST share a scale or refraction
-//                    misaligns. One scale drives capture, output, cardOrigin,
-//                    corner radius, bezel and blur together, which is why
-//                    lowering quality reduces work without changing the look
-//                    beyond resolution.
+// The BACKDROP TEXTURE RESOLUTION. Nothing else. The slider value is used
+// directly as the multiplier on the full-screen capture scale, monotonically
+// and without tiers: 1.00 -> 1.00x native, 0.60 -> 0.60x, 0.10 -> 0.10x, with
+// the aspect ratio preserved because one factor scales both axes.
 //
-//   cadence ceiling  caps how fast the adaptive ladder may run. It is a
-//                    CEILING, not a target: the existing 30/24/20/15 ladder
-//                    still measures real latency and drops below it freely.
-//                    Quality never forces MORE capturing.
+// It does NOT change blur, blur radius, refraction, distortion, tint, Fresnel,
+// specular, corner radius, or any other shader parameter, and it does NOT
+// change capture cadence. The glass is rendered at the display's native scale
+// at every quality level, so the effect looks identical -- it is simply
+// sampling a sharper or softer source.
 //
-// The compute output is upscaled by the existing present pass, which already
-// samples with filter::linear over normalized coordinates, so no shader source
-// change is needed to support this.
-// ===========================================================================
+// This decoupling required one change in the kernel. It previously computed
+// sampleUV = (cardOrigin + px + dispPx) / sourceResolution, adding OUTPUT-space
+// pixels straight to a SOURCE-space origin, which is only valid when the two
+// scales are equal. A sourceScale uniform (captureScale / outputScale) now
+// makes the conversion explicit. At 100% quality sourceScale is 1.0 and every
+// expression reduces to the previous one exactly, so the device-verified
+// appearance is unchanged.
 
 typedef NS_ENUM(NSInteger, LGIOS12QualityTier) {
     LGIOS12QualityTierLow = 0,
@@ -47,20 +44,19 @@ typedef NS_ENUM(NSInteger, LGIOS12QualityTier) {
     LGIOS12QualityTierHigh,
 };
 
-// Current tier, derived from Global.Quality. Cheap; safe to call per frame.
+// Diagnostic label only (LOW/MEDIUM/HIGH). Gates nothing.
 LGIOS12QualityTier LGIOS12QualityCurrentTier(void);
 NSString *LGIOS12QualityTierName(LGIOS12QualityTier tier);
 
-// Multiplier applied to UIScreen.mainScreen.scale. 1.0 at HIGH.
+// The slider value used directly as a backdrop-resolution multiplier.
 CGFloat LGIOS12QualityRenderScaleFactor(void);
 
-// UIScreen.mainScreen.scale * the factor above -- the single scale that the
-// capture buffer, the compute output texture and the shader's screen-space
-// uniforms all share.
+// UIScreen.mainScreen.scale * the factor above -- the scale of the shared
+// BACKDROP CAPTURE only. Glass rendering stays at the native screen scale.
 CGFloat LGIOS12QualityEffectiveScale(void);
 
-// Upper bound on capture rate for the tier. The adaptive ladder may still run
-// slower than this; it may never run faster.
+// The global capture target (40 FPS). Quality does not modify this; it is kept
+// as the ladder's ceiling so the adaptive fallback has a defined top.
 double LGIOS12QualityMaxCaptureFPS(void);
 
 // Bumped whenever the setting changes. Clients compare a stored value against

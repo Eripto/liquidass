@@ -276,8 +276,22 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
     // This must match the provider's capture scale: the kernel adds output
     // pixel coordinates directly to the source-space cardOrigin, so the two
     // spaces share one scale or refraction misaligns.
-    CGFloat renderScale =
+    // TWO INDEPENDENT SCALES, which is the whole point of this phase.
+    //
+    //   outputScale  = the display's native scale. The glass is ALWAYS rendered
+    //                  at native resolution, so blur, refraction, Fresnel,
+    //                  specular, tint and corner radius are pixel-identical at
+    //                  every quality level.
+    //   captureScale = the shared backdrop resolution, driven by the quality
+    //                  slider. This is the only thing quality changes.
+    //
+    // sourceScale converts between them for the kernel. At 100% quality they
+    // are equal, sourceScale is 1.0, and every shader expression reduces to the
+    // device-verified one exactly.
+    CGFloat outputScale = UIScreen.mainScreen.scale ?: 2.0;
+    CGFloat captureScale =
         [LGIOS12LiveBackdropProvider sharedProvider].effectiveCaptureScale;
+    CGFloat renderScale = outputScale;
 
     // GEOMETRY: size the compute output from the view's ON-SCREEN rect, not
     // its bounds. The kernel walks px from 0..width and adds it to cardOrigin
@@ -340,8 +354,10 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
         .outputResolution = { (float)width, (float)height },
         .sourceResolution = { (float)_backdropTexture.width,
                               (float)_backdropTexture.height },
-        .cardOrigin = { (float)(CGRectGetMinX(screenRect) * screenScale),
-                        (float)(CGRectGetMinY(screenRect) * screenScale) },
+        // cardOrigin is in SOURCE pixels; everything else below is in OUTPUT
+        // pixels. sourceScale is what reconciles them in the kernel.
+        .cardOrigin = { (float)(CGRectGetMinX(screenRect) * captureScale),
+                        (float)(CGRectGetMinY(screenRect) * captureScale) },
         .radius = (float)(self.layer.cornerRadius * screenScale),
         .bezelWidth = (float)(bezelPoints * screenScale),
         .glassThickness = 18.0f,
@@ -350,12 +366,13 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
         .blurRadius = (float)(7.0 * screenScale),
         .specularOpacity = 0.72f,
         .specularAngle = (float)M_PI_4,
+        .sourceScale = (float)(captureScale / MAX(outputScale, 0.01)),
         .tintColor = { 0.06f, 0.06f, 0.06f, 0.16f }
     };
 
     if (!_loggedUniforms) {
         _loggedUniforms = YES;
-        LGIOS12Log(@"shader uniforms output={%.0f,%.0f} backdrop={%.0f,%.0f} cardOrigin={%.0f,%.0f} radius=%.2f bezel=%.2f thickness=%.2f refractionScale=%.2f refractiveIndex=%.2f blurRadius=%.2f specularOpacity=%.2f specularAngle=%.4f tintRGBA={0.06,0.06,0.06,0.16}",
+        LGIOS12Log(@"shader uniforms output={%.0f,%.0f} backdrop={%.0f,%.0f} cardOrigin={%.0f,%.0f} radius=%.2f bezel=%.2f thickness=%.2f refractionScale=%.2f refractiveIndex=%.2f blurRadius=%.2f specularOpacity=%.2f specularAngle=%.4f sourceScale=%.3f outputScale=%.2f captureScale=%.2f tintRGBA={0.06,0.06,0.06,0.16}",
                    uniforms.outputResolution.x,
                    uniforms.outputResolution.y,
                    uniforms.sourceResolution.x,
@@ -364,7 +381,8 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
                    uniforms.radius, uniforms.bezelWidth,
                    uniforms.glassThickness, uniforms.refractionScale,
                    uniforms.refractiveIndex, uniforms.blurRadius,
-                   uniforms.specularOpacity, uniforms.specularAngle);
+                   uniforms.specularOpacity, uniforms.specularAngle,
+                   uniforms.sourceScale, outputScale, captureScale);
     }
 
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];

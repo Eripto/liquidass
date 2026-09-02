@@ -1261,7 +1261,7 @@ typedef struct {
         _activeClients = [NSHashTable weakObjectsHashTable];
         _excludedGlassViews = [NSHashTable weakObjectsHashTable];
 
-        _targetRefreshInterval = 1.0 / 24.0; // Start at 24 FPS
+        _targetRefreshInterval = 1.0 / 40.0; // Start at the 40 FPS target
         _uploadQueue = dispatch_queue_create("dylv.liquidass.ios12.upload",
                                               DISPATCH_QUEUE_SERIAL);
 
@@ -1300,7 +1300,14 @@ typedef struct {
     if (shouldRun && !_displayLink) {
         _displayLink = [CADisplayLink displayLinkWithTarget:self
                                                    selector:@selector(displayLinkFired:)];
-        _displayLink.preferredFramesPerSecond = 30;
+        // Ask for the 40 FPS capture target. On a 60 Hz panel CoreAnimation
+        // can only deliver rates it can express against vsync, so this
+        // resolves to the nearest achievable value rather than a true 40 --
+        // which is exactly the graceful fallback case. The interval gate in
+        // -displayLinkFired: and the adaptive ladder below both work from
+        // MEASURED delivery, so whatever the panel actually provides is what
+        // the pipeline settles on.
+        _displayLink.preferredFramesPerSecond = 40;
         [_displayLink addToRunLoop:NSRunLoop.mainRunLoop
                            forMode:NSRunLoopCommonModes];
         _lastRefreshTime = 0.0;
@@ -1494,15 +1501,15 @@ typedef struct {
     uint32_t qualityGeneration = LGIOS12QualityGeneration();
     if (qualityGeneration != _appliedQualityGeneration) {
         _appliedQualityGeneration = qualityGeneration;
+        // Dimension-dependent caches only. Buffers and textures reallocate on
+        // the next size mismatch inside ensureCaptureContextForPointSize:, so
+        // nothing is reallocated when the dimensions did not actually change.
+        // Cadence is deliberately NOT touched: quality is resolution only.
         [self invalidateIconArtworkCacheForReason:@"quality-changed"];
         _wallpaperBaseValid = NO;
-        double maxFPS = LGIOS12QualityMaxCaptureFPS();
-        if (_targetRefreshInterval < 1.0 / maxFPS) {
-            _targetRefreshInterval = 1.0 / maxFPS;
-        }
-        LGIOS12ProviderLog(@"quality applied tier=%@ effectiveScale=%.2f maxFPS=%.0f",
-                           LGIOS12QualityTierName(LGIOS12QualityCurrentTier()),
-                           LGIOS12QualityEffectiveScale(), maxFPS);
+        LGIOS12ProviderLog(@"quality applied value-driven backdropScale=%.2f "
+                           "(cadence untouched; resolution only)",
+                           LGIOS12QualityEffectiveScale());
     }
 
     _isCapturing = YES;
@@ -1765,7 +1772,7 @@ typedef struct {
         // the latest texture on its own display link and never requests a
         // capture (see dragRedrawDisplayLinkFired:).
         if (_captureCount % 20 == 0) {
-            static const double kTierIntervals[] = {1.0/30.0, 1.0/24.0, 1.0/20.0, 1.0/15.0};
+            static const double kTierIntervals[] = {1.0/40.0, 1.0/30.0, 1.0/24.0, 1.0/20.0};
             static const int kTierCount = 4;
 
             int currentTier = 0;
@@ -1779,10 +1786,10 @@ typedef struct {
             double worstMs = _perf.totalSourceFrame.worst;
             double budgetMs = 1000.0 * kTierIntervals[currentTier];
 
-            // Quality caps the ladder. It is a ceiling only: the ladder still
-            // measures real latency and drops below it freely, so quality can
-            // never force MORE capturing than the device can sustain.
-            double qualityCeilingInterval = 1.0 / LGIOS12QualityMaxCaptureFPS();
+            // Quality no longer influences cadence at all -- it changes backdrop
+            // resolution only. The ceiling is the global 40 FPS target, and the
+            // ladder still measures real latency and falls back freely.
+            double qualityCeilingInterval = kTierIntervals[0];
             if (_targetRefreshInterval < qualityCeilingInterval) {
                 _targetRefreshInterval = qualityCeilingInterval;
                 budgetMs = 1000.0 * qualityCeilingInterval;
@@ -1808,6 +1815,21 @@ typedef struct {
                     }
                 }
             }
+        }
+
+        // BACKDROP RESOLUTION / CADENCE DIAGNOSTICS. Rate-limited to once every
+        // 60 delivered frames, log-only, no on-screen UI. This is the line that
+        // proves the quality slider is actually resizing the source texture.
+        if (_captureCount % 60 == 0) {
+            LGIOS12ProviderLog(@"backdrop quality=%.2f captureScale=%.2f "
+                               "sourceTexture=%zux%zu targetSourceFPS=%.1f "
+                               "deliveredSourceFPS=%.1f textureAge=%.1fms",
+                               LG_prefFloat(@"Global.Quality", 1.0),
+                               LGIOS12QualityEffectiveScale(),
+                               _captureBufferPixelWidth, _captureBufferPixelHeight,
+                               _targetRefreshInterval > 0 ? 1.0 / _targetRefreshInterval : 0.0,
+                               _perf.deliveredBackdropFPS,
+                               _perf.textureAge.ema);
         }
 
         if (_captureCount % 60 == 0) {
