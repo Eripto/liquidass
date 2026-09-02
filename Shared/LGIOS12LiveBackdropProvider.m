@@ -950,7 +950,18 @@ typedef struct {
     NSString *_iconStrategyEvidence;
     uint64_t  _iconStrategyResolvedAtTick;
     NSString *_lastIconContributorSummary;
+
+    // Published to the on-screen probe (see the header).
+    NSUInteger _lastForegroundIconsEnumerated;
+    NSUInteger _lastForegroundIconsDrawn;
+    NSUInteger _lastForegroundPrimitivesDrawn;
+    NSString  *_lastForegroundPathName;
 }
+
+- (NSUInteger)lastForegroundIconsEnumerated { return _lastForegroundIconsEnumerated; }
+- (NSUInteger)lastForegroundIconsDrawn { return _lastForegroundIconsDrawn; }
+- (NSUInteger)lastForegroundPrimitivesDrawn { return _lastForegroundPrimitivesDrawn; }
+- (NSString *)lastForegroundPathName { return _lastForegroundPathName ?: @"(none yet)"; }
 
 + (instancetype)sharedProvider {
     static LGIOS12LiveBackdropProvider *shared = nil;
@@ -2252,6 +2263,12 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             for (NSString *contributor in contributors)
                 [renderedClasses addObject:contributor];
         }
+
+        _lastForegroundIconsEnumerated = foregroundResult.iconsEnumerated;
+        _lastForegroundIconsDrawn = foregroundResult.iconsDrawn;
+        _lastForegroundPrimitivesDrawn = foregroundResult.primitivesDrawn;
+        _lastForegroundPathName =
+            LGIOS12IconRenderStrategyName(foregroundResult.strategy);
 
         // Diagnostic outline anchor: if nothing drew, still record where the
         // first enumerated icon actually is, so modes 3 and 7 outline the

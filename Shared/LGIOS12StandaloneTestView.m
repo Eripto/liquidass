@@ -7,6 +7,7 @@
 #import <math.h>
 #import <stdarg.h>
 #import "LGIOS12LiveBackdropProvider.h"
+#import "LGIOS12ForegroundProbeView.h"
 
 // The render-server CAFilter backend cannot be enabled on iOS 12 until the
 // iOS 12 QuartzCore layouts have been independently recovered from that OS's
@@ -488,6 +489,7 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 
 static LGIOS12FloatingGlassTestView *sLGIOS12TestView;
 static LGIOS12StandaloneOverlayWindow *sLGIOS12OverlayWindow;
+static LGIOS12ForegroundProbeView *sLGIOS12ProbeView;
 
 static void LGIOS12LogLiveCAFilterStages(void) {
     // QuartzCore itself is loaded because CALayer is live.  Every deeper stage
@@ -508,6 +510,9 @@ static void LGIOS12LogLiveCAFilterStages(void) {
 
 
 static void LGIOS12RemoveTestSurface(void) {
+    [sLGIOS12ProbeView stopProbing];
+    [sLGIOS12ProbeView removeFromSuperview];
+    sLGIOS12ProbeView = nil;
     if (sLGIOS12TestView) {
         LGIOS12Log(@"remove test surface view=%@ superview=%@ overlay=%@",
                    sLGIOS12TestView, sLGIOS12TestView.superview,
@@ -636,6 +641,37 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
                NSStringFromCGRect(test.frame), test.layer.zPosition);
     [test setNeedsLayout];
     [test layoutIfNeeded];
+
+    // ON-SCREEN FOREGROUND PROBE.
+    //
+    // Installed alongside the glass card, in the same overlay window, which is
+    // already excluded from capture -- so the probe can neither perturb the
+    // source image nor appear inside it. It is plain UIKit: no Metal, no
+    // shader, no provider capture code, nothing that can affect the wallpaper
+    // path or the capture CTM.
+    //
+    // On by default in this build so the result is visible from a screen
+    // recording alone; set DisableVisualProbe=true in the ios12diag plist to
+    // suppress it.
+    NSDictionary *diagPrefs = [NSDictionary dictionaryWithContentsOfFile:
+        @"/var/mobile/Library/Preferences/dylv.liquidass.ios12diag.plist"];
+    if (![diagPrefs[@"DisableVisualProbe"] boolValue]) {
+        CGFloat probeWidth = MIN(340.0, CGRectGetWidth(hostWindow.bounds) - 16.0);
+        CGFloat probeHeight = MIN(430.0, CGRectGetHeight(hostWindow.bounds) - 80.0);
+        CGRect probeFrame = CGRectMake(
+            (CGRectGetWidth(hostWindow.bounds) - probeWidth) * 0.5,
+            MAX(30.0, CGRectGetHeight(hostWindow.bounds) * 0.06),
+            probeWidth, probeHeight);
+        LGIOS12ForegroundProbeView *probe =
+            [[LGIOS12ForegroundProbeView alloc] initWithFrame:probeFrame];
+        probe.layer.zPosition = 20000.0;   // above the glass card
+        [overlayRootView addSubview:probe];
+        sLGIOS12ProbeView = probe;
+        [probe startProbing];
+        LGIOS12Log(@"visual foreground probe installed frame=%@ window=%@",
+                   NSStringFromCGRect(probeFrame),
+                   NSStringFromClass(probe.window.class));
+    }
 }
 
 

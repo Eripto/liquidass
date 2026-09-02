@@ -24,6 +24,15 @@
 - (void)registerGlassViewForExclusion:(UIView *)glassView;
 - (void)unregisterGlassViewForExclusion:(UIView *)glassView;
 
+// Read-only snapshot of the most recent foreground composition, published for
+// the on-screen visual probe so it can distinguish "no icon pixels exist" from
+// "icon pixels exist but composition dropped them" without reading a log.
+// Written on the main thread during capture; no side effects on read.
+@property (nonatomic, readonly) NSUInteger lastForegroundIconsEnumerated;
+@property (nonatomic, readonly) NSUInteger lastForegroundIconsDrawn;
+@property (nonatomic, readonly) NSUInteger lastForegroundPrimitivesDrawn;
+@property (nonatomic, readonly, copy) NSString *lastForegroundPathName;
+
 @end
 
 // Diagnostic mode selection -- see the block comment in

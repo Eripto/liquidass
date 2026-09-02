@@ -42,6 +42,7 @@ liquidass_FILES     = Tweak.x Hooks/Dock.x Hooks/Folder.x Hooks/AppIcons.x Hooks
                       Shared/LGGlassKit.x Shared/LGLiveBackdropView.m \
                       Shared/LGIOS12LiveBackdropProvider.m \
                       Shared/LGIOS12StandaloneTestView.m \
+                      Shared/LGIOS12ForegroundProbeView.m \
                       Shared/LGSharedSupport.m Shared/LGCompatibility.m
 liquidass_CFLAGS    = -fobjc-arc -DLIQUIDASS_DEBUG=$(LIQUIDASS_DEBUG)
 liquidass_FRAMEWORKS = UIKit QuartzCore CoreText CoreGraphics CoreMotion Metal MetalKit
