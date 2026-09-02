@@ -758,8 +758,14 @@ static NSUInteger LGIOS12RenderIconWithStrategy(
         case LGIOS12IconRenderStrategyIconLayer: {
             CGRect drawn = CGRectNull;
             if (LGIOS12RenderViewAtScreenPositionLogged(icon, context, &drawn)) {
-                [contributors addObject:[NSString stringWithFormat:@"%@.layer",
-                    NSStringFromClass(icon.class)]];
+                // `contributors` is nil in mode 0. Building one formatted
+                // NSString per icon per frame -- 24 icons at 30 Hz is 720
+                // string allocations a second -- is evidence collection, and
+                // evidence belongs in diagnostic modes.
+                if (contributors) {
+                    [contributors addObject:[NSString stringWithFormat:@"%@.layer",
+                        NSStringFromClass(icon.class)]];
+                }
                 return 1;
             }
             return 0;
@@ -772,8 +778,10 @@ static NSUInteger LGIOS12RenderIconWithStrategy(
                 CGRect drawn = CGRectNull;
                 if (LGIOS12RenderViewAtScreenPositionLogged(candidate, context,
                                                             &drawn)) {
-                    [contributors addObject:[NSString stringWithFormat:@"%@.layer",
-                        NSStringFromClass(candidate.class)]];
+                    if (contributors) {
+                        [contributors addObject:[NSString stringWithFormat:@"%@.layer",
+                            NSStringFromClass(candidate.class)]];
+                    }
                     drawnCount++;
                 }
             }
@@ -790,8 +798,10 @@ static NSUInteger LGIOS12RenderIconWithStrategy(
                 if (!image) continue;
                 LGIOS12DrawImageInScreenRect(context, image, layerScreenRect);
                 CGImageRelease(image);
-                [contributors addObject:[NSString stringWithFormat:@"%@.contents",
-                    NSStringFromClass(layer.class)]];
+                if (contributors) {
+                    [contributors addObject:[NSString stringWithFormat:@"%@.contents",
+                        NSStringFromClass(layer.class)]];
+                }
                 drawnCount++;
             }
             return drawnCount;
@@ -1319,7 +1329,7 @@ typedef struct {
 
     uint64_t captureEnd = mach_absolute_time();
 
-    if (LGIOS12ProviderShouldLogSequence(tick)) {
+    if (diagMode != 0 && LGIOS12ProviderShouldLogSequence(tick)) {
         LGIOS12ProviderLog(@"capture tick=%llu sequence=%u hostWindow=%@ windowsRendered=%lu excludedGlass=%lu sameWindowExcluded=%lu standaloneSeparateOverlay=%d exclusionStrategy=%@ success=%d activeClients=%lu",
                            (unsigned long long)tick, sequence,
                            NSStringFromClass(hostWindow.class),
@@ -1748,6 +1758,7 @@ typedef struct {
 
 - (void)logWindowStack:(NSArray<UIWindow *> *)windows
              hostWindow:(UIWindow *)hostWindow {
+    if (LGIOS12CurrentDiagMode() == 0) return;
     if (!LGIOS12ProviderShouldLogSequence(_captureTickCount)) return;
     NSMutableArray<NSString *> *entries = [NSMutableArray array];
     for (UIWindow *window in windows) {
@@ -2375,7 +2386,13 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                             mach_absolute_time() - stageStart);
 
         NSInteger diagMode = LGIOS12CurrentDiagMode();
-        NSMutableSet<NSString *> *contributors = [NSMutableSet set];
+        // Mode 0 collects no evidence: no contributor strings, no pixel
+        // probes, no legacy-path comparison, no hierarchy dumps, no formatted
+        // source description. All of it remains available in the diagnostic
+        // modes that own it.
+        BOOL collectEvidence = (diagMode != 0);
+        NSMutableSet<NSString *> *contributors =
+            collectEvidence ? [NSMutableSet set] : nil;
 
         // MODE 7 (FOREGROUND_SINGLE_ICON): render exactly ONE visible icon,
         // through the same per-icon engine the normal path uses, so what it
@@ -2396,7 +2413,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             foregroundRenderCount = foregroundResult.primitivesDrawn;
             drewForeground = foregroundResult.primitivesDrawn > 0;
             for (NSString *contributor in contributors)
-                [renderedClasses addObject:contributor];
+                [renderedClasses addObject:contributor];   // nil set: no-op
         }
         LGIOS12StatAddTicks(&_perf.iconComposition, mach_absolute_time() - stageStart);
 
@@ -2418,6 +2435,14 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
 
         if (diagMode == 2) {
             foregroundSource = @"skipped:wallpaper-only-diagnostic-mode";
+        } else if (drewForeground && !collectEvidence) {
+            // Mode 0: a constant. The formatted variant below allocates a
+            // string, sorts an array and joins it EVERY capture, and its value
+            // changes whenever a count changes -- which during a page scroll
+            // is nearly every frame, which in turn used to re-trigger the
+            // whole verdict block below. That was the single most expensive
+            // thing in the mode 0 hot path.
+            foregroundSource = @"per-icon";
         } else if (drewForeground) {
             // Names the objects that actually supplied pixels, not the
             // container we hoped would.
@@ -2429,6 +2454,8 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                 (unsigned long)foregroundResult.primitivesDrawn,
                 [[contributors.allObjects sortedArrayUsingSelector:@selector(compare:)]
                     componentsJoinedByString:@","]];
+        } else if (!collectEvidence) {
+            foregroundSource = @"FAILED:no-icon-pixels";
         } else {
             // NO WHOLE-HOST FALLBACK, in any mode. It masked foreground
             // failure behind an opaque copy of the whole screen, and it is the
@@ -2490,9 +2517,12 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     captureStats.windowsRendered = (drewWallpaperWindow ? 1 : 0);
     if (stats) *stats = captureStats;
     if (sourceDescription && snapshot) {
-        *sourceDescription = [NSString stringWithFormat:
-            @"wallpaper=%@+foreground=%@+composition=wallpaper-then-per-icon-foreground",
-            wallpaperSource, foregroundSource];
+        // Another per-frame allocation that only diagnostics read.
+        *sourceDescription = (LGIOS12CurrentDiagMode() == 0)
+            ? @"wallpaper+per-icon-foreground"
+            : [NSString stringWithFormat:
+                @"wallpaper=%@+foreground=%@+composition=wallpaper-then-per-icon-foreground",
+                wallpaperSource, foregroundSource];
     }
     // ===================================================================
     // SINGLE FOREGROUND VERDICT LINE -- the one line to grep for.
@@ -2500,8 +2530,17 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     // schedule, so it is always present without flooding the log.
     // ===================================================================
     BOOL foregroundOK = drewForeground && foregroundRenderCount > 0;
-    if (![_lastForegroundDescription isEqualToString:foregroundSource] ||
-        LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
+    // EVIDENCE GATE. In mode 0 this whole block is skipped outright. It
+    // contained, per invocation: a full offscreen pixel-probe render, a
+    // complete re-walk of the hierarchy through the abandoned container path,
+    // an array sort and join, and a ~20-argument string format (which under a
+    // debug build also wrote to disk). Because foregroundSource used to change
+    // whenever an icon count changed, it ran on nearly every frame during a
+    // page scroll -- diagnostic cost paid in the shipping path.
+    BOOL wantVerdict = (LGIOS12CurrentDiagMode() != 0) &&
+        (![_lastForegroundDescription isEqualToString:foregroundSource] ||
+         LGIOS12ProviderShouldLogSequence(_captureTickCount));
+    if (wantVerdict) {
 
         // Probe the first live icon so the verdict always carries independent
         // evidence about whether icon pixels are obtainable at all, separate
@@ -2579,7 +2618,8 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         _lastForegroundDescription = foregroundSource;
     }
 
-    if (LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
+    if (LGIOS12CurrentDiagMode() != 0 &&
+        LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
         LGIOS12ProviderLog(@"wallpaper composition finalSource=%@ wallpaperWindowCandidate=%@ wallpaperWindowRendered=%d cpbitmapDecoded=%d cpbitmapRendered=%d foregroundSource=%@ foregroundPrimitivesRendered=%lu iconsDrawn=%lu hostOpaque=%d sourceMode=%lu finalPath=%@",
                            wallpaperSource,
                            NSStringFromClass(wallpaperWindow.class),
