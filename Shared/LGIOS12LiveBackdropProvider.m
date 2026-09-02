@@ -37,6 +37,14 @@ static void LGIOS12ProviderLog(NSString *format, ...) {
 //                          forever; Metal redraw + dragging stay live
 //   6 PROVIDER_OFF     (F) standalone glass/provider never starts at all;
 //                          every other LiquidAss hook untouched
+//   7 FOREGROUND_SINGLE_ICON  diagnostic: render exactly ONE visible
+//                          SBIconView at its screen position, bypassing all
+//                          container selection. Isolates the bitmap/
+//                          coordinate/render pipeline from selection logic.
+//
+// Modes 3 and 7 deliberately have NO whole-host fallback: a blank card is a
+// real result meaning the foreground produced nothing, and they draw a
+// magenta debug outline at the intended foreground screen rect.
 // ---------------------------------------------------------------------------
 NSInteger LGIOS12CurrentDiagMode(void) {
     static NSInteger mode = 0;
@@ -56,7 +64,7 @@ NSInteger LGIOS12CurrentDiagMode(void) {
 
 BOOL LGIOS12DiagRawDisplay(void) {
     NSInteger m = LGIOS12CurrentDiagMode();
-    return m >= 1 && m <= 4;
+    return (m >= 1 && m <= 4) || m == 7;
 }
 
 static BOOL LGIOS12ProviderShouldLogSequence(uint64_t sequence) {
@@ -274,11 +282,108 @@ static BOOL LGIOS12UsePresentationLayer(void) {
     return use;
 }
 
-static BOOL LGIOS12RenderViewAtScreenPosition(UIView *view,
-                                               CGContextRef context) {
+// DIAGNOSTIC PROBE: renders a candidate view into its own small offscreen
+// bitmap and counts non-transparent pixels. This is the only way to answer
+// "does -renderInContext: on this view actually produce icon pixels?" --
+// finding a UIView whose class name sounds right proves nothing, and
+// renderInContext: returning void proves nothing either.
+//
+// Downsamples to at most 64px on the long edge so this is cheap enough to
+// run on a rate-limited schedule. Returns the fraction of pixels with
+// alpha > 0.08, and reports peak luminance so an all-black-but-opaque
+// result is distinguishable from real content.
+static void LGIOS12ProbeViewRendersPixels(UIView *view,
+                                           double *outCoverage,
+                                           double *outPeakLuma) {
+    if (outCoverage) *outCoverage = -1.0;
+    if (outPeakLuma) *outPeakLuma = -1.0;
+    if (!view || CGRectIsEmpty(view.bounds)) return;
+
+    CGFloat longEdge = MAX(view.bounds.size.width, view.bounds.size.height);
+    if (longEdge <= 0) return;
+    CGFloat probeScale = MIN(1.0, 64.0 / longEdge);
+    size_t w = (size_t)MAX(1.0, floor(view.bounds.size.width * probeScale));
+    size_t h = (size_t)MAX(1.0, floor(view.bounds.size.height * probeScale));
+
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, w * 4, cs,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    CGColorSpaceRelease(cs);
+    if (!ctx) return;
+
+    // Same top-left-origin (UIKit-style) CTM as the real capture context.
+    CGContextTranslateCTM(ctx, 0, h);
+    CGContextScaleCTM(ctx, probeScale, -probeScale);
+    CGContextTranslateCTM(ctx, -CGRectGetMinX(view.bounds), -CGRectGetMinY(view.bounds));
+    [view.layer renderInContext:ctx];
+
+    uint8_t *bytes = (uint8_t *)CGBitmapContextGetData(ctx);
+    if (bytes) {
+        size_t opaqueCount = 0;
+        double peak = 0.0;
+        for (size_t i = 0; i < w * h; i++) {
+            uint8_t a = bytes[i * 4 + 3];          // host-order BGRA -> A last
+            if (a > 20) {
+                opaqueCount++;
+                double luma = (bytes[i * 4 + 2] * 0.299 +
+                               bytes[i * 4 + 1] * 0.587 +
+                               bytes[i * 4 + 0] * 0.114) / 255.0;
+                if (luma > peak) peak = luma;
+            }
+        }
+        if (outCoverage) *outCoverage = (double)opaqueCount / (double)(w * h);
+        if (outPeakLuma) *outPeakLuma = peak;
+    }
+    CGContextRelease(ctx);
+}
+
+// Rate-limited, depth-limited hierarchy dump. Branches that contain an
+// SBIconView are marked so the real icon-bearing subtree is identifiable
+// from the log instead of guessed from class names.
+static void LGIOS12DumpHierarchy(UIView *view, NSUInteger depth,
+                                  NSUInteger maxDepth,
+                                  NSMutableArray<NSString *> *lines) {
+    if (!view || depth > maxDepth || lines.count > 60) return;
+    BOOL hasIcon = LGIOS12ViewContainsVisibleIcon(view);
+    [lines addObject:[NSString stringWithFormat:
+        @"%@%@%@ frame={%.0f,%.0f,%.0f,%.0f} hidden=%d alpha=%.2f opaque=%d subs=%lu",
+        [@"" stringByPaddingToLength:depth * 2 withString:@" " startingAtIndex:0],
+        hasIcon ? @"*ICONS* " : @"",
+        NSStringFromClass(view.class),
+        view.frame.origin.x, view.frame.origin.y,
+        view.frame.size.width, view.frame.size.height,
+        view.hidden, view.alpha, view.opaque,
+        (unsigned long)view.subviews.count]];
+    // Only descend into branches that actually contain icons once past the
+    // shallow levels -- keeps the dump usable instead of dumping all of
+    // SpringBoard.
+    for (UIView *sub in view.subviews) {
+        if (depth >= 2 && !LGIOS12ViewContainsVisibleIcon(sub)) continue;
+        LGIOS12DumpHierarchy(sub, depth + 1, maxDepth, lines);
+    }
+}
+
+static BOOL LGIOS12RenderViewAtScreenPositionLogged(UIView *view,
+                                                     CGContextRef context,
+                                                     CGRect *outScreenRect);
+
+// COORDINATE AUDIT after the capture-context CTM change.
+//
+// The restored CTM (translate(0,pixelHeight) + scale(scale,-scale)) makes
+// this context behave exactly like the UIGraphics image context it replaced:
+// top-left origin, y-down, addressed in POINTS. That is the coordinate space
+// this helper has always assumed, and it is the space -[CALayer
+// renderInContext:] expects, so the translate/scale below is unchanged and
+// is NOT double-flipping. Verified structurally; the transformed rect is now
+// logged so it can be confirmed on device rather than trusted.
+static BOOL LGIOS12RenderViewAtScreenPositionLogged(UIView *view,
+                                                     CGContextRef context,
+                                                     CGRect *outScreenRect) {
+    if (outScreenRect) *outScreenRect = CGRectNull;
     if (!LGIOS12ViewIsVisibleForCapture(view) || !context) return NO;
     CGRect screenRect = [view convertRect:view.bounds toView:nil];
     if (CGRectIsEmpty(screenRect) || CGRectIsEmpty(view.bounds)) return NO;
+    if (outScreenRect) *outScreenRect = screenRect;
     CGFloat scaleX = CGRectGetWidth(screenRect) / CGRectGetWidth(view.bounds);
     CGFloat scaleY = CGRectGetHeight(screenRect) / CGRectGetHeight(view.bounds);
     CGContextSaveGState(context);
@@ -295,6 +400,7 @@ static BOOL LGIOS12RenderViewAtScreenPosition(UIView *view,
     CGContextRestoreGState(context);
     return YES;
 }
+
 
 // DEVICE-EVIDENCE FIX (2026-09-01 video, ~10.2-11.5s):
 //
@@ -1547,6 +1653,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     NSUInteger foregroundRenderCount = 0;
     NSString *wallpaperSource = @"black-base";
     NSString *foregroundSource = @"none";
+    CGRect firstForegroundScreenRectForLog = CGRectNull;
 
     if (context) {
         [[UIColor blackColor] setFill];
@@ -1568,30 +1675,71 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                 _cachedWallpaperDecoder ?: @"unknown-decoder"];
         }
 
-        if (LGIOS12CurrentDiagMode() != 2) {
+        NSInteger diagMode = LGIOS12CurrentDiagMode();
+        NSMutableArray<NSString *> *renderedClasses = [NSMutableArray array];
+
+        // MODE 7 (FOREGROUND_SINGLE_ICON) diagnostic: render exactly ONE
+        // known-visible SBIconView at its screen position, bypassing all
+        // container selection. This isolates the bitmap/coordinate/render
+        // pipeline from the container-selection logic. If one icon appears
+        // here but Mode 3 is blank, selection is the problem, not rendering.
+        // This is a diagnostic, NOT the intended architecture.
+        if (diagMode == 7) {
+            NSMutableArray<UIView *> *allIcons = [NSMutableArray array];
+            LGIOS12CollectVisibleIconViews(
+                hostWindow.rootViewController.view ?: hostWindow, allIcons);
+            UIView *oneIcon = allIcons.firstObject;
+            CGRect iconRect = CGRectNull;
+            BOOL drew = oneIcon
+                ? LGIOS12RenderViewAtScreenPositionLogged(oneIcon, context, &iconRect)
+                : NO;
+            double cov = -1.0, luma = -1.0;
+            if (oneIcon) LGIOS12ProbeViewRendersPixels(oneIcon, &cov, &luma);
+            drewForeground = drew;
+            foregroundRenderCount = drew ? 1 : 0;
+            if (drew) [renderedClasses addObject:NSStringFromClass(oneIcon.class)];
+            firstForegroundScreenRectForLog = iconRect;
+            LGIOS12ProviderLog(@"foreground result=%@ mode=7-SINGLE-ICON class=%@ "
+                               "visibleIcons=%lu renderedViews=%lu screenRect={%.0f,%.0f,%.0f,%.0f} "
+                               "probeCoverage=%.3f probePeakLuma=%.3f reason=%@",
+                               drew ? @"SUCCESS" : @"FAILED",
+                               NSStringFromClass(oneIcon.class) ?: @"none",
+                               (unsigned long)allIcons.count,
+                               (unsigned long)foregroundRenderCount,
+                               iconRect.origin.x, iconRect.origin.y,
+                               iconRect.size.width, iconRect.size.height,
+                               cov, luma,
+                               drew ? @"n/a"
+                                    : (oneIcon ? @"render-returned-NO"
+                                               : @"no-visible-SBIconView-found"));
+            foregroundSource = drew ? @"diagnostic-single-icon" : @"diagnostic-single-icon-FAILED";
+        } else if (diagMode != 2) {
             for (UIView *foregroundView in foregroundViews) {
-                if (LGIOS12RenderViewAtScreenPosition(foregroundView, context)) {
+                CGRect rect = CGRectNull;
+                if (LGIOS12RenderViewAtScreenPositionLogged(foregroundView, context, &rect)) {
                     drewForeground = YES;
                     foregroundRenderCount++;
+                    [renderedClasses addObject:NSStringFromClass(foregroundView.class)];
+                    if (CGRectIsNull(firstForegroundScreenRectForLog)) firstForegroundScreenRectForLog = rect;
                 }
             }
         }
-        if (drewForeground) {
+
+        if (drewForeground && diagMode != 7) {
             foregroundSource = [NSString stringWithFormat:
                 @"transparent-icon-hierarchy:%@",
                 foregroundDescription ?: @"unknown"];
-        } else if (LGIOS12CurrentDiagMode() == 2) {
+        } else if (diagMode == 2) {
             foregroundSource = @"skipped:wallpaper-only-diagnostic-mode";
+        } else if (diagMode == 3 || diagMode == 7) {
+            // MODE 3 MUST TELL THE TRUTH: no silent whole-host fallback here.
+            // A blank card in Mode 3 is a real, meaningful result -- it proves
+            // the foreground provider produced no usable icon content at all.
+            if (!drewForeground) {
+                foregroundSource = @"FAILED:no-foreground-rendered(diagnostic-no-fallback)";
+            }
         } else {
-            // Last resort. NOTE: this no longer uses
-            // -drawViewHierarchyInRect: (see the comment on
-            // LGIOS12RenderWindowAtScreenPosition -- that call is what
-            // corrupted the live screen during page scroll in the device
-            // video). It is now a read-only -renderInContext: of the host
-            // window, which cannot disturb SpringBoard. It can still occlude
-            // the wallpaper base if the host window is opaque, so it stays
-            // explicitly identified in diagnostics rather than silently
-            // passing as a successful composite.
+            // Normal mode retains the guarded fallback.
             usedWholeHostFallback = LGIOS12RenderWindowAtScreenPosition(
                 hostWindow, context, screenBounds);
             foregroundSource = usedWholeHostFallback
@@ -1599,8 +1747,27 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                 : @"foreground-render-failed";
         }
 
+        // FOREGROUND DEBUG OUTLINE -- diagnostic modes 3 and 7 only, never
+        // shipped in normal mode. Draws a bright magenta stroke around the
+        // exact screen rect where the foreground source was supposed to land.
+        //   outline visible, no icons  -> selection/rendering is wrong
+        //   outline offscreen/mirrored -> coordinate transform is wrong
+        //   no outline at all          -> no source was selected
+        if ((diagMode == 3 || diagMode == 7) && !CGRectIsNull(firstForegroundScreenRectForLog)) {
+            CGContextSaveGState(context);
+            CGContextSetRGBStrokeColor(context, 1.0, 0.0, 1.0, 1.0);
+            CGContextSetLineWidth(context, 3.0);
+            CGContextStrokeRect(context, firstForegroundScreenRectForLog);
+            CGContextRestoreGState(context);
+        }
+
+        // Force a snapshot in the no-fallback diagnostic modes even when
+        // nothing rendered, so a genuinely blank card is delivered as a
+        // result rather than silently reusing the previous frame.
+        BOOL forceSnapshotForDiagnostic = (diagMode == 3 || diagMode == 7);
+
         if (drewWallpaperWindow || drewCPBitmap || drewForeground ||
-            usedWholeHostFallback) {
+            usedWholeHostFallback || forceSnapshotForDiagnostic) {
             // CGBitmapContextCreateImage's copy-on-write guarantee means
             // this snapshot stays correct even once we clear/redraw
             // _captureContext for the next capture -- no need to wait for
@@ -1632,40 +1799,70 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             @"wallpaper=%@+foreground=%@+composition=wallpaper-then-transparent-foreground",
             wallpaperSource, foregroundSource];
     }
-    // Foreground-source instability diagnostics. Logged on *change* rather
-    // than on a fixed cadence, because a change mid-page-scroll is precisely
-    // the failure signature we are hunting: if the source flips while
-    // scrolling, the stable-container cache is not holding and the old
-    // per-frame rederivation is still in play.
-    if (![_lastForegroundDescription isEqualToString:foregroundSource]) {
-        uint64_t changeCount = ++_foregroundSourceChangeCount;
-        NSMutableArray<NSString *> *sourceDetails = [NSMutableArray array];
-        for (UIView *view in foregroundViews) {
-            CGRect screenRect = [view convertRect:view.bounds toView:nil];
-            [sourceDetails addObject:[NSString stringWithFormat:
-                @"{%@ bounds={%.0f,%.0f} screen={%.0f,%.0f,%.0f,%.0f} super=%@ hasPresentation=%d}",
-                NSStringFromClass(view.class),
-                view.bounds.size.width, view.bounds.size.height,
-                screenRect.origin.x, screenRect.origin.y,
-                screenRect.size.width, screenRect.size.height,
-                NSStringFromClass(view.superview.class) ?: @"none",
-                view.layer.presentationLayer != nil]];
-        }
+    // ===================================================================
+    // SINGLE FOREGROUND VERDICT LINE -- the one line to grep for.
+    // Emitted on every change of outcome plus on the normal rate-limited
+    // schedule, so it is always present without flooding the log.
+    // ===================================================================
+    BOOL foregroundOK = drewForeground && foregroundRenderCount > 0;
+    if (![_lastForegroundDescription isEqualToString:foregroundSource] ||
+        LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
+
         NSMutableArray<UIView *> *visibleIcons = [NSMutableArray array];
         LGIOS12CollectVisibleIconViews(hostWindow.rootViewController.view ?: hostWindow,
                                         visibleIcons);
-        LGIOS12ProviderLog(@"foreground SOURCE-CHANGED change=%llu previous=%@ current=%@ "
-                           "detail=%@ viewCount=%lu visibleSBIconViews=%lu "
-                           "captureMethod=%@ sources=[%@]",
-                           (unsigned long long)changeCount,
-                           _lastForegroundDescription ?: @"none", foregroundSource,
-                           foregroundDescription ?: @"none",
-                           (unsigned long)foregroundViews.count,
+        NSMutableArray<NSString *> *renderedClassList = [NSMutableArray array];
+        for (UIView *v in foregroundViews)
+            [renderedClassList addObject:NSStringFromClass(v.class)];
+
+        // Prove whether the selected candidate actually yields icon pixels.
+        double candidateCoverage = -1.0, candidatePeakLuma = -1.0;
+        UIView *candidate = foregroundViews.firstObject;
+        if (candidate) {
+            LGIOS12ProbeViewRendersPixels(candidate, &candidateCoverage, &candidatePeakLuma);
+        }
+
+        LGIOS12ProviderLog(@"foreground result=%@ source=%@ selectedClass=%@ "
+                           "renderedViews=%lu visibleIcons=%lu "
+                           "candidateProbeCoverage=%.3f candidateProbePeakLuma=%.3f "
+                           "candidateRendersPixels=%@ screenRect={%.0f,%.0f,%.0f,%.0f} "
+                           "usedStableContainer=%d usedDynamicLCA=%d wholeHostFallback=%d "
+                           "allSources=[%@] reason=%@",
+                           foregroundOK ? @"SUCCESS" : @"FAILED",
+                           foregroundSource,
+                           NSStringFromClass(candidate.class) ?: @"none",
+                           (unsigned long)foregroundRenderCount,
                            (unsigned long)visibleIcons.count,
-                           usedWholeHostFallback
-                               ? @"renderInContext:host-window-fallback"
-                               : @"renderInContext:presentationLayer-per-view",
-                           [sourceDetails componentsJoinedByString:@","]);
+                           candidateCoverage, candidatePeakLuma,
+                           candidateCoverage < 0 ? @"NO-CANDIDATE"
+                               : (candidateCoverage < 0.005 ? @"NO(blank-bitmap)" : @"YES"),
+                           firstForegroundScreenRectForLog.origin.x,
+                           firstForegroundScreenRectForLog.origin.y,
+                           firstForegroundScreenRectForLog.size.width,
+                           firstForegroundScreenRectForLog.size.height,
+                           [foregroundDescription hasPrefix:@"stable-container"],
+                           [foregroundDescription hasPrefix:@"dynamic-fallback"],
+                           usedWholeHostFallback,
+                           [renderedClassList componentsJoinedByString:@","],
+                           foregroundOK ? @"n/a"
+                               : (visibleIcons.count == 0
+                                   ? @"no-visible-SBIconView-in-host-window"
+                                   : (foregroundViews.count == 0
+                                       ? @"icons-exist-but-no-container-selected"
+                                       : @"container-selected-but-render-produced-nothing")));
+
+        // Hierarchy dump when the foreground is failing -- this is what
+        // identifies the real icon-bearing subtree instead of guessing at
+        // class names. Only on failure, and only occasionally.
+        if (!foregroundOK && LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
+            NSMutableArray<NSString *> *lines = [NSMutableArray array];
+            LGIOS12DumpHierarchy(hostWindow.rootViewController.view ?: hostWindow,
+                                  0, 7, lines);
+            LGIOS12ProviderLog(@"foreground HIERARCHY-DUMP (branches marked *ICONS* "
+                               "contain a visible SBIconView):\n%@",
+                               [lines componentsJoinedByString:@"\n"]);
+        }
+
         _lastForegroundDescription = foregroundSource;
     }
 
