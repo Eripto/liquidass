@@ -862,6 +862,127 @@ typedef struct {
     BOOL       strategyReResolved;
 } LGIOS12ForegroundResult;
 
+// ===========================================================================
+// ICON ARTWORK CACHE
+//
+// The correctness-first engine rediscovered everything every frame: it walked
+// each icon's view tree and layer tree, ran convertRect: on every node,
+// created a CGImage per contents layer, and re-resolved artwork it had
+// already found. At ~24 icons and 30 Hz that is the dominant capture cost,
+// and almost all of it is redundant -- an app icon's ARTWORK does not change
+// while the Home Screen scrolls. Only its POSITION does.
+//
+// So the two are separated. Artwork is rendered once into an icon-local
+// bitmap and cached as a CGImage. Every frame does one convertRect: and one
+// CGContextDrawImage per icon at the icon's CURRENT screen rect, which is
+// what keeps icons tracking a page swipe exactly as before.
+//
+// Revalidation is lazy and staggered: each entry is assigned a slot and is
+// re-rendered when the capture tick lands on its slot, so roughly one icon
+// per frame is refreshed rather than all of them. Cheap invalidation signals
+// (bounds change, detached from window) are checked every frame and force an
+// immediate refresh. No pixel probe ever runs in the mode 0 hot path.
+// ===========================================================================
+
+// Full sweep of every entry once per this many captures -- one second at
+// 30 FPS. Long enough that steady-state cost is one icon re-render per frame,
+// short enough that a badge or label change appears promptly.
+static const uint64_t kLGIOS12IconArtworkRevalidateInterval = 30;
+
+@interface LGIOS12IconArtworkEntry : NSObject {
+@public
+    CGImageRef artwork;          // +1, released in dealloc
+    LGIOS12IconRenderStrategy strategy;
+    CGSize     boundsSize;
+    NSUInteger primitives;
+    NSUInteger byteCost;
+    uint64_t   revalidateSlot;
+}
+@end
+
+@implementation LGIOS12IconArtworkEntry
+- (void)dealloc {
+    if (artwork) CGImageRelease(artwork);
+}
+@end
+
+// Render one icon's artwork into a bitmap the size of its own local bounds,
+// using an already-resolved strategy. No screen coordinates are involved --
+// position is applied later, per frame, when the result is blitted.
+static CGImageRef LGIOS12CreateIconArtworkImage(
+        UIView *icon,
+        LGIOS12IconRenderStrategy strategy,
+        CGFloat scale,
+        NSUInteger *outPrimitives) CF_RETURNS_RETAINED {
+    if (outPrimitives) *outPrimitives = 0;
+    if (!icon || CGRectIsEmpty(icon.bounds)) return NULL;
+
+    CGRect bounds = icon.bounds;
+    size_t pixelWidth = (size_t)MAX(1.0, llround(bounds.size.width * scale));
+    size_t pixelHeight = (size_t)MAX(1.0, llround(bounds.size.height * scale));
+    CGColorSpaceRef colorSpace = LGSharedRGBColorSpace();
+    CGContextRef ctx = CGBitmapContextCreate(NULL, pixelWidth, pixelHeight, 8,
+        pixelWidth * 4, colorSpace,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    if (!ctx) return NULL;
+
+    // Same top-left-origin convention as the real capture context.
+    CGContextTranslateCTM(ctx, 0, pixelHeight);
+    CGContextScaleCTM(ctx, scale, -scale);
+    CGContextTranslateCTM(ctx, -CGRectGetMinX(bounds), -CGRectGetMinY(bounds));
+
+    NSUInteger primitives = 0;
+    switch (strategy) {
+        case LGIOS12IconRenderStrategyIconLayer: {
+            [icon.layer renderInContext:ctx];
+            primitives = 1;
+            break;
+        }
+        case LGIOS12IconRenderStrategyDescendantViews: {
+            NSMutableArray<UIView *> *artworkViews = [NSMutableArray array];
+            LGIOS12CollectIconArtworkViews(icon, 8, artworkViews);
+            for (UIView *candidate in artworkViews) {
+                CGRect dest = [candidate convertRect:candidate.bounds toView:icon];
+                if (CGRectIsEmpty(dest) || CGRectIsEmpty(candidate.bounds)) continue;
+                CGContextSaveGState(ctx);
+                CGContextTranslateCTM(ctx, CGRectGetMinX(dest), CGRectGetMinY(dest));
+                CGContextScaleCTM(ctx,
+                    CGRectGetWidth(dest) / CGRectGetWidth(candidate.bounds),
+                    CGRectGetHeight(dest) / CGRectGetHeight(candidate.bounds));
+                CGContextTranslateCTM(ctx, -CGRectGetMinX(candidate.bounds),
+                                      -CGRectGetMinY(candidate.bounds));
+                [candidate.layer renderInContext:ctx];
+                CGContextRestoreGState(ctx);
+                primitives++;
+            }
+            break;
+        }
+        case LGIOS12IconRenderStrategyLayerContents: {
+            NSMutableArray<CALayer *> *contentLayers = [NSMutableArray array];
+            LGIOS12CollectIconContentLayers(icon.layer, 10, contentLayers);
+            for (CALayer *layer in contentLayers) {
+                CGRect dest = (layer == icon.layer)
+                    ? bounds
+                    : [layer convertRect:layer.bounds toLayer:icon.layer];
+                CGImageRef image = LGIOS12CopyLayerContentsImage(layer);
+                if (!image) continue;
+                LGIOS12DrawImageInScreenRect(ctx, image, dest);
+                CGImageRelease(image);
+                primitives++;
+            }
+            break;
+        }
+        case LGIOS12IconRenderStrategyFailed:
+        case LGIOS12IconRenderStrategyUnresolved:
+            break;
+    }
+
+    CGImageRef result = (primitives > 0) ? CGBitmapContextCreateImage(ctx) : NULL;
+    CGContextRelease(ctx);
+    if (outPrimitives) *outPrimitives = primitives;
+    return result;
+}
+
 
 // DEVICE-EVIDENCE FIX (2026-09-01 video, ~10.2-11.5s):
 //
@@ -1009,6 +1130,18 @@ typedef struct {
     // --- Pipeline instrumentation (see the header). Plain scalars: no
     // allocation, no locking, main-thread-written except textureUpload which
     // is written on the upload queue and read for display only.
+    // Icon artwork cache. Weak keys so a torn-down SpringBoard view simply
+    // drops out of the table instead of being kept alive by the cache.
+    NSMapTable<UIView *, LGIOS12IconArtworkEntry *> *_iconArtworkCache;
+    NSUInteger _iconArtworkCacheBytes;
+    uint64_t   _iconArtworkSlotCursor;
+
+    // Cached icon set. Re-validated cheaply every frame (no recursion) and
+    // fully re-enumerated only on a real change.
+    NSArray<UIView *> *_cachedIconSet;
+    UIWindow *_cachedIconWindow;
+    uint64_t  _cachedIconSetTick;
+
     LGIOS12PerfSnapshot _perf;
     uint64_t _lastDisplayLinkTicks;
     uint64_t _lastPublishTicks;
@@ -1065,6 +1198,20 @@ typedef struct {
 - (void)dealloc {
     if (_captureContext) CGContextRelease(_captureContext);
     if (_pendingUploadImage) CGImageRelease(_pendingUploadImage);
+}
+
+- (void)ensureIconArtworkCache {
+    if (_iconArtworkCache) return;
+    _iconArtworkCache = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsWeakMemory
+                                              valueOptions:NSPointerFunctionsStrongMemory];
+}
+
+- (void)invalidateIconArtworkCacheForReason:(NSString *)reason {
+    [_iconArtworkCache removeAllObjects];
+    _iconArtworkCacheBytes = 0;
+    if (LGIOS12CurrentDiagMode() != 0) {
+        LGIOS12ProviderLog(@"icon-artwork-cache invalidated reason=%@", reason);
+    }
 }
 
 - (instancetype)init {
@@ -2168,12 +2315,41 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
 - (NSArray<UIView *> *)visibleIconViewsForHostWindow:(UIWindow *)hostWindow
                                        resolvedWindow:(UIWindow **)outWindow
                                            searchNote:(NSString **)outNote {
+    // PAGE-SCROLL FAST PATH.
+    //
+    // A full enumeration recurses the entire SpringBoard view tree. During a
+    // page swipe the icon OBJECTS do not change -- only their frames -- so
+    // re-deriving the set every frame is pure waste. Validation here is O(n)
+    // over ~24 cached views with no recursion: still attached to a window,
+    // still visible, still icon-sized. Any failure, or the periodic sweep,
+    // forces a genuine re-enumeration, so newly appearing icons are still
+    // picked up promptly.
+    if (!LGIOS12PerfLegacyPath() && _cachedIconSet.count > 0 &&
+        (_captureTickCount - _cachedIconSetTick) < 30) {
+        BOOL stillValid = YES;
+        for (UIView *icon in _cachedIconSet) {
+            if (!icon.window || icon.hidden || icon.alpha <= 0.01 ||
+                CGRectIsEmpty(icon.bounds)) {
+                stillValid = NO;
+                break;
+            }
+        }
+        if (stillValid) {
+            if (outWindow) *outWindow = _cachedIconWindow;
+            if (outNote) *outNote = @"cached-icon-set";
+            return _cachedIconSet;
+        }
+    }
+
     NSMutableArray<UIView *> *icons = [NSMutableArray array];
     if (hostWindow) {
         LGIOS12CollectVisibleIconViews(
             hostWindow.rootViewController.view ?: hostWindow, icons);
     }
     if (icons.count > 0) {
+        _cachedIconSet = icons;
+        _cachedIconWindow = hostWindow;
+        _cachedIconSetTick = _captureTickCount;
         if (outWindow) *outWindow = hostWindow;
         if (outNote) *outNote = @"host-window";
         return icons;
@@ -2188,6 +2364,9 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         LGIOS12CollectVisibleIconViews(
             window.rootViewController.view ?: window, found);
         if (found.count > 0) {
+            _cachedIconSet = found;
+            _cachedIconWindow = window;
+            _cachedIconSetTick = _captureTickCount;
             if (outWindow) *outWindow = window;
             if (outNote) {
                 *outNote = [NSString stringWithFormat:
@@ -2199,11 +2378,14 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         }
     }
 
+    _cachedIconSet = nil;
+    _cachedIconWindow = nil;
     if (outWindow) *outWindow = hostWindow;
     if (outNote) {
-        *outNote = [NSString stringWithFormat:
-            @"no-icons-in-any-window scanned=[%@]",
-            [scanned componentsJoinedByString:@","]];
+        *outNote = (LGIOS12CurrentDiagMode() == 0)
+            ? @"no-icons-in-any-window"
+            : [NSString stringWithFormat:@"no-icons-in-any-window scanned=[%@]",
+                [scanned componentsJoinedByString:@","]];
     }
     return @[];
 }
@@ -2220,9 +2402,11 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     result.strategy = _iconRenderStrategy;
     if (!context || icons.count == 0) return result;
 
-    // Resolve the strategy when unset, when the last resolution is stale, or
-    // when the last attempt drew nothing. Resolution pixel-probes several
-    // candidates, so it must not run for every icon on every frame.
+    BOOL legacy = LGIOS12PerfLegacyPath();
+
+    // Strategy resolution pixel-probes several candidates, so it must never
+    // run per icon per frame. Resolve when unset or stale only.
+    uint64_t strategyStart = mach_absolute_time();
     BOOL stale = (_captureTickCount - _iconStrategyResolvedAtTick) > 300;
     if (_iconRenderStrategy == LGIOS12IconRenderStrategyUnresolved || stale) {
         NSMutableString *evidence = [NSMutableString string];
@@ -2231,31 +2415,115 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         _iconStrategyEvidence = [evidence copy];
         _iconStrategyResolvedAtTick = _captureTickCount;
         result.strategyReResolved = YES;
-        LGIOS12ProviderLog(@"foreground STRATEGY-RESOLVED strategy=%@ probedIcon=%@ "
-                           "evidence=%@",
-                           LGIOS12IconRenderStrategyName(_iconRenderStrategy),
-                           NSStringFromClass(icons.firstObject.class),
-                           _iconStrategyEvidence);
+        [self invalidateIconArtworkCacheForReason:@"strategy-resolved"];
+        if (LGIOS12CurrentDiagMode() != 0) {
+            LGIOS12ProviderLog(@"foreground STRATEGY-RESOLVED strategy=%@ probedIcon=%@ "
+                               "evidence=%@",
+                               LGIOS12IconRenderStrategyName(_iconRenderStrategy),
+                               NSStringFromClass(icons.firstObject.class),
+                               _iconStrategyEvidence);
+        }
     }
+    LGIOS12StatAddTicks(&_perf.strategyLookup, mach_absolute_time() - strategyStart);
     result.strategy = _iconRenderStrategy;
 
+    // LEGACY PATH: the correctness-first engine, rediscovering everything
+    // every frame. Kept intact and reachable via PerfLegacyPath so before and
+    // after can be measured on the same hardware from one build.
+    if (legacy) {
+        CGRect legacyFirstRect = CGRectNull;
+        for (UIView *icon in icons) {
+            CGRect iconRect = CGRectNull;
+            LGIOS12IconRenderStrategy used = LGIOS12IconRenderStrategyFailed;
+            NSUInteger drawn = LGIOS12RenderIconResilient(icon, _iconRenderStrategy,
+                                                           context, contributors,
+                                                           &iconRect, &used);
+            if (drawn > 0) {
+                result.iconsDrawn++;
+                result.primitivesDrawn += drawn;
+                if (CGRectIsNull(legacyFirstRect)) legacyFirstRect = iconRect;
+            }
+        }
+        if (outFirstIconRect) *outFirstIconRect = legacyFirstRect;
+        return result;
+    }
+
+    [self ensureIconArtworkCache];
+    CGFloat scale = UIScreen.mainScreen.scale ?: 2.0;
     CGRect firstRect = CGRectNull;
+
     for (UIView *icon in icons) {
-        CGRect iconRect = CGRectNull;
-        LGIOS12IconRenderStrategy used = LGIOS12IconRenderStrategyFailed;
-        NSUInteger drawn = LGIOS12RenderIconResilient(icon, _iconRenderStrategy,
-                                                       context, contributors,
-                                                       &iconRect, &used);
-        if (drawn > 0) {
-            result.iconsDrawn++;
-            result.primitivesDrawn += drawn;
-            if (CGRectIsNull(firstRect)) firstRect = iconRect;
+        // DYNAMIC: read every frame. One convertRect: per icon is what makes
+        // the icons follow a page swipe.
+        CGRect iconScreenRect = [icon convertRect:icon.bounds toView:nil];
+        if (CGRectIsEmpty(iconScreenRect)) continue;
+
+        // STATIC: artwork, cached.
+        LGIOS12IconArtworkEntry *entry = [_iconArtworkCache objectForKey:icon];
+
+        // Cheap per-frame invalidation -- no recursion, no probing.
+        BOOL needsRender = NO;
+        if (!entry || !entry->artwork) {
+            needsRender = YES;
+        } else if (!CGSizeEqualToSize(entry->boundsSize, icon.bounds.size)) {
+            needsRender = YES;                       // resized: artwork stale
+        } else if (entry->strategy != _iconRenderStrategy) {
+            needsRender = YES;                       // strategy changed under it
+        } else if ((_captureTickCount % kLGIOS12IconArtworkRevalidateInterval) ==
+                   entry->revalidateSlot) {
+            needsRender = YES;                       // staggered refresh turn
+        }
+
+        if (needsRender) {
+            NSUInteger primitives = 0;
+            CGImageRef artwork = LGIOS12CreateIconArtworkImage(
+                icon, _iconRenderStrategy, scale, &primitives);
+            if (artwork) {
+                if (!entry) {
+                    entry = [[LGIOS12IconArtworkEntry alloc] init];
+                    // Stagger refresh turns so roughly one icon re-renders per
+                    // frame instead of the whole grid landing on one tick.
+                    entry->revalidateSlot =
+                        (_iconArtworkSlotCursor++) % kLGIOS12IconArtworkRevalidateInterval;
+                    [_iconArtworkCache setObject:entry forKey:icon];
+                }
+                if (entry->artwork) {
+                    CGImageRelease(entry->artwork);
+                    _iconArtworkCacheBytes -= entry->byteCost;
+                }
+                entry->artwork = artwork;            // ownership transferred
+                entry->strategy = _iconRenderStrategy;
+                entry->boundsSize = icon.bounds.size;
+                entry->primitives = primitives;
+                entry->byteCost = CGImageGetHeight(artwork) *
+                                  CGImageGetBytesPerRow(artwork);
+                _iconArtworkCacheBytes += entry->byteCost;
+                _perf.iconCacheMisses++;
+            } else {
+                // This icon yields nothing right now (mid-teardown, or an
+                // empty slot). Leave any previous artwork in place rather than
+                // dropping the icon out of the composite entirely.
+                if (!entry) continue;
+            }
+        } else {
+            _perf.iconCacheHits++;
+        }
+
+        if (!entry || !entry->artwork) continue;
+        LGIOS12DrawImageInScreenRect(context, entry->artwork, iconScreenRect);
+        result.iconsDrawn++;
+        result.primitivesDrawn += MAX((NSUInteger)1, entry->primitives);
+        if (CGRectIsNull(firstRect)) firstRect = iconScreenRect;
+
+        if (contributors) {
+            [contributors addObject:[NSString stringWithFormat:@"%@(cached-artwork)",
+                NSStringFromClass(icon.class)]];
         }
     }
 
-    // Nothing came out at all: force a fresh resolution against a live icon so
-    // the very next capture tries a different strategy rather than repeating a
-    // strategy that is known not to work.
+    _perf.iconCacheEntries = _iconArtworkCache.count;
+    _perf.iconCacheBytes = _iconArtworkCacheBytes;
+
     if (result.primitivesDrawn == 0 && !result.strategyReResolved) {
         NSMutableString *evidence = [NSMutableString string];
         _iconRenderStrategy = LGIOS12ResolveIconRenderStrategy(icons.firstObject,
@@ -2264,10 +2532,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         _iconStrategyResolvedAtTick = _captureTickCount;
         result.strategyReResolved = YES;
         result.strategy = _iconRenderStrategy;
-        LGIOS12ProviderLog(@"foreground STRATEGY-RE-RESOLVED (previous drew nothing) "
-                           "strategy=%@ evidence=%@",
-                           LGIOS12IconRenderStrategyName(_iconRenderStrategy),
-                           _iconStrategyEvidence);
+        [self invalidateIconArtworkCacheForReason:@"drew-nothing"];
     }
 
     if (outFirstIconRect) *outFirstIconRect = firstRect;
