@@ -8,6 +8,7 @@
 #import <stdarg.h>
 #import "LGIOS12LiveBackdropProvider.h"
 #import "LGIOS12ForegroundProbeView.h"
+#import "LGIOS12PerfHUDView.h"
 
 // The render-server CAFilter backend cannot be enabled on iOS 12 until the
 // iOS 12 QuartzCore layouts have been independently recovered from that OS's
@@ -346,6 +347,9 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 }
 
 - (void)drawInMTKView:(MTKView *)view {
+    // Feeds the redraw-rate and texture-age halves of the instrumentation.
+    // Two clock reads; safe to leave on in mode 0.
+    [[LGIOS12LiveBackdropProvider sharedProvider] noteClientRedraw];
     if (!_rendererReady) {
         [self logMetalEarlyReturn:@"renderer-not-ready"];
         return;
@@ -490,6 +494,7 @@ static UIWindow *LGIOS12SpringBoardHostWindow(void) {
 static LGIOS12FloatingGlassTestView *sLGIOS12TestView;
 static LGIOS12StandaloneOverlayWindow *sLGIOS12OverlayWindow;
 static LGIOS12ForegroundProbeView *sLGIOS12ProbeView;
+static LGIOS12PerfHUDView *sLGIOS12PerfHUD;
 
 static void LGIOS12LogLiveCAFilterStages(void) {
     // QuartzCore itself is loaded because CALayer is live.  Every deeper stage
@@ -513,6 +518,9 @@ static void LGIOS12RemoveTestSurface(void) {
     [sLGIOS12ProbeView stopProbing];
     [sLGIOS12ProbeView removeFromSuperview];
     sLGIOS12ProbeView = nil;
+    [sLGIOS12PerfHUD stopSampling];
+    [sLGIOS12PerfHUD removeFromSuperview];
+    sLGIOS12PerfHUD = nil;
     if (sLGIOS12TestView) {
         LGIOS12Log(@"remove test surface view=%@ superview=%@ overlay=%@",
                    sLGIOS12TestView, sLGIOS12TestView.superview,
@@ -673,6 +681,23 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
                    NSStringFromClass(probe.window.class));
     }
 
+    // MODE 9 PERF HUD. Same gating discipline as the mode 7 probe: diagnostic
+    // surfaces exist only in the mode that owns them, never in mode 0.
+    if (LGIOS12CurrentDiagMode() == 9) {
+        CGFloat hudWidth = MIN(320.0, CGRectGetWidth(hostWindow.bounds) - 16.0);
+        CGRect hudFrame = CGRectMake(
+            (CGRectGetWidth(hostWindow.bounds) - hudWidth) * 0.5,
+            MAX(28.0, CGRectGetHeight(hostWindow.bounds) * 0.05),
+            hudWidth, 268.0);
+        LGIOS12PerfHUDView *hud = [[LGIOS12PerfHUDView alloc] initWithFrame:hudFrame];
+        hud.layer.zPosition = 20000.0;
+        [overlayRootView addSubview:hud];
+        sLGIOS12PerfHUD = hud;
+        [hud startSampling];
+        LGIOS12Log(@"perf HUD installed (MODE 9 ONLY) frame=%@",
+                   NSStringFromCGRect(hudFrame));
+    }
+
     // Surface census. Confirms from the device itself that mode 0 puts exactly
     // one thing on screen -- the Liquid Glass card -- and that the probe panel
     // is absent rather than merely moved.
@@ -684,6 +709,7 @@ static void LGIOS12InstallOrUpdateTestSurface(void) {
                LGIOS12DiagRawDisplay() ? @"rawBackdropIOS12" : @"liquidGlassIOS12",
                sLGIOS12ProbeView != nil,
                (unsigned long)overlayRootView.subviews.count);
+    (void)sLGIOS12PerfHUD;
 }
 
 

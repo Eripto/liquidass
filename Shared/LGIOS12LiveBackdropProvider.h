@@ -1,6 +1,60 @@
 #import <UIKit/UIKit.h>
 #import <Metal/Metal.h>
 
+// ===========================================================================
+// PIPELINE INSTRUMENTATION
+//
+// Every stage is timed separately so optimization targets measured cost
+// rather than suspicion. Averages are exponential moving averages (alpha
+// 0.1); worst values are the maximum over a window that resets every 120
+// captures, so a single stall stays visible without permanently poisoning
+// the reading.
+//
+// Collection is deliberately cheap enough to leave on in Mode 0: two
+// mach_absolute_time() reads and a few adds per stage, no allocation and no
+// string work. DISPLAY of these numbers is what costs, and that happens only
+// in the Mode 9 perf HUD or in rate-limited debug logging.
+// ===========================================================================
+typedef struct {
+    double ema;
+    double worst;
+} LGIOS12Stat;
+
+typedef struct {
+    LGIOS12Stat displayLinkInterval;
+    LGIOS12Stat windowDiscovery;
+    LGIOS12Stat iconEnumeration;
+    LGIOS12Stat strategyLookup;
+    LGIOS12Stat iconComposition;
+    LGIOS12Stat wallpaperComposition;
+    LGIOS12Stat bitmapContext;
+    LGIOS12Stat imageCreation;
+    LGIOS12Stat textureUpload;
+    LGIOS12Stat totalSourceFrame;
+    LGIOS12Stat metalRedrawInterval;
+    LGIOS12Stat textureAge;
+
+    double deliveredBackdropFPS;
+    double metalRedrawFPS;
+    double targetFPS;
+
+    NSUInteger iconsEnumerated;
+    NSUInteger iconsDrawn;
+    NSUInteger primitivesDrawn;
+
+    NSUInteger iconCacheHits;
+    NSUInteger iconCacheMisses;
+    NSUInteger iconCacheEntries;
+    NSUInteger iconCacheBytes;
+    NSUInteger captureBufferBytes;
+
+    unsigned long long droppedStale;
+    unsigned long long droppedSuperseded;
+    unsigned long long captureCount;
+
+    BOOL legacyPath;
+} LGIOS12PerfSnapshot;
+
 @protocol LGIOS12LiveBackdropClient <NSObject>
 - (void)providerDidUpdateBackdropTexture:(id<MTLTexture>)texture source:(NSString *)source;
 - (void)providerDidFailToUpdateBackdrop:(NSError *)error;
@@ -33,7 +87,26 @@
 @property (nonatomic, readonly) NSUInteger lastForegroundPrimitivesDrawn;
 @property (nonatomic, readonly, copy) NSString *lastForegroundPathName;
 
+// Live pipeline timings. Cheap to read; safe on the main thread.
+- (LGIOS12PerfSnapshot)performanceSnapshot;
+
+// Called by a client from its Metal draw callback so redraw rate and texture
+// age can be reported alongside the capture-side numbers. Cheap: two clock
+// reads and a couple of adds.
+- (void)noteClientRedraw;
+
 @end
+
+// Runtime performance toggles, read once per SpringBoard launch from
+// /var/mobile/Library/Preferences/dylv.liquidass.ios12diag.plist:
+//
+//   PerfLegacyPath (Boolean)  YES disables every optimization added in the
+//                             performance phase -- icon artwork/strategy
+//                             caching, the wallpaper base cache and the
+//                             self-owned capture buffers -- so the SAME build
+//                             can produce genuine before/after numbers on the
+//                             same hardware. Default NO.
+extern BOOL LGIOS12PerfLegacyPath(void);
 
 // Diagnostic mode selection -- see the block comment in
 // LGIOS12LiveBackdropProvider.m for the full mode table and the plist path.

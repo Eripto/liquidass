@@ -67,6 +67,45 @@ BOOL LGIOS12DiagRawDisplay(void) {
     return (m >= 1 && m <= 4) || m == 7;
 }
 
+// Runtime performance toggle -- see the header. Read once per launch.
+BOOL LGIOS12PerfLegacyPath(void) {
+    static BOOL legacy = NO;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:
+            @"/var/mobile/Library/Preferences/dylv.liquidass.ios12diag.plist"];
+        legacy = [dict[@"PerfLegacyPath"] boolValue];
+        LGLog(@"renderer.ios12.provider PERF path=%@",
+              legacy ? @"LEGACY(optimizations disabled)" : @"OPTIMIZED");
+    });
+    return legacy;
+}
+
+// mach_absolute_time -> milliseconds. The timebase is queried once; calling
+// mach_timebase_info() per sample (as the old 60-capture report did) is itself
+// measurable overhead at 30 Hz across a dozen stages.
+static double LGIOS12MsFromTicks(uint64_t ticks) {
+    static double scale = 0.0;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        mach_timebase_info_data_t tb;
+        mach_timebase_info(&tb);
+        scale = (double)tb.numer / (double)tb.denom / 1000000.0;
+    });
+    return (double)ticks * scale;
+}
+
+static void LGIOS12StatAddMs(LGIOS12Stat *stat, double milliseconds) {
+    if (!stat) return;
+    stat->ema = (stat->ema <= 0.0) ? milliseconds
+                                   : (stat->ema * 0.9 + milliseconds * 0.1);
+    if (milliseconds > stat->worst) stat->worst = milliseconds;
+}
+
+static void LGIOS12StatAddTicks(LGIOS12Stat *stat, uint64_t ticks) {
+    LGIOS12StatAddMs(stat, LGIOS12MsFromTicks(ticks));
+}
+
 static BOOL LGIOS12ProviderShouldLogSequence(uint64_t sequence) {
     return sequence <= 3 || (sequence % 30) == 0;
 }
@@ -956,6 +995,45 @@ typedef struct {
     NSUInteger _lastForegroundIconsDrawn;
     NSUInteger _lastForegroundPrimitivesDrawn;
     NSString  *_lastForegroundPathName;
+
+    // --- Pipeline instrumentation (see the header). Plain scalars: no
+    // allocation, no locking, main-thread-written except textureUpload which
+    // is written on the upload queue and read for display only.
+    LGIOS12PerfSnapshot _perf;
+    uint64_t _lastDisplayLinkTicks;
+    uint64_t _lastPublishTicks;
+    uint64_t _lastRedrawTicks;
+    uint64_t _perfWindowResetCounter;
+}
+
+- (LGIOS12PerfSnapshot)performanceSnapshot {
+    LGIOS12PerfSnapshot snapshot = _perf;
+    snapshot.targetFPS = _targetRefreshInterval > 0 ? 1.0 / _targetRefreshInterval : 0.0;
+    snapshot.iconsEnumerated = _lastForegroundIconsEnumerated;
+    snapshot.iconsDrawn = _lastForegroundIconsDrawn;
+    snapshot.primitivesDrawn = _lastForegroundPrimitivesDrawn;
+    snapshot.droppedStale = _droppedStaleCount;
+    snapshot.droppedSuperseded = _droppedSupersededCount;
+    snapshot.captureBufferBytes =
+        _captureBufferPixelHeight * _captureBufferBytesPerRow;
+    snapshot.legacyPath = LGIOS12PerfLegacyPath();
+    return snapshot;
+}
+
+- (void)noteClientRedraw {
+    uint64_t now = mach_absolute_time();
+    if (_lastRedrawTicks != 0) {
+        double intervalMs = LGIOS12MsFromTicks(now - _lastRedrawTicks);
+        LGIOS12StatAddMs(&_perf.metalRedrawInterval, intervalMs);
+        if (_perf.metalRedrawInterval.ema > 0.0) {
+            _perf.metalRedrawFPS = 1000.0 / _perf.metalRedrawInterval.ema;
+        }
+    }
+    _lastRedrawTicks = now;
+    if (_lastPublishTicks != 0) {
+        LGIOS12StatAddMs(&_perf.textureAge,
+                         LGIOS12MsFromTicks(now - _lastPublishTicks));
+    }
 }
 
 - (NSUInteger)lastForegroundIconsEnumerated { return _lastForegroundIconsEnumerated; }
@@ -1161,6 +1239,13 @@ typedef struct {
         [self updateRefreshLoopForReason:@"display-link-no-active-clients"];
         return;
     }
+    uint64_t nowTicks = mach_absolute_time();
+    if (_lastDisplayLinkTicks != 0) {
+        LGIOS12StatAddTicks(&_perf.displayLinkInterval,
+                            nowTicks - _lastDisplayLinkTicks);
+    }
+    _lastDisplayLinkTicks = nowTicks;
+
     CFTimeInterval current = CACurrentMediaTime();
     if (current - _lastRefreshTime >= _targetRefreshInterval) {
         [self performCaptureAndUpload];
@@ -1417,6 +1502,45 @@ typedef struct {
         _captureCount++;
         _totalCaptureTime += hierarchyTicks;
         _totalUploadTime += uploadTicks;
+
+        // Per-stage instrumentation. totalSourceFrame is wall time from the
+        // start of capture to the moment the texture becomes visible to
+        // clients -- the number that actually governs how stale the glass is.
+        uint64_t publishTicks = mach_absolute_time();
+        LGIOS12StatAddTicks(&_perf.textureUpload, uploadTicks);
+        LGIOS12StatAddTicks(&_perf.totalSourceFrame, publishTicks - captureStartTicks);
+        if (_lastPublishTicks != 0) {
+            double deliveryIntervalMs =
+                LGIOS12MsFromTicks(publishTicks - _lastPublishTicks);
+            if (deliveryIntervalMs > 0.0) {
+                _perf.deliveredBackdropFPS =
+                    (_perf.deliveredBackdropFPS <= 0.0)
+                        ? 1000.0 / deliveryIntervalMs
+                        : _perf.deliveredBackdropFPS * 0.9 +
+                          (1000.0 / deliveryIntervalMs) * 0.1;
+            }
+        }
+        _lastPublishTicks = publishTicks;
+        _perf.captureCount = _captureCount;
+
+        // Worst-frame values are windowed: a stall stays visible for a while,
+        // then clears, so the reading tracks current behaviour instead of
+        // being pinned forever by one startup hitch.
+        if (++_perfWindowResetCounter >= 120) {
+            _perfWindowResetCounter = 0;
+            _perf.displayLinkInterval.worst = 0.0;
+            _perf.windowDiscovery.worst = 0.0;
+            _perf.iconEnumeration.worst = 0.0;
+            _perf.strategyLookup.worst = 0.0;
+            _perf.iconComposition.worst = 0.0;
+            _perf.wallpaperComposition.worst = 0.0;
+            _perf.bitmapContext.worst = 0.0;
+            _perf.imageCreation.worst = 0.0;
+            _perf.textureUpload.worst = 0.0;
+            _perf.totalSourceFrame.worst = 0.0;
+            _perf.metalRedrawInterval.worst = 0.0;
+            _perf.textureAge.worst = 0.0;
+        }
 
         if (_captureCount % 60 == 0) {
             mach_timebase_info_data_t tb;
@@ -2147,6 +2271,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     CGRect screenBounds = UIScreen.mainScreen.bounds;
     CGFloat screenScale = UIScreen.mainScreen.scale ?: 1.0;
 
+    uint64_t stageStart = mach_absolute_time();
     NSArray<UIWindow *> *visibleWindows =
         [self visibleSourceWindowsSortedByLevel];
     [self logWindowStack:visibleWindows hostWindow:hostWindow];
@@ -2155,15 +2280,18 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                               visibleWindows:visibleWindows];
     UIImage *wallpaper = [self cachedDecodedWallpaperAtPath:
         LGIOS12HomeWallpaperPathProvider()];
+    LGIOS12StatAddTicks(&_perf.windowDiscovery, mach_absolute_time() - stageStart);
     // PRIMARY FOREGROUND PATH: enumerate the live visible icons every capture.
     // No container selection, no cached view set -- re-reading the hierarchy
     // each frame is what makes the rendered icons follow a page scroll.
     UIWindow *iconWindow = nil;
     NSString *iconSearchNote = nil;
+    stageStart = mach_absolute_time();
     NSArray<UIView *> *visibleIcons =
         [self visibleIconViewsForHostWindow:hostWindow
                              resolvedWindow:&iconWindow
                                  searchNote:&iconSearchNote];
+    LGIOS12StatAddTicks(&_perf.iconEnumeration, mach_absolute_time() - stageStart);
 
     LGIOS12CaptureStats captureStats = { 0 };
     captureStats.excludedGlassCount = excludedViews.count;
@@ -2198,6 +2326,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         for (CALayer *layer in sameWindowLayers) layer.hidden = YES;
     }
 
+    stageStart = mach_absolute_time();
     CGContextRef context = [self ensureCaptureContextForPointSize:screenBounds.size
                                                               scale:screenScale];
     if (context) {
@@ -2209,6 +2338,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         CGContextClearRect(context, screenBounds);
         UIGraphicsPushContext(context);
     }
+    LGIOS12StatAddTicks(&_perf.bitmapContext, mach_absolute_time() - stageStart);
     UIImage *snapshot = nil;
     BOOL drewWallpaperWindow = NO;
     BOOL drewCPBitmap = NO;
@@ -2221,6 +2351,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     NSMutableArray<NSString *> *renderedClasses = [NSMutableArray array];
 
     if (context) {
+        stageStart = mach_absolute_time();
         [[UIColor blackColor] setFill];
         UIRectFill(screenBounds);
 
@@ -2240,6 +2371,9 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                 _cachedWallpaperDecoder ?: @"unknown-decoder"];
         }
 
+        LGIOS12StatAddTicks(&_perf.wallpaperComposition,
+                            mach_absolute_time() - stageStart);
+
         NSInteger diagMode = LGIOS12CurrentDiagMode();
         NSMutableSet<NSString *> *contributors = [NSMutableSet set];
 
@@ -2252,6 +2386,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             iconsToRender = @[ visibleIcons.firstObject ];
         }
 
+        stageStart = mach_absolute_time();
         if (diagMode != 2) {
             foregroundResult =
                 [self renderPerIconForegroundIntoContext:context
@@ -2263,6 +2398,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             for (NSString *contributor in contributors)
                 [renderedClasses addObject:contributor];
         }
+        LGIOS12StatAddTicks(&_perf.iconComposition, mach_absolute_time() - stageStart);
 
         _lastForegroundIconsEnumerated = foregroundResult.iconsEnumerated;
         _lastForegroundIconsDrawn = foregroundResult.iconsDrawn;
@@ -2329,7 +2465,10 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
             // this snapshot stays correct even once we clear/redraw
             // _captureContext for the next capture -- no need to wait for
             // whatever consumes this image before reusing the buffer.
+            uint64_t imageStart = mach_absolute_time();
             CGImageRef cgImage = CGBitmapContextCreateImage(context);
+            LGIOS12StatAddTicks(&_perf.imageCreation,
+                                mach_absolute_time() - imageStart);
             if (cgImage) {
                 snapshot = [UIImage imageWithCGImage:cgImage
                                                 scale:screenScale
