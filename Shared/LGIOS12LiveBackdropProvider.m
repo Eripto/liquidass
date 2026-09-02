@@ -1060,15 +1060,32 @@ typedef struct {
     // --- Reusable CPU capture buffer. One persistent CGContext, reused
     // every capture instead of UIGraphicsBeginImageContextWithOptions's
     // per-frame alloc/free. CGBitmapContextCreateImage's copy-on-write
-    // guarantee (Apple-documented) means a CGImageRef snapshot taken from
-    // this context stays correct even if the main thread immediately
-    // reuses the same buffer for the next capture -- so no manual
-    // double-buffering is needed on the CPU side, only on the GPU/texture
-    // side below, where Metal's replaceRegion: has no such protection.
-    CGContextRef _captureContext;
+    // guarantee used to make a CGImage snapshot safe across buffer reuse.
+    // That is no longer how the upload works: the buffers below are
+    // self-owned and rotated, and the slot being uploaded is marked
+    // in-flight, so the pixels reach Metal with no intermediate copy.
+    // Three self-owned CPU buffers, each with its own context. Self-owned
+    // because CGBitmapContext-owned storage cannot be handed to the upload
+    // queue safely -- the next capture would overwrite it mid-read -- which is
+    // why the old path paid CGDataProviderCopyData, a full-screen malloc and
+    // memcpy, on every single frame. Three is the exact number the pipeline
+    // needs: one being drawn, one pending upload, one uploading.
+    CGContextRef _captureContexts[3];
+    void        *_captureBuffers[3];
+    BOOL         _captureBufferInFlight[3];
+    NSUInteger   _captureBufferIndex;
+    CGContextRef _captureContext;          // = _captureContexts[_captureBufferIndex]
     size_t       _captureBufferPixelWidth;
     size_t       _captureBufferPixelHeight;
     size_t       _captureBufferBytesPerRow;
+
+    // Pre-composited wallpaper base. The wallpaper is static between changes,
+    // so re-rendering a full-screen layer tree (or redrawing a full-screen
+    // UIImage) every frame is wasted work; a memcpy of the finished base is
+    // a fraction of the cost.
+    void   *_wallpaperBaseBuffer;
+    BOOL    _wallpaperBaseValid;
+    uint64_t _wallpaperBaseTick;
 
     // --- Reusable, double-buffered Metal textures. Clients only ever see
     // _currentBackdropTexture, swapped to the freshly-written slot only
@@ -1083,7 +1100,7 @@ typedef struct {
     // hasn't started yet -- newest-frame-wins, no unbounded queue. ---
     dispatch_queue_t _uploadQueue;
     BOOL              _uploadBusy;
-    CGImageRef        _pendingUploadImage;      // +1, released on replace/consume
+    NSUInteger        _pendingUploadBufferIndex; // NSUIntegerMax = none pending
     NSString         *_pendingUploadSourceDesc;
     uint32_t          _pendingUploadSequence;
     uint64_t          _pendingUploadCaptureStartTicks;
@@ -1197,7 +1214,7 @@ typedef struct {
 // included anyway for correctness rather than relying on that.
 - (void)dealloc {
     if (_captureContext) CGContextRelease(_captureContext);
-    if (_pendingUploadImage) CGImageRelease(_pendingUploadImage);
+    [self releaseCaptureBuffers];
 }
 
 - (void)ensureIconArtworkCache {
@@ -1217,6 +1234,10 @@ typedef struct {
 - (instancetype)init {
     self = [super init];
     if (self) {
+        // NSUIntegerMax means "no pending upload". Zero would be read as
+        // "buffer 0 is pending" on the very first frame, which would wrongly
+        // mark that slot in flight and start a bogus upload.
+        _pendingUploadBufferIndex = NSUIntegerMax;
         _device = MTLCreateSystemDefaultDevice();
         if (_device) {
             _textureLoader = [[MTKTextureLoader alloc] initWithDevice:_device];
@@ -1469,7 +1490,7 @@ typedef struct {
     NSArray<UIView *> *excludedViews = _excludedGlassViews.allObjects;
     LGIOS12CaptureStats stats = { 0 };
     NSString *sourceDesc = nil;
-    UIImage *snapshot = [self captureSpringBoardBackdrop:hostWindow
+    BOOL captureProducedFrame = [self captureSpringBoardBackdrop:hostWindow
                                           excludingViews:excludedViews
                                                    stats:&stats
                                        sourceDescription:&sourceDesc];
@@ -1487,11 +1508,11 @@ typedef struct {
                            stats.usedModelLayerExclusion
                                ? @"model-layer-render-no-commit"
                                : @"structural-window-separation",
-                           snapshot != nil,
+                           captureProducedFrame,
                            (unsigned long)[self activeClientCount]);
     }
 
-    if (!snapshot) {
+    if (!captureProducedFrame) {
         [self finishCaptureWithError:[NSError errorWithDomain:@"LGIOS12"
             code:2 userInfo:@{NSLocalizedDescriptionKey: @"Capture failed"}]];
         return;
@@ -1503,18 +1524,23 @@ typedef struct {
     // the following frame while this one's Metal upload runs on
     // _uploadQueue. The CPU capture buffer is safe to reuse immediately
     // regardless (see captureSpringBoardBackdrop:'s copy-on-write note).
-    CGImageRef cgImageRef = CGImageRetain(snapshot.CGImage);
     uint64_t hierarchyTicks = captureEnd - captureStart;
+    NSUInteger bufferIndex = _captureBufferIndex;
     _isCapturing = NO;
 
+    // NEWEST-FRAME-WINS, unchanged in behaviour: at most one upload running
+    // and one newest request pending. A superseded pending frame releases its
+    // buffer slot immediately so it can be drawn into again -- the queue never
+    // grows, and the glass never drains a backlog of stale frames.
     BOOL startNow = NO;
     @synchronized (self) {
+        _captureBufferInFlight[bufferIndex] = YES;
         if (_uploadBusy) {
-            if (_pendingUploadImage) {
+            if (_pendingUploadBufferIndex < 3) {
                 _droppedSupersededCount++;
-                CGImageRelease(_pendingUploadImage);
+                _captureBufferInFlight[_pendingUploadBufferIndex] = NO;
             }
-            _pendingUploadImage = cgImageRef; // ownership transferred
+            _pendingUploadBufferIndex = bufferIndex;
             _pendingUploadSourceDesc = sourceDesc;
             _pendingUploadSequence = sequence;
             _pendingUploadCaptureStartTicks = captureStart;
@@ -1525,11 +1551,11 @@ typedef struct {
         }
     }
     if (startNow) {
-        [self dispatchUploadJobWithImage:cgImageRef
-                               sourceDesc:sourceDesc
-                                 sequence:sequence
-                        captureStartTicks:captureStart
-                           hierarchyTicks:hierarchyTicks];
+        [self dispatchUploadJobWithBufferIndex:bufferIndex
+                                    sourceDesc:sourceDesc
+                                      sequence:sequence
+                             captureStartTicks:captureStart
+                                hierarchyTicks:hierarchyTicks];
     }
 }
 
@@ -1537,18 +1563,22 @@ typedef struct {
 // writes them into whichever of the two reusable texture slots is NOT the
 // currently-published one via replaceRegion: -- never a brand-new texture
 // object, never the slot a client/GPU might currently be reading.
-- (void)dispatchUploadJobWithImage:(CGImageRef)cgImageRef // +1, consumed here
-                         sourceDesc:(NSString *)sourceDesc
-                           sequence:(uint32_t)sequence
-                  captureStartTicks:(uint64_t)captureStartTicks
-                     hierarchyTicks:(uint64_t)hierarchyTicks {
+- (void)dispatchUploadJobWithBufferIndex:(NSUInteger)bufferIndex
+                               sourceDesc:(NSString *)sourceDesc
+                                 sequence:(uint32_t)sequence
+                        captureStartTicks:(uint64_t)captureStartTicks
+                           hierarchyTicks:(uint64_t)hierarchyTicks {
     dispatch_async(_uploadQueue, ^{
         uint64_t uploadStart = mach_absolute_time();
-        id<MTLTexture> texture = [self lgUploadTextureFromCGImage:cgImageRef];
+        id<MTLTexture> texture = [self lgUploadTextureFromBufferIndex:bufferIndex];
         uint64_t uploadTicks = mach_absolute_time() - uploadStart;
-        CGImageRelease(cgImageRef);
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            // The buffer is free the moment replaceRegion: has returned --
+            // Metal has taken its own copy into the texture by then.
+            @synchronized (self) {
+                self->_captureBufferInFlight[bufferIndex] = NO;
+            }
             [self completeUploadJobWithTexture:texture
                                      sourceDesc:sourceDesc
                                        sequence:sequence
@@ -1559,12 +1589,13 @@ typedef struct {
     });
 }
 
-// Runs on _uploadQueue. Pure CPU/Metal work, no UIKit -- safe off-main.
-- (id<MTLTexture>)lgUploadTextureFromCGImage:(CGImageRef)cgImageRef {
-    if (!cgImageRef || !_device) return nil;
-    size_t width = CGImageGetWidth(cgImageRef);
-    size_t height = CGImageGetHeight(cgImageRef);
-    if (width == 0 || height == 0) return nil;
+- (id<MTLTexture>)lgUploadTextureFromBufferIndex:(NSUInteger)bufferIndex {
+    if (bufferIndex >= 3 || !_device) return nil;
+    const void *bytes = _captureBuffers[bufferIndex];
+    size_t width = _captureBufferPixelWidth;
+    size_t height = _captureBufferPixelHeight;
+    size_t bytesPerRow = _captureBufferBytesPerRow;
+    if (!bytes || width == 0 || height == 0) return nil;
 
     NSUInteger publishedSlot = NSUIntegerMax;
     @synchronized (self) {
@@ -1586,44 +1617,30 @@ typedef struct {
                            (unsigned long)targetSlot, width, height);
     }
 
-    // Our capture context is kCGImageAlphaPremultipliedFirst with host byte
-    // order, i.e. BGRA on this (little-endian) hardware -- exactly what
-    // MTLPixelFormatBGRA8Unorm expects, so this is a straight byte copy
-    // with no channel reordering. CGDataProviderCopyData does allocate one
-    // copy of the pixel buffer; a true zero-copy path would need a
-    // self-owned capture buffer instead of letting CGBitmapContext own it,
-    // which would give up the copy-on-write safety captureSpringBoardBackdrop:
-    // relies on -- this is the deliberate tradeoff, documented rather than
-    // silently accepted.
-    CGDataProviderRef dataProvider = CGImageGetDataProvider(cgImageRef);
-    CFDataRef data = dataProvider ? CGDataProviderCopyData(dataProvider) : NULL;
-    if (!data) return nil;
-    const uint8_t *bytes = CFDataGetBytePtr(data);
-    size_t bytesPerRow = CGImageGetBytesPerRow(cgImageRef);
+    // ZERO-COPY UPLOAD.
+    //
+    // The capture buffers are self-owned, so the bytes can go straight to
+    // Metal. The previous path had to call CGDataProviderCopyData first --
+    // a full-screen malloc plus memcpy (about 4 MB at 750x1334x4) on EVERY
+    // frame -- because the pixels belonged to a CGBitmapContext that the next
+    // capture would overwrite. Rotating three self-owned buffers removes both
+    // the allocation and the copy while keeping the same guarantee: the slot
+    // being read here is marked in-flight, so no capture can draw into it.
+    //
+    // Format is unchanged: kCGImageAlphaPremultipliedFirst + host byte order
+    // is BGRA on this hardware, exactly what MTLPixelFormatBGRA8Unorm expects,
+    // so this remains a straight byte copy with no channel reordering.
+    //
+    // ORIENTATION: replaceRegion: performs no reorientation -- byte row 0
+    // becomes texture row 0. The buffers are filled by contexts carrying the
+    // same top-left-origin CTM as before, so the orientation chain is
+    // untouched.
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     [texture replaceRegion:region mipmapLevel:0 withBytes:bytes bytesPerRow:bytesPerRow];
-
-    // ORIENTATION CHAIN, upload stage. Part B replaced MTKTextureLoader
-    // (which honored MTKTextureLoaderOptionOrigin=TopLeft) with this raw
-    // replaceRegion: path. replaceRegion: performs NO reorientation at all --
-    // byte row 0 becomes texture row 0. A CGImage's bytes start at its top
-    // row, so this is top-left origin and introduces no flip of its own. Any
-    // vertical inversion therefore comes from the capture CTM upstream, not
-    // from here. Logged once so this is verifiable on device rather than
-    // assumed.
-    static dispatch_once_t orientationOnce;
-    dispatch_once(&orientationOnce, ^{
-        LGIOS12ProviderLog(@"ORIENTATION upload path=replaceRegion(no-reorientation) "
-                           "origin=top-left(byte-row-0=texture-row-0) "
-                           "textureDims=%zux%zu bytesPerRow=%zu "
-                           "note=MTKTextureLoaderOptionOrigin no longer applies",
-                           width, height, bytesPerRow);
-    });
-    CFRelease(data);
     return texture;
 }
 
-// Runs on the main queue (dispatched from dispatchUploadJobWithImage:).
+// Runs on the main queue (dispatched from dispatchUploadJobWithBufferIndex:).
 - (void)completeUploadJobWithTexture:(id<MTLTexture>)texture
                            sourceDesc:(NSString *)sourceDesc
                              sequence:(uint32_t)sequence
@@ -1767,29 +1784,29 @@ typedef struct {
     }
 
     // Drain a coalesced pending job (newest-wins queueing), or go idle.
-    CGImageRef nextImage = NULL;
+    NSUInteger nextBufferIndex = NSUIntegerMax;
     NSString *nextSourceDesc = nil;
     uint32_t nextSequence = 0;
     uint64_t nextCaptureStart = 0, nextHierarchyTicks = 0;
     @synchronized (self) {
-        if (_pendingUploadImage) {
-            nextImage = _pendingUploadImage;
+        if (_pendingUploadBufferIndex < 3) {
+            nextBufferIndex = _pendingUploadBufferIndex;
             nextSourceDesc = _pendingUploadSourceDesc;
             nextSequence = _pendingUploadSequence;
             nextCaptureStart = _pendingUploadCaptureStartTicks;
             nextHierarchyTicks = _pendingUploadHierarchyTicks;
-            _pendingUploadImage = NULL;
+            _pendingUploadBufferIndex = NSUIntegerMax;
             _pendingUploadSourceDesc = nil;
         } else {
             _uploadBusy = NO;
         }
     }
-    if (nextImage) {
-        [self dispatchUploadJobWithImage:nextImage
-                               sourceDesc:nextSourceDesc
-                                 sequence:nextSequence
-                        captureStartTicks:nextCaptureStart
-                           hierarchyTicks:nextHierarchyTicks];
+    if (nextBufferIndex < 3) {
+        [self dispatchUploadJobWithBufferIndex:nextBufferIndex
+                                    sourceDesc:nextSourceDesc
+                                      sequence:nextSequence
+                             captureStartTicks:nextCaptureStart
+                                hierarchyTicks:nextHierarchyTicks];
     }
 }
 
@@ -1832,60 +1849,148 @@ typedef struct {
 // copy-on-write behavior means a CGImageRef snapshot taken from this
 // context stays correct even after we immediately reuse it for the next
 // capture, so this is safe without any additional locking.
+- (void)releaseCaptureBuffers {
+    for (NSUInteger i = 0; i < 3; i++) {
+        if (_captureContexts[i]) {
+            CGContextRelease(_captureContexts[i]);
+            _captureContexts[i] = NULL;
+        }
+        if (_captureBuffers[i]) {
+            free(_captureBuffers[i]);
+            _captureBuffers[i] = NULL;
+        }
+        _captureBufferInFlight[i] = NO;
+    }
+    if (_wallpaperBaseBuffer) {
+        free(_wallpaperBaseBuffer);
+        _wallpaperBaseBuffer = NULL;
+    }
+    _wallpaperBaseValid = NO;
+    _captureContext = NULL;
+}
+
+// Returns a context whose backing buffer is not currently being read by the
+// upload queue, rotating through the three slots. The chosen slot is recorded
+// in _captureBufferIndex for the upload hand-off.
 - (CGContextRef)ensureCaptureContextForPointSize:(CGSize)pointSize
                                             scale:(CGFloat)scale {
     size_t pixelWidth = (size_t)llround(pointSize.width * scale);
     size_t pixelHeight = (size_t)llround(pointSize.height * scale);
     if (pixelWidth == 0 || pixelHeight == 0) return NULL;
 
-    if (_captureContext && pixelWidth == _captureBufferPixelWidth &&
-        pixelHeight == _captureBufferPixelHeight) {
-        return _captureContext;
-    }
+    if (pixelWidth != _captureBufferPixelWidth ||
+        pixelHeight != _captureBufferPixelHeight) {
+        [self releaseCaptureBuffers];
 
-    if (_captureContext) {
-        CGContextRelease(_captureContext);
-        _captureContext = NULL;
-    }
+        size_t bytesPerRow = pixelWidth * 4;
+        size_t totalBytes = bytesPerRow * pixelHeight;
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+        BOOL ok = YES;
+        for (NSUInteger i = 0; i < 3; i++) {
+            _captureBuffers[i] = calloc(1, totalBytes);
+            if (!_captureBuffers[i]) { ok = NO; break; }
+            _captureContexts[i] = CGBitmapContextCreate(
+                _captureBuffers[i], pixelWidth, pixelHeight, 8, bytesPerRow,
+                colorSpace,
+                kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+            if (!_captureContexts[i]) { ok = NO; break; }
 
-    size_t bytesPerRow = pixelWidth * 4;
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    // NULL data: CGBitmapContextCreate allocates and owns the backing
-    // store itself, which is exactly what we want to reuse across calls --
-    // no manual malloc/free bookkeeping on our end either.
-    _captureContext = CGBitmapContextCreate(
-        NULL, pixelWidth, pixelHeight, 8, bytesPerRow, colorSpace,
-        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
-    CGColorSpaceRelease(colorSpace);
+            // ORIENTATION: unchanged from the working build.
+            // UIGraphicsBeginImageContextWithOptions installs a flip CTM
+            // (translate(0,height)+scale(1,-1)) because CoreGraphics bitmaps
+            // have a BOTTOM-left origin while UIKit/CALayer drawing assumes
+            // TOP-left. Every context here gets exactly that same CTM, so the
+            // orientation fix carries over to all three slots identically.
+            CGContextTranslateCTM(_captureContexts[i], 0, pixelHeight);
+            CGContextScaleCTM(_captureContexts[i], scale, -scale);
+        }
+        _wallpaperBaseBuffer = ok ? calloc(1, totalBytes) : NULL;
+        CGColorSpaceRelease(colorSpace);
 
-    if (_captureContext) {
-        // ORIENTATION FIX (regression introduced by me in 7bf02a7, Part B).
-        //
-        // Part B replaced UIGraphicsBeginImageContextWithOptions with this
-        // hand-rolled CGBitmapContext to avoid a per-frame alloc. But
-        // UIGraphicsBeginImageContextWithOptions does not just allocate --
-        // it also installs a flip CTM (translate(0,height) + scale(1,-1)),
-        // because CoreGraphics bitmap contexts have their origin at the
-        // BOTTOM-left while UIKit/CALayer drawing assumes TOP-left. The Part B
-        // replacement applied only the scale and omitted that flip, so every
-        // UIKit/-renderInContext: draw since then has gone in vertically
-        // mirrored. That is the reported upside-down wallpaper, and it enters
-        // the pipeline here -- at composition, before upload and before any
-        // shader. Restoring the flip makes this context behave exactly like
-        // the UIGraphics one it replaced.
-        CGContextTranslateCTM(_captureContext, 0, pixelHeight);
-        CGContextScaleCTM(_captureContext, scale, -scale);
+        if (!ok) {
+            [self releaseCaptureBuffers];
+            _captureBufferPixelWidth = 0;
+            _captureBufferPixelHeight = 0;
+            LGIOS12ProviderLog(@"capture-buffer allocation FAILED pixels=%zux%zu",
+                               pixelWidth, pixelHeight);
+            return NULL;
+        }
+
         _captureBufferPixelWidth = pixelWidth;
         _captureBufferPixelHeight = pixelHeight;
         _captureBufferBytesPerRow = bytesPerRow;
-        LGIOS12ProviderLog(@"capture-buffer allocated pixels=%zux%zu scale=%.1f "
-                           "ctm=top-left-origin(flipped)", pixelWidth, pixelHeight, scale);
-    } else {
-        LGIOS12ProviderLog(@"capture-buffer allocation FAILED pixels=%zux%zu", pixelWidth, pixelHeight);
-        _captureBufferPixelWidth = 0;
-        _captureBufferPixelHeight = 0;
+        _captureBufferIndex = 0;
+        _wallpaperBaseValid = NO;
+        LGIOS12ProviderLog(@"capture-buffer allocated slots=3 pixels=%zux%zu scale=%.1f "
+                           "bytesPerSlot=%zu ctm=top-left-origin(flipped)",
+                           pixelWidth, pixelHeight, scale, totalBytes);
     }
+
+    // Pick the next slot the GPU/upload queue is not reading.
+    NSUInteger chosen = NSUIntegerMax;
+    @synchronized (self) {
+        for (NSUInteger step = 1; step <= 3; step++) {
+            NSUInteger candidate = (_captureBufferIndex + step) % 3;
+            if (!_captureBufferInFlight[candidate]) { chosen = candidate; break; }
+        }
+    }
+    if (chosen == NSUIntegerMax) return NULL;   // all in flight: skip this frame
+    _captureBufferIndex = chosen;
+    _captureContext = _captureContexts[chosen];
     return _captureContext;
+}
+
+// Paints the wallpaper base once into its own buffer, then reuses it. Returns
+// NO if no base could be produced, in which case the caller draws normally.
+- (BOOL)ensureWallpaperBaseWithWindow:(UIWindow *)wallpaperWindow
+                             wallpaper:(UIImage *)wallpaper
+                          screenBounds:(CGRect)screenBounds
+                                 scale:(CGFloat)scale
+                                source:(NSString **)outSource {
+    if (!_wallpaperBaseBuffer || LGIOS12PerfLegacyPath()) return NO;
+
+    // Re-render periodically so a wallpaper change, or any slow drift in the
+    // wallpaper window, cannot persist indefinitely.
+    BOOL expired = (_captureTickCount - _wallpaperBaseTick) >= 30;
+    if (_wallpaperBaseValid && !expired) {
+        if (outSource) *outSource = @"cached-base";
+        return YES;
+    }
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef baseContext = CGBitmapContextCreate(
+        _wallpaperBaseBuffer, _captureBufferPixelWidth, _captureBufferPixelHeight,
+        8, _captureBufferBytesPerRow, colorSpace,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    CGColorSpaceRelease(colorSpace);
+    if (!baseContext) return NO;
+
+    CGContextTranslateCTM(baseContext, 0, _captureBufferPixelHeight);
+    CGContextScaleCTM(baseContext, scale, -scale);
+    CGContextClearRect(baseContext, screenBounds);
+
+    UIGraphicsPushContext(baseContext);
+    [[UIColor blackColor] setFill];
+    UIRectFill(screenBounds);
+    BOOL drew = NO;
+    NSString *source = @"black-base";
+    if (wallpaperWindow) {
+        drew = LGIOS12RenderWindowAtScreenPosition(wallpaperWindow, baseContext,
+                                                    screenBounds);
+        if (drew) source = @"window-base";
+    }
+    if (!drew && wallpaper) {
+        LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
+        drew = YES;
+        source = @"cpbitmap-base";
+    }
+    UIGraphicsPopContext();
+    CGContextRelease(baseContext);
+
+    _wallpaperBaseValid = YES;
+    _wallpaperBaseTick = _captureTickCount;
+    if (outSource) *outSource = source;
+    return YES;
 }
 
 - (NSArray<UIWindow *> *)visibleSourceWindowsSortedByLevel {
@@ -2539,7 +2644,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     return result;
 }
 
-- (UIImage *)captureSpringBoardBackdrop:(UIWindow *)hostWindow
+- (BOOL)captureSpringBoardBackdrop:(UIWindow *)hostWindow
                           excludingViews:(NSArray<UIView *> *)excludedViews
                                    stats:(LGIOS12CaptureStats *)stats
                        sourceDescription:(NSString **)sourceDescription {
@@ -2611,11 +2716,10 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         // dismissed widget) would show stale pixels from last time. The
         // context's CTM is pre-scaled (see ensureCaptureContextForPointSize:),
         // so this rect is in points, matching every other draw call below.
-        CGContextClearRect(context, screenBounds);
         UIGraphicsPushContext(context);
     }
     LGIOS12StatAddTicks(&_perf.bitmapContext, mach_absolute_time() - stageStart);
-    UIImage *snapshot = nil;
+    BOOL captureProducedFrame = NO;
     BOOL drewWallpaperWindow = NO;
     BOOL drewCPBitmap = NO;
     BOOL drewForeground = NO;
@@ -2628,23 +2732,52 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
 
     if (context) {
         stageStart = mach_absolute_time();
-        [[UIColor blackColor] setFill];
-        UIRectFill(screenBounds);
 
-        if (wallpaperWindow && LGIOS12CurrentDiagMode() != 3) {
-            drewWallpaperWindow = LGIOS12RenderWindowAtScreenPosition(
-                wallpaperWindow, context, screenBounds);
-            if (drewWallpaperWindow) {
-                wallpaperSource = [NSString stringWithFormat:@"window:%@",
-                    NSStringFromClass(wallpaperWindow.class)];
-            }
+        NSString *baseSource = nil;
+        BOOL usedWallpaperBase = NO;
+        if (LGIOS12CurrentDiagMode() != 3 &&
+            [self ensureWallpaperBaseWithWindow:wallpaperWindow
+                                       wallpaper:wallpaper
+                                    screenBounds:screenBounds
+                                           scale:screenScale
+                                          source:&baseSource]) {
+            // One memcpy of the pre-composited base replaces a clear, a
+            // full-screen fill, and a full-screen layer render or image draw.
+            // The base already carries the same pixels those produced, so the
+            // wallpaper and its orientation are bit-identical to the working
+            // build -- this changes only how often that work is done.
+            memcpy(_captureBuffers[_captureBufferIndex], _wallpaperBaseBuffer,
+                   _captureBufferBytesPerRow * _captureBufferPixelHeight);
+            usedWallpaperBase = YES;
+            drewWallpaperWindow = YES;
+            wallpaperSource = baseSource ?: @"cached-base";
         }
-        if (!drewWallpaperWindow && wallpaper &&
-            LGIOS12CurrentDiagMode() != 3) {
-            LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
-            drewCPBitmap = YES;
-            wallpaperSource = [NSString stringWithFormat:@"cpbitmap:%@",
-                _cachedWallpaperDecoder ?: @"unknown-decoder"];
+
+        if (!usedWallpaperBase) {
+            CGContextClearRect(context, screenBounds);
+            [[UIColor blackColor] setFill];
+            UIRectFill(screenBounds);
+            drewWallpaperWindow = NO;
+
+            if (wallpaperWindow && LGIOS12CurrentDiagMode() != 3) {
+                drewWallpaperWindow = LGIOS12RenderWindowAtScreenPosition(
+                    wallpaperWindow, context, screenBounds);
+                if (drewWallpaperWindow) {
+                    wallpaperSource = (LGIOS12CurrentDiagMode() == 0)
+                        ? @"window"
+                        : [NSString stringWithFormat:@"window:%@",
+                            NSStringFromClass(wallpaperWindow.class)];
+                }
+            }
+            if (!drewWallpaperWindow && wallpaper &&
+                LGIOS12CurrentDiagMode() != 3) {
+                LGIOS12DrawAspectFillImageProvider(wallpaper, screenBounds);
+                drewCPBitmap = YES;
+                wallpaperSource = (LGIOS12CurrentDiagMode() == 0)
+                    ? @"cpbitmap"
+                    : [NSString stringWithFormat:@"cpbitmap:%@",
+                        _cachedWallpaperDecoder ?: @"unknown-decoder"];
+            }
         }
 
         LGIOS12StatAddTicks(&_perf.wallpaperComposition,
@@ -2751,23 +2884,16 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         // result rather than silently reusing the previous frame.
         BOOL forceSnapshotForDiagnostic = (diagMode == 3 || diagMode == 7);
 
-        if (drewWallpaperWindow || drewCPBitmap || drewForeground ||
-            forceSnapshotForDiagnostic) {
-            // CGBitmapContextCreateImage's copy-on-write guarantee means
-            // this snapshot stays correct even once we clear/redraw
-            // _captureContext for the next capture -- no need to wait for
-            // whatever consumes this image before reusing the buffer.
-            uint64_t imageStart = mach_absolute_time();
-            CGImageRef cgImage = CGBitmapContextCreateImage(context);
-            LGIOS12StatAddTicks(&_perf.imageCreation,
-                                mach_absolute_time() - imageStart);
-            if (cgImage) {
-                snapshot = [UIImage imageWithCGImage:cgImage
-                                                scale:screenScale
-                                          orientation:UIImageOrientationUp];
-                CGImageRelease(cgImage);
-            }
-        }
+        // No CGImage is built any more. The upload reads the capture buffer
+        // directly (see lgUploadTextureFromBufferIndex:), so the per-frame
+        // CGBitmapContextCreateImage and the UIImage wrapper are both gone
+        // along with the full-screen copy they existed to make safe. This
+        // stage now measures as ~0 by construction.
+        uint64_t imageStart = mach_absolute_time();
+        captureProducedFrame = drewWallpaperWindow || drewCPBitmap ||
+                               drewForeground || forceSnapshotForDiagnostic;
+        LGIOS12StatAddTicks(&_perf.imageCreation,
+                            mach_absolute_time() - imageStart);
         UIGraphicsPopContext();
     }
 
@@ -2781,7 +2907,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
 
     captureStats.windowsRendered = (drewWallpaperWindow ? 1 : 0);
     if (stats) *stats = captureStats;
-    if (sourceDescription && snapshot) {
+    if (sourceDescription && captureProducedFrame) {
         // Another per-frame allocation that only diagnostics read.
         *sourceDescription = (LGIOS12CurrentDiagMode() == 0)
             ? @"wallpaper+per-icon-foreground"
@@ -2896,7 +3022,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                            (unsigned long)LGIOS12CurrentDiagMode(),
                            @"wallpaper+per-icon-foreground");
     }
-    return snapshot;
+    return captureProducedFrame;
 }
 
 @end
