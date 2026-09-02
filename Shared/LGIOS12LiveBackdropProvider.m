@@ -282,28 +282,29 @@ static BOOL LGIOS12UsePresentationLayer(void) {
     return use;
 }
 
-// DIAGNOSTIC PROBE: renders a candidate view into its own small offscreen
-// bitmap and counts non-transparent pixels. This is the only way to answer
-// "does -renderInContext: on this view actually produce icon pixels?" --
-// finding a UIView whose class name sounds right proves nothing, and
-// renderInContext: returning void proves nothing either.
+// Core pixel probe. Renders `layer` (restricted to `boundsInLayer`) into its
+// own small offscreen bitmap and counts non-transparent pixels. This is the
+// only way to answer "does -renderInContext: on this object actually produce
+// pixels?" -- finding an object whose class name sounds right proves nothing,
+// and renderInContext: returning void proves nothing either.
 //
-// Downsamples to at most 64px on the long edge so this is cheap enough to
-// run on a rate-limited schedule. Returns the fraction of pixels with
-// alpha > 0.08, and reports peak luminance so an all-black-but-opaque
-// result is distinguishable from real content.
-static void LGIOS12ProbeViewRendersPixels(UIView *view,
-                                           double *outCoverage,
-                                           double *outPeakLuma) {
+// Downsamples to at most 64px on the long edge so this is cheap enough to run
+// during strategy resolution. Reports the fraction of pixels with alpha > 20
+// and the peak luminance among them, so an all-black-but-opaque result is
+// distinguishable from real content.
+static void LGIOS12ProbeLayerRendersPixels(CALayer *layer,
+                                            CGRect boundsInLayer,
+                                            double *outCoverage,
+                                            double *outPeakLuma) {
     if (outCoverage) *outCoverage = -1.0;
     if (outPeakLuma) *outPeakLuma = -1.0;
-    if (!view || CGRectIsEmpty(view.bounds)) return;
+    if (!layer || CGRectIsEmpty(boundsInLayer)) return;
 
-    CGFloat longEdge = MAX(view.bounds.size.width, view.bounds.size.height);
+    CGFloat longEdge = MAX(boundsInLayer.size.width, boundsInLayer.size.height);
     if (longEdge <= 0) return;
     CGFloat probeScale = MIN(1.0, 64.0 / longEdge);
-    size_t w = (size_t)MAX(1.0, floor(view.bounds.size.width * probeScale));
-    size_t h = (size_t)MAX(1.0, floor(view.bounds.size.height * probeScale));
+    size_t w = (size_t)MAX(1.0, floor(boundsInLayer.size.width * probeScale));
+    size_t h = (size_t)MAX(1.0, floor(boundsInLayer.size.height * probeScale));
 
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, w * 4, cs,
@@ -314,8 +315,9 @@ static void LGIOS12ProbeViewRendersPixels(UIView *view,
     // Same top-left-origin (UIKit-style) CTM as the real capture context.
     CGContextTranslateCTM(ctx, 0, h);
     CGContextScaleCTM(ctx, probeScale, -probeScale);
-    CGContextTranslateCTM(ctx, -CGRectGetMinX(view.bounds), -CGRectGetMinY(view.bounds));
-    [view.layer renderInContext:ctx];
+    CGContextTranslateCTM(ctx, -CGRectGetMinX(boundsInLayer),
+                          -CGRectGetMinY(boundsInLayer));
+    [layer renderInContext:ctx];
 
     uint8_t *bytes = (uint8_t *)CGBitmapContextGetData(ctx);
     if (bytes) {
@@ -335,6 +337,18 @@ static void LGIOS12ProbeViewRendersPixels(UIView *view,
         if (outPeakLuma) *outPeakLuma = peak;
     }
     CGContextRelease(ctx);
+}
+
+static void LGIOS12ProbeViewRendersPixels(UIView *view,
+                                           double *outCoverage,
+                                           double *outPeakLuma) {
+    if (!view) {
+        if (outCoverage) *outCoverage = -1.0;
+        if (outPeakLuma) *outPeakLuma = -1.0;
+        return;
+    }
+    LGIOS12ProbeLayerRendersPixels(view.layer, view.bounds,
+                                   outCoverage, outPeakLuma);
 }
 
 // Rate-limited, depth-limited hierarchy dump. Branches that contain an
@@ -400,6 +414,404 @@ static BOOL LGIOS12RenderViewAtScreenPositionLogged(UIView *view,
     CGContextRestoreGState(context);
     return YES;
 }
+
+// ===========================================================================
+// PER-ICON FOREGROUND CAPTURE ENGINE
+//
+// Replaces the stable-container snapshot as the PRIMARY foreground path.
+//
+// Why the container approach was abandoned: it is all-or-nothing. One
+// container is selected, and if that container is opaque, wallpaper-adjacent,
+// mis-selected, or simply yields nothing from -renderInContext:, the ENTIRE
+// foreground vanishes -- which is the observed device symptom (correct
+// wallpaper, zero icons). There is no partial result and no way for one bad
+// predicate to fail softly.
+//
+// This engine instead enumerates the live visible SBIconView instances on
+// every capture and renders each one individually at its own screen
+// coordinates, resolving per icon how to get pixels out of it:
+//
+//   1  IconLayer        -[SBIconView.layer renderInContext:] works -> use it
+//   2  DescendantViews  the icon layer is blank, but artwork-bearing
+//                       descendant UIViews (image views, labels, badges,
+//                       anything with layer.contents) render -> draw those
+//   3  LayerContents    -renderInContext: produces nothing anywhere in the
+//                       subtree, but CALayers in it carry a CGImage in
+//                       .contents -> blit those images directly, bypassing
+//                       renderInContext: entirely
+//
+// Strategy 3 is the important one: if iOS 12 SpringBoard icon artwork is
+// composited by the render server rather than replayed by renderInContext:,
+// the layer's backing image is still reachable through .contents, and drawing
+// it is not a "cheap visual hack" -- it is the actual artwork, at its actual
+// coordinates.
+//
+// Enumerating per capture (rather than caching a container) is also what
+// makes the icons follow a Home Screen page scroll: every icon's screen rect
+// is re-read from the live hierarchy each frame.
+//
+// Nothing here touches the wallpaper path, the capture-context CTM, the Metal
+// presentation path, or the overlay-window isolation.
+// ===========================================================================
+
+// A candidate must cover at least this fraction of its own probe bitmap to
+// count as "actually renders pixels". 0.5% of a 64px probe is a handful of
+// pixels -- low enough to accept a thin glyph, high enough to reject the
+// single-pixel noise a blank render can leave behind.
+static const double kLGIOS12IconArtworkCoverageThreshold = 0.005;
+
+// An icon is small. Anything covering more than this fraction of the screen
+// found while descending an icon subtree is a page/container/wallpaper
+// surface that must never be drawn -- this is the guard that keeps opaque
+// page backgrounds out of the composite.
+static const double kLGIOS12IconMaxScreenAreaFraction = 0.25;
+
+typedef NS_ENUM(NSInteger, LGIOS12IconRenderStrategy) {
+    LGIOS12IconRenderStrategyUnresolved = 0,
+    LGIOS12IconRenderStrategyIconLayer,
+    LGIOS12IconRenderStrategyDescendantViews,
+    LGIOS12IconRenderStrategyLayerContents,
+    LGIOS12IconRenderStrategyFailed,
+};
+
+static NSString *LGIOS12IconRenderStrategyName(LGIOS12IconRenderStrategy s) {
+    switch (s) {
+        case LGIOS12IconRenderStrategyIconLayer:       return @"ICON-LAYER";
+        case LGIOS12IconRenderStrategyDescendantViews: return @"DESCENDANT-VIEWS";
+        case LGIOS12IconRenderStrategyLayerContents:   return @"LAYER-CONTENTS";
+        case LGIOS12IconRenderStrategyFailed:          return @"FAILED";
+        case LGIOS12IconRenderStrategyUnresolved:      break;
+    }
+    return @"UNRESOLVED";
+}
+
+static BOOL LGIOS12LayerIsVisibleForCapture(CALayer *layer) {
+    return layer && !layer.hidden && layer.opacity > 0.01 &&
+           !CGRectIsEmpty(layer.bounds);
+}
+
+// Screen rect for an arbitrary CALayer, including layers with no UIView of
+// their own. Walks up to the nearest UIView-backed ancestor layer, converts
+// into that layer's space (which honours every intermediate layer transform),
+// then uses UIKit's own view->window conversion for the last hop. No manual
+// transform composition, and no assumption that the layer belongs to a view.
+static BOOL LGIOS12LayerScreenRect(CALayer *layer, CGRect *outRect) {
+    if (!layer || CGRectIsEmpty(layer.bounds)) return NO;
+    UIView *ownerView = nil;
+    for (CALayer *cursor = layer; cursor; cursor = cursor.superlayer) {
+        id delegate = cursor.delegate;
+        if ([delegate isKindOfClass:UIView.class]) {
+            ownerView = (UIView *)delegate;
+            break;
+        }
+    }
+    if (!ownerView || !ownerView.window) return NO;
+    CGRect inOwner = (layer == ownerView.layer)
+        ? layer.bounds
+        : [layer convertRect:layer.bounds toLayer:ownerView.layer];
+    CGRect screenRect = [ownerView convertRect:inOwner toView:nil];
+    if (CGRectIsEmpty(screenRect)) return NO;
+    if (outRect) *outRect = screenRect;
+    return YES;
+}
+
+static BOOL LGIOS12ScreenRectIsIconSized(CGRect screenRect) {
+    CGRect screen = UIScreen.mainScreen.bounds;
+    CGFloat screenArea = CGRectGetWidth(screen) * CGRectGetHeight(screen);
+    if (screenArea <= 0) return YES;
+    CGFloat area = CGRectGetWidth(screenRect) * CGRectGetHeight(screenRect);
+    return (area / screenArea) <= kLGIOS12IconMaxScreenAreaFraction;
+}
+
+// Returns a +1 CGImage for a layer's .contents when it holds one, honouring
+// contentsRect so an atlas-backed layer contributes only its own slice.
+// Returns NULL for IOSurface-backed or otherwise non-CGImage contents, which
+// this path cannot draw.
+static CGImageRef LGIOS12CopyLayerContentsImage(CALayer *layer) CF_RETURNS_RETAINED {
+    id contents = layer.contents;
+    if (!contents) return NULL;
+    CFTypeRef ref = (__bridge CFTypeRef)contents;
+    if (CFGetTypeID(ref) != CGImageGetTypeID()) return NULL;
+    CGImageRef image = (CGImageRef)ref;
+    size_t pixelWidth = CGImageGetWidth(image);
+    size_t pixelHeight = CGImageGetHeight(image);
+    if (pixelWidth == 0 || pixelHeight == 0) return NULL;
+
+    CGRect contentsRect = layer.contentsRect;
+    if (CGRectIsEmpty(contentsRect) ||
+        CGRectEqualToRect(contentsRect, CGRectMake(0, 0, 1, 1))) {
+        return CGImageRetain(image);
+    }
+    CGRect cropPixels = CGRectMake(contentsRect.origin.x * pixelWidth,
+                                   contentsRect.origin.y * pixelHeight,
+                                   contentsRect.size.width * pixelWidth,
+                                   contentsRect.size.height * pixelHeight);
+    CGImageRef cropped = CGImageCreateWithImageInRect(image, cropPixels);
+    return cropped ?: CGImageRetain(image);
+}
+
+static BOOL LGIOS12LayerHasDrawableContents(CALayer *layer) {
+    id contents = layer.contents;
+    if (!contents) return NO;
+    return CFGetTypeID((__bridge CFTypeRef)contents) == CGImageGetTypeID();
+}
+
+// CTM NOTE -- the one place an extra flip is mathematically required.
+//
+// The capture context CTM is translate(0,pixelHeight)+scale(scale,-scale):
+// top-left origin, y-down, addressed in points. -[CALayer renderInContext:]
+// understands that space natively, which is why the existing render helper
+// applies no flip and must keep applying none.
+//
+// CGContextDrawImage is different: it always maps the image bottom-up onto
+// the destination rect in the *current* CTM, so in a y-down space it lands
+// vertically mirrored. The local flip below cancels exactly that, is confined
+// to a save/restore pair around a single draw, and never touches the shared
+// context CTM. It is required for this call and for this call only.
+static void LGIOS12DrawImageInScreenRect(CGContextRef context,
+                                          CGImageRef image,
+                                          CGRect screenRect) {
+    if (!context || !image || CGRectIsEmpty(screenRect)) return;
+    CGContextSaveGState(context);
+    CGContextTranslateCTM(context, CGRectGetMinX(screenRect),
+                          CGRectGetMinY(screenRect));
+    CGContextTranslateCTM(context, 0, CGRectGetHeight(screenRect));
+    CGContextScaleCTM(context, 1.0, -1.0);
+    CGContextDrawImage(context,
+                       CGRectMake(0, 0, CGRectGetWidth(screenRect),
+                                  CGRectGetHeight(screenRect)),
+                       image);
+    CGContextRestoreGState(context);
+}
+
+// Does this view look like it carries icon artwork rather than being a plain
+// grouping container? Structural tests first (a backing image, a known UIKit
+// artwork class), class-name tokens only as a supplement -- per the rule that
+// a matching class name proves nothing on its own, every candidate this
+// returns YES for is still pixel-probed before it is trusted.
+static BOOL LGIOS12ViewLooksLikeIconArtwork(UIView *view) {
+    if (!view) return NO;
+    if (view.layer.contents != nil) return YES;
+    if ([view isKindOfClass:UIImageView.class]) return YES;
+    if ([view isKindOfClass:UILabel.class]) return YES;
+    static NSArray<NSString *> *tokens = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        tokens = @[ @"IconImageView", @"IconImage", @"ImageView", @"Label",
+                    @"Badge", @"Accessory", @"Artwork" ];
+    });
+    for (NSString *token in tokens) {
+        if (LGIOS12ClassNameContainsToken(view, token)) return YES;
+    }
+    return NO;
+}
+
+// Depth-first collection of artwork-bearing descendant views. Stops
+// descending once a view is accepted, because -renderInContext: on it already
+// replays its whole subtree -- descending further would draw the same pixels
+// twice and double-darken any translucent artwork.
+static void LGIOS12CollectIconArtworkViews(UIView *view, NSUInteger depth,
+                                            NSMutableArray<UIView *> *out) {
+    if (!LGIOS12ViewIsVisibleForCapture(view) || depth == 0) return;
+    if (out.count >= 24) return;
+    CGRect screenRect = [view convertRect:view.bounds toView:nil];
+    if (!LGIOS12ScreenRectIsIconSized(screenRect)) return;
+    if (LGIOS12ClassNameContainsToken(view, @"Wallpaper")) return;
+    if (LGIOS12ViewLooksLikeIconArtwork(view)) {
+        [out addObject:view];
+        return;
+    }
+    for (UIView *subview in view.subviews) {
+        LGIOS12CollectIconArtworkViews(subview, depth - 1, out);
+    }
+}
+
+// Depth-first collection of CALayers carrying a drawable CGImage. Walks the
+// raw layer tree, so it finds layers that have no UIView of their own -- the
+// case the view-based passes structurally cannot reach. Stops descending once
+// a layer is accepted, for the same double-draw reason as above.
+static void LGIOS12CollectIconContentLayers(CALayer *layer, NSUInteger depth,
+                                             NSMutableArray<CALayer *> *out) {
+    if (!LGIOS12LayerIsVisibleForCapture(layer) || depth == 0) return;
+    if (out.count >= 24) return;
+    CGRect screenRect = CGRectZero;
+    if (!LGIOS12LayerScreenRect(layer, &screenRect)) return;
+    if (!LGIOS12ScreenRectIsIconSized(screenRect)) return;
+    if (LGIOS12LayerHasDrawableContents(layer)) {
+        [out addObject:layer];
+        return;
+    }
+    for (CALayer *sublayer in layer.sublayers) {
+        LGIOS12CollectIconContentLayers(sublayer, depth - 1, out);
+    }
+}
+
+// Decide how pixels can actually be obtained from one SBIconView, cheapest
+// and most faithful method first. Every candidate is pixel-probed; nothing is
+// accepted on the strength of its class name. `evidence` receives a
+// human-readable record of exactly which object answered, for the report.
+static LGIOS12IconRenderStrategy LGIOS12ResolveIconRenderStrategy(
+        UIView *icon, NSMutableString *evidence) {
+    if (!icon) return LGIOS12IconRenderStrategyFailed;
+
+    double coverage = -1.0, peakLuma = -1.0;
+    LGIOS12ProbeViewRendersPixels(icon, &coverage, &peakLuma);
+    if (coverage >= kLGIOS12IconArtworkCoverageThreshold) {
+        [evidence appendFormat:@"iconLayer(%@) coverage=%.3f peakLuma=%.3f",
+            NSStringFromClass(icon.class), coverage, peakLuma];
+        return LGIOS12IconRenderStrategyIconLayer;
+    }
+    [evidence appendFormat:@"iconLayer(%@) BLANK coverage=%.3f; ",
+        NSStringFromClass(icon.class), coverage];
+
+    NSMutableArray<UIView *> *artworkViews = [NSMutableArray array];
+    LGIOS12CollectIconArtworkViews(icon, 8, artworkViews);
+    for (UIView *candidate in artworkViews) {
+        double c = -1.0, l = -1.0;
+        LGIOS12ProbeViewRendersPixels(candidate, &c, &l);
+        if (c >= kLGIOS12IconArtworkCoverageThreshold) {
+            [evidence appendFormat:@"descendantView(%@) coverage=%.3f "
+                "peakLuma=%.3f candidates=%lu",
+                NSStringFromClass(candidate.class), c, l,
+                (unsigned long)artworkViews.count];
+            return LGIOS12IconRenderStrategyDescendantViews;
+        }
+    }
+    [evidence appendFormat:@"descendantViews=%lu all-blank; ",
+        (unsigned long)artworkViews.count];
+
+    NSMutableArray<CALayer *> *contentLayers = [NSMutableArray array];
+    LGIOS12CollectIconContentLayers(icon.layer, 10, contentLayers);
+    if (contentLayers.count > 0) {
+        CALayer *first = contentLayers.firstObject;
+        CGImageRef image = LGIOS12CopyLayerContentsImage(first);
+        [evidence appendFormat:@"layerContents(%@) layers=%lu "
+            "firstImage=%zux%zu delegate=%@",
+            NSStringFromClass(first.class),
+            (unsigned long)contentLayers.count,
+            image ? CGImageGetWidth(image) : 0,
+            image ? CGImageGetHeight(image) : 0,
+            first.delegate ? NSStringFromClass([first.delegate class]) : @"none"];
+        if (image) CGImageRelease(image);
+        return LGIOS12IconRenderStrategyLayerContents;
+    }
+
+    [evidence appendString:@"no-contents-layers-either"];
+    return LGIOS12IconRenderStrategyFailed;
+}
+
+// Render ONE icon with an already-resolved strategy. Returns how many
+// primitives were actually drawn (0 means this strategy did not work for this
+// icon, and the caller re-resolves). Records the class of every object that
+// supplied pixels so the report can name it exactly.
+static NSUInteger LGIOS12RenderIconWithStrategy(
+        UIView *icon,
+        LGIOS12IconRenderStrategy strategy,
+        CGContextRef context,
+        NSMutableSet<NSString *> *contributors,
+        CGRect *outIconScreenRect) {
+    if (!icon || !context) return 0;
+    CGRect iconScreenRect = [icon convertRect:icon.bounds toView:nil];
+    if (outIconScreenRect) *outIconScreenRect = iconScreenRect;
+    if (CGRectIsEmpty(iconScreenRect)) return 0;
+
+    switch (strategy) {
+        case LGIOS12IconRenderStrategyIconLayer: {
+            CGRect drawn = CGRectNull;
+            if (LGIOS12RenderViewAtScreenPositionLogged(icon, context, &drawn)) {
+                [contributors addObject:[NSString stringWithFormat:@"%@.layer",
+                    NSStringFromClass(icon.class)]];
+                return 1;
+            }
+            return 0;
+        }
+        case LGIOS12IconRenderStrategyDescendantViews: {
+            NSMutableArray<UIView *> *artworkViews = [NSMutableArray array];
+            LGIOS12CollectIconArtworkViews(icon, 8, artworkViews);
+            NSUInteger drawnCount = 0;
+            for (UIView *candidate in artworkViews) {
+                CGRect drawn = CGRectNull;
+                if (LGIOS12RenderViewAtScreenPositionLogged(candidate, context,
+                                                            &drawn)) {
+                    [contributors addObject:[NSString stringWithFormat:@"%@.layer",
+                        NSStringFromClass(candidate.class)]];
+                    drawnCount++;
+                }
+            }
+            return drawnCount;
+        }
+        case LGIOS12IconRenderStrategyLayerContents: {
+            NSMutableArray<CALayer *> *contentLayers = [NSMutableArray array];
+            LGIOS12CollectIconContentLayers(icon.layer, 10, contentLayers);
+            NSUInteger drawnCount = 0;
+            for (CALayer *layer in contentLayers) {
+                CGRect layerScreenRect = CGRectZero;
+                if (!LGIOS12LayerScreenRect(layer, &layerScreenRect)) continue;
+                CGImageRef image = LGIOS12CopyLayerContentsImage(layer);
+                if (!image) continue;
+                LGIOS12DrawImageInScreenRect(context, image, layerScreenRect);
+                CGImageRelease(image);
+                [contributors addObject:[NSString stringWithFormat:@"%@.contents",
+                    NSStringFromClass(layer.class)]];
+                drawnCount++;
+            }
+            return drawnCount;
+        }
+        case LGIOS12IconRenderStrategyFailed:
+        case LGIOS12IconRenderStrategyUnresolved:
+            break;
+    }
+    return 0;
+}
+
+// Render one icon, preferring the globally resolved strategy but escalating
+// if that strategy finds nothing structural for THIS icon.
+//
+// The escalation deliberately never falls back TO IconLayer. IconLayer is
+// chosen only when the pixel probe proved the icon layer produces pixels;
+// -renderInContext: itself reports nothing back, so "falling back" to it
+// would always look like success while drawing a blank -- precisely the
+// failure mode this engine exists to eliminate.
+static NSUInteger LGIOS12RenderIconResilient(
+        UIView *icon,
+        LGIOS12IconRenderStrategy preferred,
+        CGContextRef context,
+        NSMutableSet<NSString *> *contributors,
+        CGRect *outIconScreenRect,
+        LGIOS12IconRenderStrategy *outUsedStrategy) {
+    if (outUsedStrategy) *outUsedStrategy = LGIOS12IconRenderStrategyFailed;
+
+    NSUInteger drawn = LGIOS12RenderIconWithStrategy(icon, preferred, context,
+                                                     contributors,
+                                                     outIconScreenRect);
+    if (drawn > 0) {
+        if (outUsedStrategy) *outUsedStrategy = preferred;
+        return drawn;
+    }
+
+    const LGIOS12IconRenderStrategy escalation[2] = {
+        LGIOS12IconRenderStrategyDescendantViews,
+        LGIOS12IconRenderStrategyLayerContents,
+    };
+    for (int i = 0; i < 2; i++) {
+        if (escalation[i] == preferred) continue;
+        drawn = LGIOS12RenderIconWithStrategy(icon, escalation[i], context,
+                                              contributors, outIconScreenRect);
+        if (drawn > 0) {
+            if (outUsedStrategy) *outUsedStrategy = escalation[i];
+            return drawn;
+        }
+    }
+    return 0;
+}
+
+typedef struct {
+    NSUInteger iconsEnumerated;
+    NSUInteger iconsDrawn;
+    NSUInteger primitivesDrawn;
+    LGIOS12IconRenderStrategy strategy;
+    BOOL       strategyReResolved;
+} LGIOS12ForegroundResult;
 
 
 // DEVICE-EVIDENCE FIX (2026-09-01 video, ~10.2-11.5s):
@@ -523,6 +935,21 @@ typedef struct {
     NSString *_lastForegroundDescription;
     uint64_t  _foregroundSourceChangeCount;
     BOOL      _freezeNoticeLogged;
+
+    // --- Per-icon foreground engine state.
+    //
+    // The strategy is resolved from a live icon and then reused, because
+    // resolution pixel-probes several candidates and is far too expensive to
+    // repeat for every icon on every frame. It is re-resolved whenever it
+    // stops producing pixels, and periodically regardless, so a hierarchy
+    // change can never leave a stale strategy in place permanently.
+    //
+    // The icon SET is never cached: it is re-enumerated every capture, which
+    // is what makes rendered icons follow a Home Screen page scroll.
+    LGIOS12IconRenderStrategy _iconRenderStrategy;
+    NSString *_iconStrategyEvidence;
+    uint64_t  _iconStrategyResolvedAtTick;
+    NSString *_lastIconContributorSummary;
 }
 
 + (instancetype)sharedProvider {
@@ -1580,6 +2007,127 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
 }
 
 
+// Enumerate the live visible SBIconView instances, every capture, no cache.
+//
+// The host window is tried first. If it yields no icons, every other visible
+// non-overlay window is searched and the first one that actually contains
+// icons wins. That widening exists because -springBoardHostWindow selects by
+// the class-name substring "HomeScreenWindow"; if that match is wrong on this
+// build, the old code reported "no visible SBIconView" and stopped, which is
+// indistinguishable from "icons cannot be captured". Searching the rest of
+// the window list removes that entire failure class as an explanation.
+//
+// Our own overlay window is excluded throughout, so this can never re-enter
+// the glass and self-capture.
+- (NSArray<UIView *> *)visibleIconViewsForHostWindow:(UIWindow *)hostWindow
+                                       resolvedWindow:(UIWindow **)outWindow
+                                           searchNote:(NSString **)outNote {
+    NSMutableArray<UIView *> *icons = [NSMutableArray array];
+    if (hostWindow) {
+        LGIOS12CollectVisibleIconViews(
+            hostWindow.rootViewController.view ?: hostWindow, icons);
+    }
+    if (icons.count > 0) {
+        if (outWindow) *outWindow = hostWindow;
+        if (outNote) *outNote = @"host-window";
+        return icons;
+    }
+
+    NSMutableArray<NSString *> *scanned = [NSMutableArray array];
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        if (!window || window.hidden || window.alpha <= 0.01 ||
+            LGIOS12IsStandaloneOverlayWindow(window)) continue;
+        [scanned addObject:NSStringFromClass(window.class)];
+        NSMutableArray<UIView *> *found = [NSMutableArray array];
+        LGIOS12CollectVisibleIconViews(
+            window.rootViewController.view ?: window, found);
+        if (found.count > 0) {
+            if (outWindow) *outWindow = window;
+            if (outNote) {
+                *outNote = [NSString stringWithFormat:
+                    @"widened-window-search:%@(host=%@ had none)",
+                    NSStringFromClass(window.class),
+                    NSStringFromClass(hostWindow.class) ?: @"nil"];
+            }
+            return found;
+        }
+    }
+
+    if (outWindow) *outWindow = hostWindow;
+    if (outNote) {
+        *outNote = [NSString stringWithFormat:
+            @"no-icons-in-any-window scanned=[%@]",
+            [scanned componentsJoinedByString:@","]];
+    }
+    return @[];
+}
+
+// Composite the foreground as individually rendered icons on top of the
+// already-drawn wallpaper. Never draws a container, a page background, or the
+// host window, so there is nothing here that can occlude the wallpaper.
+- (LGIOS12ForegroundResult)renderPerIconForegroundIntoContext:(CGContextRef)context
+                                                         icons:(NSArray<UIView *> *)icons
+                                                  contributors:(NSMutableSet<NSString *> *)contributors
+                                                 firstIconRect:(CGRect *)outFirstIconRect {
+    LGIOS12ForegroundResult result = { 0 };
+    result.iconsEnumerated = icons.count;
+    result.strategy = _iconRenderStrategy;
+    if (!context || icons.count == 0) return result;
+
+    // Resolve the strategy when unset, when the last resolution is stale, or
+    // when the last attempt drew nothing. Resolution pixel-probes several
+    // candidates, so it must not run for every icon on every frame.
+    BOOL stale = (_captureTickCount - _iconStrategyResolvedAtTick) > 300;
+    if (_iconRenderStrategy == LGIOS12IconRenderStrategyUnresolved || stale) {
+        NSMutableString *evidence = [NSMutableString string];
+        _iconRenderStrategy = LGIOS12ResolveIconRenderStrategy(icons.firstObject,
+                                                                evidence);
+        _iconStrategyEvidence = [evidence copy];
+        _iconStrategyResolvedAtTick = _captureTickCount;
+        result.strategyReResolved = YES;
+        LGIOS12ProviderLog(@"foreground STRATEGY-RESOLVED strategy=%@ probedIcon=%@ "
+                           "evidence=%@",
+                           LGIOS12IconRenderStrategyName(_iconRenderStrategy),
+                           NSStringFromClass(icons.firstObject.class),
+                           _iconStrategyEvidence);
+    }
+    result.strategy = _iconRenderStrategy;
+
+    CGRect firstRect = CGRectNull;
+    for (UIView *icon in icons) {
+        CGRect iconRect = CGRectNull;
+        LGIOS12IconRenderStrategy used = LGIOS12IconRenderStrategyFailed;
+        NSUInteger drawn = LGIOS12RenderIconResilient(icon, _iconRenderStrategy,
+                                                       context, contributors,
+                                                       &iconRect, &used);
+        if (drawn > 0) {
+            result.iconsDrawn++;
+            result.primitivesDrawn += drawn;
+            if (CGRectIsNull(firstRect)) firstRect = iconRect;
+        }
+    }
+
+    // Nothing came out at all: force a fresh resolution against a live icon so
+    // the very next capture tries a different strategy rather than repeating a
+    // strategy that is known not to work.
+    if (result.primitivesDrawn == 0 && !result.strategyReResolved) {
+        NSMutableString *evidence = [NSMutableString string];
+        _iconRenderStrategy = LGIOS12ResolveIconRenderStrategy(icons.firstObject,
+                                                                evidence);
+        _iconStrategyEvidence = [evidence copy];
+        _iconStrategyResolvedAtTick = _captureTickCount;
+        result.strategyReResolved = YES;
+        result.strategy = _iconRenderStrategy;
+        LGIOS12ProviderLog(@"foreground STRATEGY-RE-RESOLVED (previous drew nothing) "
+                           "strategy=%@ evidence=%@",
+                           LGIOS12IconRenderStrategyName(_iconRenderStrategy),
+                           _iconStrategyEvidence);
+    }
+
+    if (outFirstIconRect) *outFirstIconRect = firstRect;
+    return result;
+}
+
 - (UIImage *)captureSpringBoardBackdrop:(UIWindow *)hostWindow
                           excludingViews:(NSArray<UIView *> *)excludedViews
                                    stats:(LGIOS12CaptureStats *)stats
@@ -1596,10 +2144,15 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
                               visibleWindows:visibleWindows];
     UIImage *wallpaper = [self cachedDecodedWallpaperAtPath:
         LGIOS12HomeWallpaperPathProvider()];
-    NSString *foregroundDescription = nil;
-    NSArray<UIView *> *foregroundViews =
-        [self foregroundViewsForHostWindow:hostWindow
-                               description:&foregroundDescription];
+    // PRIMARY FOREGROUND PATH: enumerate the live visible icons every capture.
+    // No container selection, no cached view set -- re-reading the hierarchy
+    // each frame is what makes the rendered icons follow a page scroll.
+    UIWindow *iconWindow = nil;
+    NSString *iconSearchNote = nil;
+    NSArray<UIView *> *visibleIcons =
+        [self visibleIconViewsForHostWindow:hostWindow
+                             resolvedWindow:&iconWindow
+                                 searchNote:&iconSearchNote];
 
     LGIOS12CaptureStats captureStats = { 0 };
     captureStats.excludedGlassCount = excludedViews.count;
@@ -1649,11 +2202,12 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     BOOL drewWallpaperWindow = NO;
     BOOL drewCPBitmap = NO;
     BOOL drewForeground = NO;
-    BOOL usedWholeHostFallback = NO;
     NSUInteger foregroundRenderCount = 0;
     NSString *wallpaperSource = @"black-base";
     NSString *foregroundSource = @"none";
     CGRect firstForegroundScreenRectForLog = CGRectNull;
+    LGIOS12ForegroundResult foregroundResult = { 0 };
+    NSMutableArray<NSString *> *renderedClasses = [NSMutableArray array];
 
     if (context) {
         [[UIColor blackColor] setFill];
@@ -1676,75 +2230,61 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         }
 
         NSInteger diagMode = LGIOS12CurrentDiagMode();
-        NSMutableArray<NSString *> *renderedClasses = [NSMutableArray array];
+        NSMutableSet<NSString *> *contributors = [NSMutableSet set];
 
-        // MODE 7 (FOREGROUND_SINGLE_ICON) diagnostic: render exactly ONE
-        // known-visible SBIconView at its screen position, bypassing all
-        // container selection. This isolates the bitmap/coordinate/render
-        // pipeline from the container-selection logic. If one icon appears
-        // here but Mode 3 is blank, selection is the problem, not rendering.
-        // This is a diagnostic, NOT the intended architecture.
-        if (diagMode == 7) {
-            NSMutableArray<UIView *> *allIcons = [NSMutableArray array];
-            LGIOS12CollectVisibleIconViews(
-                hostWindow.rootViewController.view ?: hostWindow, allIcons);
-            UIView *oneIcon = allIcons.firstObject;
-            CGRect iconRect = CGRectNull;
-            BOOL drew = oneIcon
-                ? LGIOS12RenderViewAtScreenPositionLogged(oneIcon, context, &iconRect)
-                : NO;
-            double cov = -1.0, luma = -1.0;
-            if (oneIcon) LGIOS12ProbeViewRendersPixels(oneIcon, &cov, &luma);
-            drewForeground = drew;
-            foregroundRenderCount = drew ? 1 : 0;
-            if (drew) [renderedClasses addObject:NSStringFromClass(oneIcon.class)];
-            firstForegroundScreenRectForLog = iconRect;
-            LGIOS12ProviderLog(@"foreground result=%@ mode=7-SINGLE-ICON class=%@ "
-                               "visibleIcons=%lu renderedViews=%lu screenRect={%.0f,%.0f,%.0f,%.0f} "
-                               "probeCoverage=%.3f probePeakLuma=%.3f reason=%@",
-                               drew ? @"SUCCESS" : @"FAILED",
-                               NSStringFromClass(oneIcon.class) ?: @"none",
-                               (unsigned long)allIcons.count,
-                               (unsigned long)foregroundRenderCount,
-                               iconRect.origin.x, iconRect.origin.y,
-                               iconRect.size.width, iconRect.size.height,
-                               cov, luma,
-                               drew ? @"n/a"
-                                    : (oneIcon ? @"render-returned-NO"
-                                               : @"no-visible-SBIconView-found"));
-            foregroundSource = drew ? @"diagnostic-single-icon" : @"diagnostic-single-icon-FAILED";
-        } else if (diagMode != 2) {
-            for (UIView *foregroundView in foregroundViews) {
-                CGRect rect = CGRectNull;
-                if (LGIOS12RenderViewAtScreenPositionLogged(foregroundView, context, &rect)) {
-                    drewForeground = YES;
-                    foregroundRenderCount++;
-                    [renderedClasses addObject:NSStringFromClass(foregroundView.class)];
-                    if (CGRectIsNull(firstForegroundScreenRectForLog)) firstForegroundScreenRectForLog = rect;
-                }
-            }
+        // MODE 7 (FOREGROUND_SINGLE_ICON): render exactly ONE visible icon,
+        // through the same per-icon engine the normal path uses, so what it
+        // proves transfers directly. Isolates one icon's render from the
+        // enumeration of the rest.
+        NSArray<UIView *> *iconsToRender = visibleIcons;
+        if (diagMode == 7 && visibleIcons.count > 0) {
+            iconsToRender = @[ visibleIcons.firstObject ];
         }
 
-        if (drewForeground && diagMode != 7) {
-            foregroundSource = [NSString stringWithFormat:
-                @"transparent-icon-hierarchy:%@",
-                foregroundDescription ?: @"unknown"];
-        } else if (diagMode == 2) {
+        if (diagMode != 2) {
+            foregroundResult =
+                [self renderPerIconForegroundIntoContext:context
+                                                   icons:iconsToRender
+                                            contributors:contributors
+                                           firstIconRect:&firstForegroundScreenRectForLog];
+            foregroundRenderCount = foregroundResult.primitivesDrawn;
+            drewForeground = foregroundResult.primitivesDrawn > 0;
+            for (NSString *contributor in contributors)
+                [renderedClasses addObject:contributor];
+        }
+
+        // Diagnostic outline anchor: if nothing drew, still record where the
+        // first enumerated icon actually is, so modes 3 and 7 outline the
+        // icon's real screen rect. An outline with no artwork inside it is the
+        // evidence that separates "wrong coordinates" from "no pixels".
+        if (CGRectIsNull(firstForegroundScreenRectForLog) && visibleIcons.count > 0) {
+            UIView *anchorIcon = visibleIcons.firstObject;
+            firstForegroundScreenRectForLog =
+                [anchorIcon convertRect:anchorIcon.bounds toView:nil];
+        }
+
+        if (diagMode == 2) {
             foregroundSource = @"skipped:wallpaper-only-diagnostic-mode";
-        } else if (diagMode == 3 || diagMode == 7) {
-            // MODE 3 MUST TELL THE TRUTH: no silent whole-host fallback here.
-            // A blank card in Mode 3 is a real, meaningful result -- it proves
-            // the foreground provider produced no usable icon content at all.
-            if (!drewForeground) {
-                foregroundSource = @"FAILED:no-foreground-rendered(diagnostic-no-fallback)";
-            }
+        } else if (drewForeground) {
+            // Names the objects that actually supplied pixels, not the
+            // container we hoped would.
+            foregroundSource = [NSString stringWithFormat:
+                @"per-icon:%@ icons=%lu/%lu primitives=%lu via=[%@]",
+                LGIOS12IconRenderStrategyName(foregroundResult.strategy),
+                (unsigned long)foregroundResult.iconsDrawn,
+                (unsigned long)foregroundResult.iconsEnumerated,
+                (unsigned long)foregroundResult.primitivesDrawn,
+                [[contributors.allObjects sortedArrayUsingSelector:@selector(compare:)]
+                    componentsJoinedByString:@","]];
         } else {
-            // Normal mode retains the guarded fallback.
-            usedWholeHostFallback = LGIOS12RenderWindowAtScreenPosition(
-                hostWindow, context, screenBounds);
-            foregroundSource = usedWholeHostFallback
-                ? @"whole-host-window-fallback"
-                : @"foreground-render-failed";
+            // NO WHOLE-HOST FALLBACK, in any mode. It masked foreground
+            // failure behind an opaque copy of the whole screen, and it is the
+            // call that previously corrupted the live hierarchy. A blank card
+            // is now always a truthful result.
+            foregroundSource = [NSString stringWithFormat:
+                @"FAILED:no-icon-pixels(strategy=%@ icons=%lu)",
+                LGIOS12IconRenderStrategyName(foregroundResult.strategy),
+                (unsigned long)foregroundResult.iconsEnumerated];
         }
 
         // FOREGROUND DEBUG OUTLINE -- diagnostic modes 3 and 7 only, never
@@ -1767,7 +2307,7 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         BOOL forceSnapshotForDiagnostic = (diagMode == 3 || diagMode == 7);
 
         if (drewWallpaperWindow || drewCPBitmap || drewForeground ||
-            usedWholeHostFallback || forceSnapshotForDiagnostic) {
+            forceSnapshotForDiagnostic) {
             // CGBitmapContextCreateImage's copy-on-write guarantee means
             // this snapshot stays correct even once we clear/redraw
             // _captureContext for the next capture -- no need to wait for
@@ -1791,12 +2331,11 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
         [CATransaction commit];
     }
 
-    captureStats.windowsRendered = (drewWallpaperWindow ? 1 : 0) +
-                                   (usedWholeHostFallback ? 1 : 0);
+    captureStats.windowsRendered = (drewWallpaperWindow ? 1 : 0);
     if (stats) *stats = captureStats;
     if (sourceDescription && snapshot) {
         *sourceDescription = [NSString stringWithFormat:
-            @"wallpaper=%@+foreground=%@+composition=wallpaper-then-transparent-foreground",
+            @"wallpaper=%@+foreground=%@+composition=wallpaper-then-per-icon-foreground",
             wallpaperSource, foregroundSource];
     }
     // ===================================================================
@@ -1808,55 +2347,73 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     if (![_lastForegroundDescription isEqualToString:foregroundSource] ||
         LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
 
-        NSMutableArray<UIView *> *visibleIcons = [NSMutableArray array];
-        LGIOS12CollectVisibleIconViews(hostWindow.rootViewController.view ?: hostWindow,
-                                        visibleIcons);
-        NSMutableArray<NSString *> *renderedClassList = [NSMutableArray array];
-        for (UIView *v in foregroundViews)
-            [renderedClassList addObject:NSStringFromClass(v.class)];
-
-        // Prove whether the selected candidate actually yields icon pixels.
-        double candidateCoverage = -1.0, candidatePeakLuma = -1.0;
-        UIView *candidate = foregroundViews.firstObject;
-        if (candidate) {
-            LGIOS12ProbeViewRendersPixels(candidate, &candidateCoverage, &candidatePeakLuma);
+        // Probe the first live icon so the verdict always carries independent
+        // evidence about whether icon pixels are obtainable at all, separate
+        // from whether this frame happened to draw any.
+        double iconProbeCoverage = -1.0, iconProbePeakLuma = -1.0;
+        UIView *probeIcon = visibleIcons.firstObject;
+        if (probeIcon) {
+            LGIOS12ProbeViewRendersPixels(probeIcon, &iconProbeCoverage,
+                                          &iconProbePeakLuma);
         }
 
-        LGIOS12ProviderLog(@"foreground result=%@ source=%@ selectedClass=%@ "
-                           "renderedViews=%lu visibleIcons=%lu "
-                           "candidateProbeCoverage=%.3f candidateProbePeakLuma=%.3f "
-                           "candidateRendersPixels=%@ screenRect={%.0f,%.0f,%.0f,%.0f} "
-                           "usedStableContainer=%d usedDynamicLCA=%d wholeHostFallback=%d "
-                           "allSources=[%@] reason=%@",
+        NSString *contributorSummary =
+            [[renderedClasses sortedArrayUsingSelector:@selector(compare:)]
+                componentsJoinedByString:@","];
+        if (contributorSummary.length == 0) contributorSummary = @"none";
+        _lastIconContributorSummary = contributorSummary;
+
+        // ===============================================================
+        // THE ONE LINE TO GREP: names the exact objects that supplied the
+        // icon pixels, or the exact stage that failed.
+        // ===============================================================
+        LGIOS12ProviderLog(@"foreground result=%@ path=per-icon strategy=%@ "
+                           "iconsEnumerated=%lu iconsDrawn=%lu primitivesDrawn=%lu "
+                           "pixelSuppliers=[%@] iconWindow=%@ iconSearch=%@ "
+                           "firstIconProbeCoverage=%.3f firstIconProbePeakLuma=%.3f "
+                           "firstIconClass=%@ firstIconScreenRect={%.0f,%.0f,%.0f,%.0f} "
+                           "strategyEvidence=%@ wholeHostFallback=REMOVED reason=%@",
                            foregroundOK ? @"SUCCESS" : @"FAILED",
-                           foregroundSource,
-                           NSStringFromClass(candidate.class) ?: @"none",
-                           (unsigned long)foregroundRenderCount,
-                           (unsigned long)visibleIcons.count,
-                           candidateCoverage, candidatePeakLuma,
-                           candidateCoverage < 0 ? @"NO-CANDIDATE"
-                               : (candidateCoverage < 0.005 ? @"NO(blank-bitmap)" : @"YES"),
+                           LGIOS12IconRenderStrategyName(foregroundResult.strategy),
+                           (unsigned long)foregroundResult.iconsEnumerated,
+                           (unsigned long)foregroundResult.iconsDrawn,
+                           (unsigned long)foregroundResult.primitivesDrawn,
+                           contributorSummary,
+                           NSStringFromClass(iconWindow.class) ?: @"none",
+                           iconSearchNote ?: @"n/a",
+                           iconProbeCoverage, iconProbePeakLuma,
+                           NSStringFromClass(probeIcon.class) ?: @"none",
                            firstForegroundScreenRectForLog.origin.x,
                            firstForegroundScreenRectForLog.origin.y,
                            firstForegroundScreenRectForLog.size.width,
                            firstForegroundScreenRectForLog.size.height,
-                           [foregroundDescription hasPrefix:@"stable-container"],
-                           [foregroundDescription hasPrefix:@"dynamic-fallback"],
-                           usedWholeHostFallback,
-                           [renderedClassList componentsJoinedByString:@","],
+                           _iconStrategyEvidence ?: @"none",
                            foregroundOK ? @"n/a"
-                               : (visibleIcons.count == 0
-                                   ? @"no-visible-SBIconView-in-host-window"
-                                   : (foregroundViews.count == 0
-                                       ? @"icons-exist-but-no-container-selected"
-                                       : @"container-selected-but-render-produced-nothing")));
+                               : (foregroundResult.iconsEnumerated == 0
+                                   ? @"no-visible-SBIconView-in-any-window"
+                                   : (foregroundResult.strategy ==
+                                        LGIOS12IconRenderStrategyFailed
+                                       ? @"icons-found-but-no-artwork-source-in-subtree"
+                                       : @"artwork-source-resolved-but-drew-nothing")));
+
+        // What the abandoned container path WOULD have selected. Kept purely
+        // as comparative evidence -- it no longer influences the capture.
+        if (LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
+            NSString *legacyDescription = nil;
+            (void)[self foregroundViewsForHostWindow:hostWindow
+                                          description:&legacyDescription];
+            LGIOS12ProviderLog(@"foreground LEGACY-CONTAINER-PATH (informational, "
+                               "not used) would-have-selected=%@",
+                               legacyDescription ?: @"nothing");
+        }
 
         // Hierarchy dump when the foreground is failing -- this is what
         // identifies the real icon-bearing subtree instead of guessing at
-        // class names. Only on failure, and only occasionally.
+        // class names.
         if (!foregroundOK && LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
             NSMutableArray<NSString *> *lines = [NSMutableArray array];
-            LGIOS12DumpHierarchy(hostWindow.rootViewController.view ?: hostWindow,
+            LGIOS12DumpHierarchy((iconWindow ?: hostWindow).rootViewController.view
+                                     ?: (iconWindow ?: hostWindow),
                                   0, 7, lines);
             LGIOS12ProviderLog(@"foreground HIERARCHY-DUMP (branches marked *ICONS* "
                                "contain a visible SBIconView):\n%@",
@@ -1867,17 +2424,16 @@ static void LGIOS12DrawAspectFillImageProvider(UIImage *image, CGRect bounds) {
     }
 
     if (LGIOS12ProviderShouldLogSequence(_captureTickCount)) {
-        LGIOS12ProviderLog(@"wallpaper composition finalSource=%@ wallpaperWindowCandidate=%@ wallpaperWindowRendered=%d cpbitmapDecoded=%d cpbitmapRendered=%d foregroundSource=%@ foregroundViewsRendered=%lu wholeHostFallback=%d hostOpaque=%d sourceMode=%lu finalPath=%@",
+        LGIOS12ProviderLog(@"wallpaper composition finalSource=%@ wallpaperWindowCandidate=%@ wallpaperWindowRendered=%d cpbitmapDecoded=%d cpbitmapRendered=%d foregroundSource=%@ foregroundPrimitivesRendered=%lu iconsDrawn=%lu hostOpaque=%d sourceMode=%lu finalPath=%@",
                            wallpaperSource,
                            NSStringFromClass(wallpaperWindow.class),
                            drewWallpaperWindow, wallpaper != nil, drewCPBitmap,
                            foregroundSource,
                            (unsigned long)foregroundRenderCount,
-                           usedWholeHostFallback, hostWindow.opaque,
+                           (unsigned long)foregroundResult.iconsDrawn,
+                           hostWindow.opaque,
                            (unsigned long)LGIOS12CurrentDiagMode(),
-                           usedWholeHostFallback
-                               ? @"wallpaper+opaque-host-fallback"
-                               : @"wallpaper+transparent-icon-foreground");
+                           @"wallpaper+per-icon-foreground");
     }
     return snapshot;
 }
