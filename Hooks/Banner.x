@@ -214,8 +214,15 @@ static void LGUpdatePlatterGlass(UIView *material) {
     // ===================================================================
     if (LGIOS12GlassSurfacesAvailable()) {
         LGIOS12RegisterGlassSurface(@"NotificationCenter", ^CGFloat(UIView *material) {
+            // LGIsPlatterMaterial() already requires the OUTERMOST material
+            // beneath PLPlatterView, so per-control platter materials are
+            // excluded by the existing detection. The explicit control test
+            // below covers any platter whose background sits inside a button.
             if (!LGIsPlatterMaterial(material)) return -1.0;
             if (LGIsTopBannerPresentation(material)) return -1.0;
+            if (LGIOS12GlassHasControlAncestorUnder(material, @"PLPlatterView")) {
+                return -1.0;
+            }
             CGSize size = material.bounds.size;
             if (size.width < 100.0 || size.height < 30.0) return -1.0;
             // iOS 12 notification platter rounding, used only if the host

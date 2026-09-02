@@ -42,6 +42,18 @@ void LGIOS12RegisterGlassSurface(NSString *name,
 // Fresnel edge on the visible corner.
 CGFloat LGIOS12GlassInheritedCornerRadius(UIView *material, CGFloat fallback);
 
+// YES when `material` is the OUTERMOST MTMaterialView beneath an ancestor of
+// class `stopClassName` -- i.e. no other material sits between them. This is
+// the test that separates a container's own background from the per-control
+// backgrounds nested inside it, and it is the reason individual buttons and
+// sliders must not be converted: only the container gets glass.
+BOOL LGIOS12GlassIsOutermostMaterialUnder(UIView *material, NSString *stopClassName);
+
+// YES if a UIControl (button, slider, switch) sits between `material` and an
+// ancestor of class `stopClassName`. Such a material is a control's own
+// background, never a container background.
+BOOL LGIOS12GlassHasControlAncestorUnder(UIView *material, NSString *stopClassName);
+
 // YES only on iOS 12 inside SpringBoard. Callers use this to decide whether to
 // hand their material to this path or leave it on the existing
 // LGLiveBackdropView implementation.

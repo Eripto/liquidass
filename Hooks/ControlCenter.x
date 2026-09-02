@@ -70,6 +70,58 @@ static CGFloat ccGlassRadiusForMaterial(UIView *mat) {
     return ccPillRadius(mat);
 }
 
+
+// ===========================================================================
+// iOS 12 CONTROL CENTER: THE MODULE CONTAINER'S BACKGROUND, AND NOTHING ELSE
+//
+// Device evidence: registering everything ccGlassRadiusForMaterial() accepts
+// converted the per-control materials too, so the Airplane/Cellular/Wi-Fi/
+// Bluetooth buttons, the brightness and volume sliders and the round toggles
+// each became their own glass surface. The intended result is ONE continuous
+// glass material behind a module with ordinary controls on top of it.
+//
+// Three additional tests, all structural rather than class-name guesses:
+//
+//   1. OUTERMOST ONLY. The material must be the first MTMaterialView beneath
+//      its CCUIContentModuleContainerView, with no other material between
+//      them. A control's own background always has the module background as an
+//      intervening material, so this alone removes the nested control glass.
+//
+//   2. NO CONTROL ANCESTOR. A material with a UIControl between it and the
+//      module container belongs to a button or slider, never to the module.
+//
+//   3. NOT A SLIDER, AT ALL. The previous rule made an exception for the
+//      MRUContinuousSliderView pill. A slider is a control, so the exception
+//      is dropped for the Metal path; sliders keep their stock material.
+//
+// Plus a size floor: a module tile is substantially larger than a control, so
+// anything under 60pt on its short edge is a control background regardless of
+// where it sits.
+//
+// Everything ccGlassRadiusForMaterial() already rejected stays rejected: the
+// SBElastic volume-HUD hierarchy, non-material views, and undersized hosts.
+// This function only ever NARROWS that set.
+// ===========================================================================
+static CGFloat ccIOS12ModuleBackgroundRadius(UIView *material) {
+    CGFloat radius = ccGlassRadiusForMaterial(material);
+    if (radius < 0.0) return -1.0;
+
+    if (ccIsInsideSlider(material)) return -1.0;
+    if (!LGIOS12GlassIsOutermostMaterialUnder(material,
+                                              @"CCUIContentModuleContainerView")) {
+        return -1.0;
+    }
+    if (LGIOS12GlassHasControlAncestorUnder(material,
+                                            @"CCUIContentModuleContainerView")) {
+        return -1.0;
+    }
+
+    CGSize size = material.bounds.size;
+    if (MIN(size.width, size.height) < 60.0) return -1.0;
+
+    return radius;
+}
+
 #pragma mark - fullscreen backdrop styling
 
 static void *kCCFullscreenBlurCapKey = &kCCFullscreenBlurCapKey;
@@ -827,7 +879,7 @@ static void roundModuleContainer(UIView *module) {
     // ===================================================================
     if (LGIOS12GlassSurfacesAvailable()) {
         LGIOS12RegisterGlassSurface(@"ControlCenter", ^CGFloat(UIView *material) {
-            return ccGlassRadiusForMaterial(material);
+            return ccIOS12ModuleBackgroundRadius(material);
         });
     }
 

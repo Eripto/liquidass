@@ -7,6 +7,31 @@
 static const void *kLGIOS12GlassKey = &kLGIOS12GlassKey;
 static const void *kLGIOS12SuppressedKey = &kLGIOS12SuppressedKey;
 static const void *kLGIOS12SurfaceNameKey = &kLGIOS12SurfaceNameKey;
+static const void *kLGIOS12ClassificationKey = &kLGIOS12ClassificationKey;
+
+// Logged only when a material's classification CHANGES, so this is a handful
+// of lines per surface rather than per layout. Log-only: no on-screen UI.
+static void LGIOS12GlassLogClassification(UIView *material, NSString *verdict,
+                                           NSString *surfaceName, CGFloat radius) {
+    NSString *previous = objc_getAssociatedObject(material, kLGIOS12ClassificationKey);
+    if ([previous isEqualToString:verdict]) return;
+    objc_setAssociatedObject(material, kLGIOS12ClassificationKey, verdict,
+                             OBJC_ASSOCIATION_COPY_NONATOMIC);
+    CGRect bounds = material.bounds;
+    CGRect screenRect = material.window
+        ? [material convertRect:material.bounds toView:nil] : CGRectZero;
+    LGLog(@"ios12.glasshost classify verdict=%@ surface=%@ class=%@ super=%@ "
+          "bounds={%.0f,%.0f,%.0f,%.0f} screenRect={%.0f,%.0f,%.0f,%.0f} "
+          "radius=%.1f transformed=%d window=%@",
+          verdict, surfaceName ?: @"none", NSStringFromClass(material.class),
+          NSStringFromClass(material.superview.class) ?: @"none",
+          bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height,
+          screenRect.origin.x, screenRect.origin.y,
+          screenRect.size.width, screenRect.size.height,
+          radius,
+          !CGAffineTransformIsIdentity(material.transform),
+          NSStringFromClass(material.window.class) ?: @"none");
+}
 
 @interface LGIOS12GlassSurfaceRegistration : NSObject
 @property (nonatomic, copy) NSString *name;
@@ -28,6 +53,26 @@ void LGIOS12RegisterGlassSurface(NSString *name,
     [sSurfaces addObject:registration];
     LGLog(@"ios12.glasshost surface registered name=%@ total=%lu",
           name, (unsigned long)sSurfaces.count);
+}
+
+BOOL LGIOS12GlassIsOutermostMaterialUnder(UIView *material, NSString *stopClassName) {
+    Class stopClass = NSClassFromString(stopClassName);
+    Class materialClass = NSClassFromString(@"MTMaterialView");
+    if (!stopClass || !materialClass) return NO;
+    for (UIView *ancestor = material.superview; ancestor; ancestor = ancestor.superview) {
+        if ([ancestor isKindOfClass:stopClass]) return YES;      // reached the container first
+        if ([ancestor isKindOfClass:materialClass]) return NO;    // nested inside another material
+    }
+    return NO;
+}
+
+BOOL LGIOS12GlassHasControlAncestorUnder(UIView *material, NSString *stopClassName) {
+    Class stopClass = NSClassFromString(stopClassName);
+    for (UIView *ancestor = material.superview; ancestor; ancestor = ancestor.superview) {
+        if (stopClass && [ancestor isKindOfClass:stopClass]) return NO;
+        if ([ancestor isKindOfClass:UIControl.class]) return YES;
+    }
+    return NO;
 }
 
 CGFloat LGIOS12GlassInheritedCornerRadius(UIView *material, CGFloat fallback) {
@@ -112,6 +157,7 @@ static void LGIOS12GlassSync(UIView *material) {
     CGFloat radius = -1.0;
     NSString *surfaceName = nil;
     if (!LGIOS12GlassResolveSurface(material, &radius, &surfaceName)) {
+        LGIOS12GlassLogClassification(material, @"REJECTED", nil, -1.0);
         // No longer (or never) one of ours. If we previously attached to it,
         // put it back the way we found it.
         if (objc_getAssociatedObject(material, kLGIOS12GlassKey)) {
@@ -148,9 +194,7 @@ static void LGIOS12GlassSync(UIView *material) {
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         objc_setAssociatedObject(material, kLGIOS12SurfaceNameKey, surfaceName,
                                  OBJC_ASSOCIATION_COPY_NONATOMIC);
-        LGLog(@"ios12.glasshost attached surface=%@ host=%@ bounds=%@ radius=%.1f",
-              surfaceName, NSStringFromClass(material.class),
-              NSStringFromCGRect(material.bounds), radius);
+        LGIOS12GlassLogClassification(material, @"ACCEPTED", surfaceName, radius);
     }
 
     // Geometry resync. Driven from -layoutSubviews, so element layout,

@@ -278,10 +278,23 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
     // spaces share one scale or refraction misaligns.
     CGFloat renderScale =
         [LGIOS12LiveBackdropProvider sharedProvider].effectiveCaptureScale;
+
+    // GEOMETRY: size the compute output from the view's ON-SCREEN rect, not
+    // its bounds. The kernel walks px from 0..width and adds it to cardOrigin
+    // in source space, so the number of pixels it walks has to equal the
+    // number of source pixels the view actually covers. Those are the same
+    // thing only when the host has no transform. Notification Center presents
+    // its platters with a transform, so bounds-sized output sampled a region
+    // of the wrong size and the backdrop came out stretched.
+    CGRect glassScreenRect = [self convertRect:self.bounds toView:nil];
+    if (CGRectIsEmpty(glassScreenRect)) {
+        [self logMetalEarlyReturn:@"screen-rect-empty"];
+        return;
+    }
     NSUInteger width = MAX((NSUInteger)1,
-        (NSUInteger)llround(CGRectGetWidth(self.bounds) * renderScale));
+        (NSUInteger)llround(CGRectGetWidth(glassScreenRect) * renderScale));
     NSUInteger height = MAX((NSUInteger)1,
-        (NSUInteger)llround(CGRectGetHeight(self.bounds) * renderScale));
+        (NSUInteger)llround(CGRectGetHeight(glassScreenRect) * renderScale));
     if (!_outputTexture || _outputTexture.width != width ||
         _outputTexture.height != height) {
         MTLTextureDescriptor *outputDescriptor =
@@ -299,10 +312,30 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
         return;
     }
 
-    CGRect screenRect = [self convertRect:self.bounds toView:nil];
+    CGRect screenRect = glassScreenRect;
     // Every screen-space uniform below uses the same shared scale as the
     // capture buffer and the output texture.
     CGFloat screenScale = renderScale;
+
+    // BEZEL MUST SCALE TO THE SURFACE.
+    //
+    // bezelWidth is the depth of the refraction ramp inward from every edge.
+    // As a fixed 34pt constant it was tuned for the 220pt standalone card,
+    // where it occupies 31% of the half-height and leaves the centre
+    // undistorted. On a small host it saturates:
+    //
+    //   card 220pt      half-min 110pt   34pt = 31%   clean rim
+    //   notification 80pt tall  half-min 40pt   34pt = 85%   smeared
+    //   CC round button 50pt    half-min 25pt   34pt > 100%  fully warped
+    //
+    // That saturation is the stretched notification backdrop and the warped
+    // Control Center controls. Clamping it to the host's own geometry is a
+    // coordinate/geometry fix, not a change to the renderer: 0.31 is exactly
+    // the ratio the verified card already uses, so at 220pt this evaluates to
+    // min(34, 34.1) = 34 and the verified surface is bit-identical.
+    CGFloat halfMinPoints = MIN(CGRectGetWidth(self.bounds),
+                                CGRectGetHeight(self.bounds)) * 0.5;
+    CGFloat bezelPoints = MIN(34.0, halfMinPoints * 0.31);
     LGIOS12LiveUniforms uniforms = {
         .outputResolution = { (float)width, (float)height },
         .sourceResolution = { (float)_backdropTexture.width,
@@ -310,7 +343,7 @@ static BOOL LGIOS12GlassShouldLogSequence(uint64_t sequence) {
         .cardOrigin = { (float)(CGRectGetMinX(screenRect) * screenScale),
                         (float)(CGRectGetMinY(screenRect) * screenScale) },
         .radius = (float)(self.layer.cornerRadius * screenScale),
-        .bezelWidth = (float)(34.0 * screenScale),
+        .bezelWidth = (float)(bezelPoints * screenScale),
         .glassThickness = 18.0f,
         .refractionScale = 2.2f,
         .refractiveIndex = 1.55f,
