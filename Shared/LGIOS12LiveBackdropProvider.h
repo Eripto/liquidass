@@ -56,10 +56,10 @@ typedef struct {
 
     BOOL legacyPath;
 
-    // Quality diagnostics
-    NSInteger qualityTier;          // LGIOS12QualityTier
+    // Quality diagnostics. Resolution only -- this struct intentionally
+    // carries no quality-derived timing value, because none exists.
+    NSInteger qualityTier;          // LGIOS12QualityTier (label only)
     double    qualityEffectiveScale;
-    double    qualityMaxCaptureFPS;
 } LGIOS12PerfSnapshot;
 
 @protocol LGIOS12LiveBackdropClient <NSObject>

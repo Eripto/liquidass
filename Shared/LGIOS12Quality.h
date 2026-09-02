@@ -25,8 +25,13 @@
 // the aspect ratio preserved because one factor scales both axes.
 //
 // It does NOT change blur, blur radius, refraction, distortion, tint, Fresnel,
-// specular, corner radius, or any other shader parameter, and it does NOT
-// change capture cadence. The glass is rendered at the display's native scale
+// specular, corner radius, or any other shader parameter.
+//
+// IT HAS NO CONNECTION TO TIMING AT ALL. This module exposes no FPS, no
+// cadence and no interval, so quality cannot influence capture rate even by
+// accident. Capture cadence is owned entirely by the provider and is derived
+// from measured frame latency, never from this setting. 10% quality and 100%
+// quality capture at exactly the same rate. The glass is rendered at the display's native scale
 // at every quality level, so the effect looks identical -- it is simply
 // sampling a sharper or softer source.
 //
@@ -54,10 +59,6 @@ CGFloat LGIOS12QualityRenderScaleFactor(void);
 // UIScreen.mainScreen.scale * the factor above -- the scale of the shared
 // BACKDROP CAPTURE only. Glass rendering stays at the native screen scale.
 CGFloat LGIOS12QualityEffectiveScale(void);
-
-// The global capture target (40 FPS). Quality does not modify this; it is kept
-// as the ladder's ceiling so the adaptive fallback has a defined top.
-double LGIOS12QualityMaxCaptureFPS(void);
 
 // Bumped whenever the setting changes. Clients compare a stored value against
 // this to notice a live quality change without polling preferences.

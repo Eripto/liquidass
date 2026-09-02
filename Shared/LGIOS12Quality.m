@@ -3,9 +3,6 @@
 
 static LGIOS12QualityTier sTier = LGIOS12QualityTierHigh;
 static CGFloat sRenderScaleFactor = 1.0;
-// Global capture target. Quality does not modify it.
-static const double kLGIOS12TargetCaptureFPS = 40.0;
-static double sMaxCaptureFPS = kLGIOS12TargetCaptureFPS;
 static uint32_t sGeneration = 1;
 static dispatch_once_t sLoadOnce;
 
@@ -32,7 +29,6 @@ static void LGIOS12QualityApplyValue(CGFloat quality) {
     BOOL changed = (factor != sRenderScaleFactor);
     sTier = tier;
     sRenderScaleFactor = factor;
-    sMaxCaptureFPS = kLGIOS12TargetCaptureFPS;   // quality never limits cadence
     if (changed) {
         sGeneration++;
         LGLog(@"ios12.quality value=%.2f backdropScaleFactor=%.2f label=%@ generation=%u "
@@ -78,10 +74,6 @@ CGFloat LGIOS12QualityEffectiveScale(void) {
     return fmax(1.0, scale);
 }
 
-double LGIOS12QualityMaxCaptureFPS(void) {
-    LGIOS12QualityLoadIfNeeded();
-    return sMaxCaptureFPS;
-}
 
 uint32_t LGIOS12QualityGeneration(void) {
     LGIOS12QualityLoadIfNeeded();

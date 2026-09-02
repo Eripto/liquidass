@@ -1186,7 +1186,6 @@ typedef struct {
     snapshot.legacyPath = LGIOS12PerfLegacyPath();
     snapshot.qualityTier = LGIOS12QualityCurrentTier();
     snapshot.qualityEffectiveScale = LGIOS12QualityEffectiveScale();
-    snapshot.qualityMaxCaptureFPS = LGIOS12QualityMaxCaptureFPS();
     snapshot.backdropTextureWidth = _captureBufferPixelWidth;
     snapshot.backdropTextureHeight = _captureBufferPixelHeight;
     return snapshot;
@@ -1786,13 +1785,14 @@ typedef struct {
             double worstMs = _perf.totalSourceFrame.worst;
             double budgetMs = 1000.0 * kTierIntervals[currentTier];
 
-            // Quality no longer influences cadence at all -- it changes backdrop
-            // resolution only. The ceiling is the global 40 FPS target, and the
-            // ladder still measures real latency and falls back freely.
-            double qualityCeilingInterval = kTierIntervals[0];
-            if (_targetRefreshInterval < qualityCeilingInterval) {
-                _targetRefreshInterval = qualityCeilingInterval;
-                budgetMs = 1000.0 * qualityCeilingInterval;
+            // The ceiling is the pipeline's own capture target and is a fixed
+            // constant. It is NOT derived from, and cannot be influenced by,
+            // the quality setting -- this function never reads quality at all.
+            // The ladder below moves only on MEASURED frame latency.
+            double captureCeilingInterval = kTierIntervals[0];
+            if (_targetRefreshInterval < captureCeilingInterval) {
+                _targetRefreshInterval = captureCeilingInterval;
+                budgetMs = 1000.0 * captureCeilingInterval;
             }
 
             if (avgMs > budgetMs && currentTier < kTierCount - 1) {
@@ -1807,7 +1807,7 @@ typedef struct {
                 // worst-frame test keeps a spiky device out of a tier it can
                 // only hit on average.
                 if (avgMs < fasterBudgetMs * 0.85 && worstMs < fasterBudgetMs &&
-                    kTierIntervals[currentTier - 1] >= qualityCeilingInterval) {
+                    kTierIntervals[currentTier - 1] >= captureCeilingInterval) {
                     _targetRefreshInterval = kTierIntervals[currentTier - 1];
                     if (LGIOS12CurrentDiagMode() != 0) {
                         LGIOS12ProviderLog(@"cadence UP to %.0f FPS (avg %.2fms, worst %.2fms, budget %.2fms)",

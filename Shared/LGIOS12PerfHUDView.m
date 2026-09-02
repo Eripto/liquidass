@@ -87,9 +87,9 @@ static NSString *LGIOS12HUDRow(NSString *name, LGIOS12Stat stat) {
     _headlineLabel.text = [NSString stringWithFormat:
         @"backdrop %.1f fps  ·  metal %.1f fps  ·  target %.0f\n%@",
         perf.deliveredBackdropFPS, perf.metalRedrawFPS, perf.targetFPS,
-        [NSString stringWithFormat:@"quality %@ · scale %.2f · cap %.0f fps%@",
+        [NSString stringWithFormat:@"quality %@ · backdrop scale %.2f%@",
             LGIOS12QualityTierName((LGIOS12QualityTier)perf.qualityTier),
-            perf.qualityEffectiveScale, perf.qualityMaxCaptureFPS,
+            perf.qualityEffectiveScale,
             perf.legacyPath ? @" · LEGACY" : @""]];
 
     NSMutableString *table = [NSMutableString string];
