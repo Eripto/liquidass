@@ -353,7 +353,6 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
         LGLog(@"RWB: legacy Today widgets use the in-process iOS 12/13 fallback");
         return;
     }
-    ReloadPrefs();
     if (!kIsEnabled) return;
 
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
@@ -377,4 +376,16 @@ static BOOL ShouldHandleWidget(NSString *bundleIdentifier) {
             %init(RWB_15);
         }
     }
+
+    // CFPreferencesAppSynchronize/CFPreferencesCopyAppValue talk to cfprefsd over
+    // XPC. Calling them synchronously from a MobileSubstrate dylib constructor -
+    // i.e. before the host process (SpringBoard here) has finished its own early
+    // bring-up - races that XPC connection and can bring CoreFoundation down with
+    // EXC_BREAKPOINT before SpringBoard ever reaches its run loop. Push the actual
+    // preferences read to the next main-queue turn so it runs once the process is
+    // fully alive; kIsEnabled/kWidgetBundleIdentifiers default safely in the
+    // meantime (hooks simply no-op until the deferred reload lands).
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ReloadPrefs();
+    });
 }
